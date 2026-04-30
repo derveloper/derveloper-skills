@@ -1,4 +1,4 @@
-# agent-skills
+# derveloper-skills
 
 Personal Claude Code plugin marketplace.
 
@@ -11,13 +11,13 @@ Personal Claude Code plugin marketplace.
 Add this marketplace to Claude Code:
 
 ```
-/plugin marketplace add derveloper/agent-skills
+/plugin marketplace add derveloper/derveloper-skills
 ```
 
 Then install plugins individually:
 
 ```
-/plugin install tmux-pair
+/plugin install tmux-pair@derveloper-skills
 ```
 
 ## License
