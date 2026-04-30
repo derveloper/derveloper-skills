@@ -8,9 +8,6 @@
   },
   "license": "Apache-2.0",
   "homepage": "https://github.com/derveloper/derveloper-skills",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/derveloper/derveloper-skills"
-  },
+  "repository": "https://github.com/derveloper/derveloper-skills",
   "keywords": ["tmux", "git-worktree", "pair-programming", "orchestration", "multi-agent"]
 }
