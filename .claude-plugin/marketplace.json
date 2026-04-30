@@ -1,0 +1,21 @@
+{
+  "name": "agent-skills",
+  "owner": {
+    "name": "derveloper",
+    "url": "https://github.com/derveloper"
+  },
+  "metadata": {
+    "description": "Personal Claude Code plugin marketplace.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "tmux-pair",
+      "source": "./plugins/tmux-pair",
+      "description": "Spawn writer/reviewer agent pairs (or writer/reviewer/orchestrator triples) in fresh git worktrees, wired up via tmux. Includes the orchestration script, slash commands, and the tmux-pair-orchestration skill.",
+      "version": "0.1.0",
+      "category": "workflow",
+      "tags": ["tmux", "git-worktree", "pair-programming", "orchestration"]
+    }
+  ]
+}

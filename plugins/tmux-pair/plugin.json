@@ -1,0 +1,16 @@
+{
+  "name": "tmux-pair",
+  "version": "0.1.0",
+  "description": "Spawn writer/reviewer agent pairs (or writer/reviewer/orchestrator triples) in fresh git worktrees, wired up via tmux. Each agent runs in its own pane and talks to its peer through a small Python helper.",
+  "author": {
+    "name": "derveloper",
+    "url": "https://github.com/derveloper"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/derveloper/agent-skills",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/derveloper/agent-skills"
+  },
+  "keywords": ["tmux", "git-worktree", "pair-programming", "orchestration", "multi-agent"]
+}
