@@ -174,6 +174,9 @@ def spawn_pane(
 
     if display_name:
         tmux_safe("select-pane", "-t", pane_id, "-T", display_name)
+        # Make pane titles visible. Server-wide setting, idempotent. Users who
+        # don't want it can override in their .tmux.conf.
+        tmux_safe("set-option", "-g", "pane-border-status", "top")
 
     if boot_command:
         time.sleep(0.5)  # shell needs boot time, otherwise first char is eaten
