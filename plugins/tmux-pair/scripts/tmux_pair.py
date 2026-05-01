@@ -122,6 +122,24 @@ def cmd_send(args: argparse.Namespace) -> int:
     return 0
 
 
+def _schedule_slash_command(pane_id: str, slash: str, delay_s: int) -> None:
+    """Background-schedule a single slash-command into a TUI pane after delay.
+
+    Used to inject /effort max (claude) and /rename <name> (both) post-boot,
+    before the briefing lands at 14s.
+    """
+    bg = (
+        f"sleep {delay_s} && "
+        f"tmux send-keys -t {shlex.quote(pane_id)} -l {shlex.quote(slash)} && "
+        f"sleep 0.3 && "
+        f"tmux send-keys -t {shlex.quote(pane_id)} C-m"
+    )
+    subprocess.Popen(
+        ["bash", "-c", bg], start_new_session=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
 def spawn_pane(
     *,
     session: str,
@@ -130,8 +148,15 @@ def spawn_pane(
     agent: str,
     boot_command: str,
     split: str,
+    display_name: str = "",
 ) -> str:
-    """Spawn a pane, return its pane-id. `split` ∈ {none, h, v}."""
+    """Spawn a pane, return its pane-id. `split` ∈ {none, h, v}.
+
+    `display_name`, when set, is applied two ways post-boot:
+      - tmux pane-title (visible when pane-border-status=top)
+      - `/rename <name>` slash-command (claude + codex; visible in TUI header
+        + /resume picker)
+    """
     target = f"{session}:{window_name}"
     if not window_exists(session, window_name):
         pane_id = tmux(
@@ -147,25 +172,23 @@ def spawn_pane(
             "-P", "-F", "#{pane_id}",
         )
 
+    if display_name:
+        tmux_safe("select-pane", "-t", pane_id, "-T", display_name)
+
     if boot_command:
         time.sleep(0.5)  # shell needs boot time, otherwise first char is eaten
         tmux("send-keys", "-t", pane_id, "-l", boot_command)
         tmux("send-keys", "-t", pane_id, "C-m")
 
-    # Claude TUI: /effort max muss VOR erstem User-Prompt rein, damit
-    # Reasoning-Level fuer Initial-Briefing gilt. 8s Boot-Delay, dann sent.
-    # Briefing-Send (14s spaeter via _schedule_send) landet nach effort-confirm.
-    if agent == "claude" and boot_command:
-        bg = (
-            f"sleep 8 && "
-            f"tmux send-keys -t {shlex.quote(pane_id)} -l '/effort max' && "
-            f"sleep 0.3 && "
-            f"tmux send-keys -t {shlex.quote(pane_id)} C-m"
-        )
-        subprocess.Popen(
-            ["bash", "-c", bg], start_new_session=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+    # Post-boot slash-commands. Schedule order:
+    #   t+8s  /effort max  (claude only; reasoning-level for initial briefing)
+    #   t+10s /rename ...  (claude + codex; readable session label)
+    #   t+14s briefing send (caller via _schedule_send)
+    if boot_command:
+        if agent == "claude":
+            _schedule_slash_command(pane_id, "/effort max", delay_s=8)
+        if display_name:
+            _schedule_slash_command(pane_id, f"/rename {display_name}", delay_s=10)
 
     return pane_id
 
@@ -193,9 +216,11 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         agent=args.agent,
         boot_command=boot,
         split=args.split,
+        display_name=args.name or "",
     )
     print(json.dumps({"pane_id": pane_id, "window": window_name,
-                      "session": session, "agent": args.agent}, indent=2))
+                      "session": session, "agent": args.agent,
+                      "display_name": args.name or None}, indent=2))
     return 0
 
 
@@ -384,15 +409,18 @@ def cmd_pair(args: argparse.Namespace) -> int:
     project, wt_path, branch, window_name, master_pane = _common_pair_setup(args)
     session = current_session()
 
+    writer_name = f"wr.{window_name}"
+    reviewer_name = f"rv.{window_name}"
+
     writer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
         agent=args.writer_agent, boot_command=agents[args.writer_agent],
-        split="none",
+        split="none", display_name=writer_name,
     )
     reviewer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
         agent=args.reviewer_agent, boot_command=agents[args.reviewer_agent],
-        split="h",
+        split="h", display_name=reviewer_name,
     )
 
     target_window = f"{session}:{window_name}"
@@ -420,8 +448,10 @@ def cmd_pair(args: argparse.Namespace) -> int:
         "window": window_name,
         "writer_pane": writer_pane,
         "writer_agent": args.writer_agent,
+        "writer_name": writer_name,
         "reviewer_pane": reviewer_pane,
         "reviewer_agent": args.reviewer_agent,
+        "reviewer_name": reviewer_name,
         "master_pane": master_pane,
         "briefing_dispatch": "scheduled in 14s (boot delay)",
     }, indent=2))
@@ -438,21 +468,26 @@ def cmd_triple(args: argparse.Namespace) -> int:
     project, wt_path, branch, window_name, master_pane = _common_pair_setup(args)
     session = current_session()
 
+    orchestrator_name = f"or.{window_name}"
+    writer_name = f"wr.{window_name}"
+    reviewer_name = f"rv.{window_name}"
+
     # Layout: orchestrator on top full width, writer bottom-left, reviewer bottom-right.
     orchestrator_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
         agent=args.orchestrator_agent,
         boot_command=agents[args.orchestrator_agent], split="none",
+        display_name=orchestrator_name,
     )
     writer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
         agent=args.writer_agent, boot_command=agents[args.writer_agent],
-        split="v",
+        split="v", display_name=writer_name,
     )
     reviewer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
         agent=args.reviewer_agent, boot_command=agents[args.reviewer_agent],
-        split="h",
+        split="h", display_name=reviewer_name,
     )
 
     target_window = f"{session}:{window_name}"
@@ -478,10 +513,13 @@ def cmd_triple(args: argparse.Namespace) -> int:
         "window": window_name,
         "orchestrator_pane": orchestrator_pane,
         "orchestrator_agent": args.orchestrator_agent,
+        "orchestrator_name": orchestrator_name,
         "writer_pane": writer_pane,
         "writer_agent": args.writer_agent,
+        "writer_name": writer_name,
         "reviewer_pane": reviewer_pane,
         "reviewer_agent": args.reviewer_agent,
+        "reviewer_name": reviewer_name,
         "master_pane": master_pane,
         "briefing_dispatch": "orchestrator only, scheduled in 14s; engineers idle until orchestrator briefs them",
     }, indent=2))
@@ -523,6 +561,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--session")
     sp.add_argument("--split", choices=["none", "h", "v"], default="none")
     sp.add_argument("--task", default="")
+    sp.add_argument("--name", default="",
+                    help="display name; sent as /rename + tmux pane-title post-boot")
     sp.set_defaults(func=cmd_spawn)
 
     se = sub.add_parser("send", help="send text to a pane")
