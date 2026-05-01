@@ -1,5 +1,6 @@
 ---
 description: Spawn an orchestrator + writer + reviewer triple in a fresh git worktree (orchestrator on top, engineers below)
+argument-hint: <project-path> <base> <feature> [task...]
 ---
 
 # triple

@@ -1,5 +1,6 @@
 ---
 description: Spawn a writer + reviewer agent pair in a fresh git worktree, side by side in tmux
+argument-hint: <project-path> <base> <feature> [task...]
 ---
 
 # pair
