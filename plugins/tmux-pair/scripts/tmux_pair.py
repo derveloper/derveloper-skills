@@ -80,6 +80,28 @@ def slugify(s: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "-", s.strip().lstrip("/"))
 
 
+def _probe_for(text: str) -> str:
+    """Return a verification probe: last 40 chars of the last non-empty line.
+    Used to detect whether a TUI swallowed Enter while busy with a tool call."""
+    for line in reversed(text.splitlines()):
+        s = line.rstrip()
+        if s.strip():
+            return s[-40:]
+    return text.strip()[-40:]
+
+
+def _pane_tail(pane: str, lines: int) -> str:
+    """Return the last `lines` rows of the *visible* pane (no scrollback).
+    TUI agents render their input area near the bottom and submitted messages
+    scroll into the chat history above the viewport edge — so a probe still
+    found in the bottom rows means Enter was swallowed."""
+    rc, out, _ = tmux_safe("capture-pane", "-t", pane, "-p")
+    if rc != 0:
+        return ""
+    rows = out.splitlines()
+    return "\n".join(rows[-lines:]) if rows else ""
+
+
 def cmd_send(args: argparse.Namespace) -> int:
     """Send `args.text` to pane `args.pane`, handling multi-line + Enter quirks.
 
@@ -87,8 +109,10 @@ def cmd_send(args: argparse.Namespace) -> int:
     Multi-line:  load-buffer + paste-buffer (avoids per-newline submit issues
                  in agent TUIs), then Enter.
 
-    Some agent TUIs ignore the first Enter when a tool call is in flight, so we
-    send Enter three times with small gaps. Override with --no-enter.
+    Agent TUIs (claude, codex) sometimes swallow Enter while a tool call is in
+    flight. We retry up to 6 times with growing waits and a capture-pane probe
+    (last 40 chars of last non-empty line) to confirm the input area cleared.
+    Override with --no-enter.
     """
     pane = args.pane
     text = args.text
@@ -114,11 +138,16 @@ def cmd_send(args: argparse.Namespace) -> int:
     if args.no_enter:
         return 0
 
-    time.sleep(0.2 if "\n" not in text else 0.3)
-    for i in range(3):
+    probe = _probe_for(text)
+    time.sleep(0.4)
+    # Send Enter, verify, retry. Total worst-case ~14s (6 retries with 1.2..3.2s waits).
+    for attempt in range(6):
         tmux_safe("send-keys", "-t", pane, "C-m")
-        if i < 2:
-            time.sleep(0.5)
+        time.sleep(1.2 + 0.4 * attempt)
+        if not probe or probe not in _pane_tail(pane, 5):
+            return 0
+    print(f"warning: pane {pane} may not have accepted the message "
+          f"(probe still visible after 6 Enter retries)", file=sys.stderr)
     return 0
 
 
