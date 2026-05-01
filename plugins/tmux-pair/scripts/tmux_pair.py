@@ -152,6 +152,21 @@ def spawn_pane(
         tmux("send-keys", "-t", pane_id, "-l", boot_command)
         tmux("send-keys", "-t", pane_id, "C-m")
 
+    # Claude TUI: /effort max muss VOR erstem User-Prompt rein, damit
+    # Reasoning-Level fuer Initial-Briefing gilt. 8s Boot-Delay, dann sent.
+    # Briefing-Send (14s spaeter via _schedule_send) landet nach effort-confirm.
+    if agent == "claude" and boot_command:
+        bg = (
+            f"sleep 8 && "
+            f"tmux send-keys -t {shlex.quote(pane_id)} -l '/effort max' && "
+            f"sleep 0.3 && "
+            f"tmux send-keys -t {shlex.quote(pane_id)} C-m"
+        )
+        subprocess.Popen(
+            ["bash", "-c", bg], start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
     return pane_id
 
 
