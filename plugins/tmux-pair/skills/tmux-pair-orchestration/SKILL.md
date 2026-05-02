@@ -144,6 +144,43 @@ python3 <plugin>/scripts/tmux_pair.py send <pane-id> "<message>"
 
 Multi-line messages are submitted via `load-buffer` + `paste-buffer` to avoid the issue where some agent TUIs interpret each newline as a submit. Single-line messages use plain `send-keys -l`. After the text, the helper sends Enter three times with small gaps; this works around agent TUIs that ignore the first Enter when a tool call is in flight. Override with `--no-enter` if needed.
 
+## Token management & re-briefs
+
+Long-running pairs/triples drift past the sweet spot (~200k tokens) where the agent still reasons cleanly, even though the model context window is much larger. Two helper subcommands let any layer refresh the layer below in place:
+
+```
+python3 <plugin>/scripts/tmux_pair.py status <pane-id>
+python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path>
+```
+
+`status` returns JSON with the detected agent and the parsed token count. Claude prints `N tokens` in its footer, so the count is reliable. Codex usually does not, so its `tokens` field comes back `null` — fall back to a feel-based heuristic (elapsed wall-time, number of REVIEW cycles, whether the agent is repeating itself).
+
+`compact` sends `/compact` to the pane, polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop ≥50% as a fallback), and then sends the re-brief from `--briefing-file` through the regular submit-with-retry path.
+
+**Authoring the re-brief.** After `/compact` the agent has lost the conversational state and only remembers the summary. The re-brief MUST stand on its own. Include:
+
+- the agent's role (writer / reviewer / orchestrator)
+- the concrete current task, phrased as if the agent is hearing it the first time
+- a short progress recap (what the layer above has seen, what the agent has shipped)
+- the next concrete step the agent should take
+- the peer-protocol for this run, with current pane IDs
+- the standards (commits, no `--no-verify`, language conventions)
+
+Where the recap comes from depends on the layer:
+
+- the orchestrator keeps a running progress log and authors re-briefs for its writer and reviewer
+- the master keeps the same kind of log for any orchestrator it spawns; orchestrators get the richest re-brief because they own the most state
+- the human compacts the master themselves; a human-authored re-brief at that layer is fine
+
+**When to trigger.**
+
+- between REVIEW cycles, never mid-edit or mid-tool-call
+- claude pane > ~200k tokens (visible in footer)
+- codex pane: by feel
+- before a known long phase (e.g. starting Wave N) so the agent enters it fresh
+
+**Parallelism.** To compact both engineers in a triple at once, run two `compact` calls with `&` from the orchestrator's shell; each call blocks for the duration of its poll loop.
+
 ## Common failure modes (summary)
 
 The full list with diagnostics and recovery steps lives in `references/failure-modes.md`. The most common ones:

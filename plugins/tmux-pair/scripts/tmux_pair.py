@@ -582,6 +582,128 @@ def cmd_capture(args: argparse.Namespace) -> int:
     return 0
 
 
+TOKEN_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([km]?)\s*tokens", re.IGNORECASE)
+COMPACT_DONE_MARKERS = (
+    "conversation compacted",
+    "compaction complete",
+    "compact complete",
+    "compacted conversation",
+)
+
+
+def _parse_tokens(text: str) -> int | None:
+    m = TOKEN_RE.search(text)
+    if not m:
+        return None
+    n = float(m.group(1))
+    unit = m.group(2).lower()
+    if unit == "k":
+        n *= 1_000
+    elif unit == "m":
+        n *= 1_000_000
+    return int(n)
+
+
+def _detect_agent(pane: str) -> str:
+    """Identify the running agent via TUI fingerprints.
+
+    Both claude and codex run as `node` (claude even shows its version as
+    pane_current_command, e.g. '2.1.126'), so we rely on prompt + footer chars:
+      - claude: '❯' prompt indicator + 'N tokens' line in footer
+      - codex:  '›' prompt indicator + 'gpt-' model line
+    """
+    tail = _pane_tail(pane, 15)
+    if "❯" in tail and TOKEN_RE.search(tail):
+        return "claude"
+    if "›" in tail and ("gpt-" in tail.lower() or "codex" in tail.lower()):
+        return "codex"
+    if "❯" in tail:
+        return "claude"
+    if "›" in tail:
+        return "codex"
+    return "unknown"
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Report agent type + token-count probe for a pane.
+
+    Token-count is parseable from claude's footer ('183.5k tokens'). Codex
+    rarely shows it, so callers must fall back to a time/event heuristic
+    ('nach Gefuehl') when tokens is null.
+    """
+    pane = args.pane
+    tail = _pane_tail(pane, 15)
+    tokens = _parse_tokens(tail)
+    match = TOKEN_RE.search(tail)
+    print(json.dumps({
+        "pane": pane,
+        "agent": _detect_agent(pane),
+        "tokens": tokens,
+        "raw_match": match.group(0) if match else None,
+    }, indent=2))
+    return 0
+
+
+def cmd_compact(args: argparse.Namespace) -> int:
+    """Send /compact to a pane, wait for completion, then re-brief.
+
+    The re-brief is sent verbatim from --briefing-file (preferred for multi-
+    line) or --briefing. It MUST contain the agent's role, task, current
+    progress recap, next concrete step, peer-protocol, and standards: after
+    /compact the agent has lost its conversational state.
+
+    Compaction-done detection:
+      - claude prints 'Conversation compacted' / similar markers
+      - codex format unknown -> we also accept token-count drop >= 50%
+      - hard timeout (default 300s) -> warn + send brief anyway
+
+    Run multiple in parallel via shell '&' if you need to compact both
+    engineers at once (each call blocks for the duration of its poll loop).
+    """
+    pane = args.pane
+    if args.briefing_file:
+        briefing = Path(args.briefing_file).expanduser().read_text()
+    elif args.briefing:
+        briefing = args.briefing
+    else:
+        sys.exit("error: --briefing or --briefing-file required")
+
+    pre_tokens = _parse_tokens(_pane_tail(pane, 15))
+    print(f"[compact {pane}] pre-tokens: {pre_tokens}", file=sys.stderr)
+
+    rc, _, err = tmux_safe("send-keys", "-t", pane, "-l", "/compact")
+    if rc != 0:
+        sys.exit(f"error: send-keys /compact failed: {err}")
+    time.sleep(0.3)
+    tmux_safe("send-keys", "-t", pane, "C-m")
+
+    deadline = time.time() + args.timeout
+    settled = False
+    while time.time() < deadline:
+        time.sleep(5)
+        scrollback = _pane_tail(pane, 40)
+        if any(m in scrollback.lower() for m in COMPACT_DONE_MARKERS):
+            settled = True
+            print(f"[compact {pane}] marker detected", file=sys.stderr)
+            break
+        new_tokens = _parse_tokens(scrollback)
+        if (pre_tokens and pre_tokens > 50_000
+                and new_tokens is not None
+                and new_tokens < pre_tokens * 0.5):
+            settled = True
+            print(f"[compact {pane}] token drop {pre_tokens} -> {new_tokens}",
+                  file=sys.stderr)
+            break
+
+    if not settled:
+        print(f"[compact {pane}] WARNING: did not settle within "
+              f"{args.timeout}s; sending brief anyway", file=sys.stderr)
+
+    time.sleep(3)  # let TUI settle before brief lands
+    send_args = argparse.Namespace(pane=pane, text=briefing, no_enter=False)
+    return cmd_send(send_args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="tmux_pair", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -637,6 +759,21 @@ def build_parser() -> argparse.ArgumentParser:
     ca.add_argument("pane")
     ca.add_argument("--lines", type=int, default=100)
     ca.set_defaults(func=cmd_capture)
+
+    st = sub.add_parser("status", help="probe pane for agent + token-count")
+    st.add_argument("pane")
+    st.set_defaults(func=cmd_status)
+
+    co = sub.add_parser("compact",
+                        help="send /compact to a pane, wait for completion, re-brief")
+    co.add_argument("pane")
+    co.add_argument("--briefing-file",
+                    help="path to a file with the post-compact re-brief")
+    co.add_argument("--briefing",
+                    help="inline re-brief text (prefer --briefing-file for multi-line)")
+    co.add_argument("--timeout", type=int, default=300,
+                    help="max seconds to wait for compaction (default: 300)")
+    co.set_defaults(func=cmd_compact)
 
     return p
 
