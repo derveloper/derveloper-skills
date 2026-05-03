@@ -40,18 +40,18 @@ If the tempfile is gone, regenerate the briefing manually using the templates in
 
 **Prevention:** If you know the agents are slow to boot on a cold machine, add a wrapper that calls the spawn and sleeps longer before the first send. The 14 seconds is a heuristic that works for warm systems.
 
-## 3. Engineers ping master directly in triple mode
+## 3. Engineers ping human directly in triple mode
 
-**Symptom:** The master pane gets `REVIEW-READY`, `BLOCKER`, or other engineer-level events directly. Orchestrator sees nothing.
+**Symptom:** The human pane gets `REVIEW-READY`, `BLOCKER`, or other engineer-level events directly. Orchestrator sees nothing.
 
-**Cause:** The engineer's briefing missed the "ping orchestrator at <pane-id>, not master" instruction, or the orchestrator's recon-phase briefing didn't propagate the right pane id.
+**Cause:** The engineer's briefing missed the "ping orchestrator at <pane-id>, not human" instruction, or the orchestrator's recon-phase briefing didn't propagate the right pane id.
 
-**Diagnosis:** Look at the briefing the orchestrator sent. If it doesn't contain the orchestrator's pane id and an explicit "do not ping master directly" line, that's the bug.
+**Diagnosis:** Look at the briefing the orchestrator sent. If it doesn't contain the orchestrator's pane id and an explicit "do not ping human directly" line, that's the bug.
 
 **Recovery:** Orchestrator re-briefs the noisy engineer:
 
 ```
-python3 <plugin>/scripts/tmux_pair.py send <engineer-pane> "PROCESS-NEEDS-FIX: All pings go to <orch-pane>, not master. Re-route any open ping you have to <orch-pane>."
+python3 <plugin>/scripts/tmux_pair.py send <engineer-pane> "PROCESS-NEEDS-FIX: All pings go to <orch-pane>, not human. Re-route any open ping you have to <orch-pane>."
 ```
 
 **Prevention:** The orchestrator briefing template in `examples/orchestrator-briefing.md` has the explicit "your pane id, copy this into engineer briefings" line. Don't drop it.
@@ -79,18 +79,18 @@ python3 <plugin>/scripts/tmux_pair.py send <engineer-pane> "PROCESS-NEEDS-FIX: A
 
 **Prevention:** None — this is rare. Recovery is the design.
 
-## 5. Writer pushed without master OK
+## 5. Writer pushed without human OK
 
 **Symptom:** A `git push` happened. The branch is on the remote.
 
 **Cause:** Briefing missing or weakly worded on the push gate.
 
-**Recovery (master decision):**
+**Recovery (human decision):**
 
 - Accept and review post-hoc. Open a PR or just `git log` the new commits and audit. If review is clean, no action. If not, commit fixes and push.
 - Revert and rerun. `git push --force-with-lease origin <branch>:<branch>` after `git reset --hard <pre-push-sha>` is the destructive path; only use if the push contains real problems.
 
-**Prevention:** Spell the gate explicitly in the writer briefing: "Do not run `git push` until master replies `PUSH-OK`. Commits are fine; pushes are not." Double-blanks like "wait for master before push" are too soft to override the writer's instinct to ship.
+**Prevention:** Spell the gate explicitly in the writer briefing: "Do not run `git push` until human replies `PUSH-OK`. Commits are fine; pushes are not." Double-blanks like "wait for human before push" are too soft to override the writer's instinct to ship.
 
 ## 6. Reviewer drifts into nitpicking
 
@@ -124,7 +124,7 @@ PROCESS-NEEDS-FIX: <event> rejected because it's based on a sub-agent's recon. R
 
 **Symptom:** Worktree creation fails with "fatal: '<path>' already exists" or the new worktree's branch is already checked out elsewhere.
 
-**Cause:** A previous run of the same feature was not cleaned up, or the master ran the spawn twice with the same feature name.
+**Cause:** A previous run of the same feature was not cleaned up, or the human ran the spawn twice with the same feature name.
 
 **Recovery:**
 

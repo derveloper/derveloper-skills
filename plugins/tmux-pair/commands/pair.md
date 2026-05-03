@@ -37,7 +37,7 @@ If the feature description is missing or ambiguous, ask the user before spawning
 
 ## Output
 
-JSON with `worktree`, `branch`, `window`, `writer_pane`, `reviewer_pane`, `master_pane`. Relay these back to the user so they can address either agent directly via the `send` subcommand.
+JSON with `worktree`, `branch`, `window`, `writer_pane`, `reviewer_pane`, `human_pane`. Relay these back to the user so they can address either agent directly via the `send` subcommand.
 
 ## Cleanup (manual)
 

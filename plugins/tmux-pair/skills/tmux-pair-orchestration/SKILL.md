@@ -12,7 +12,7 @@ This skill applies whenever the user wants to set up such a pair or triple, moni
 
 ## The two modes
 
-| Mode | Agents | Layout | Master role |
+| Mode | Agents | Layout | Human role |
 |------|--------|--------|-------------|
 | **pair** | Writer + Reviewer | side by side (`main-vertical`) | active relay between the two agents, hands-on |
 | **triple** | Writer + Reviewer + Orchestrator | Orchestrator on top (full width), Writer/Reviewer below (`main-horizontal`) | hands-off after spawn, only sees major-event pings |
@@ -30,28 +30,28 @@ These are defaults baked into the bundled script. Different agent CLIs work fine
 Choose **pair** when:
 
 - the task is small and well-scoped (one to a few files)
-- the master is willing to be the relay between writer and reviewer
+- the human is willing to be the relay between writer and reviewer
 - recon is shallow or already done
 
 Choose **triple** when:
 
 - the task spans many files or unfamiliar code
-- the master wants to step away and only get pinged on real events
+- the human wants to step away and only get pinged on real events
 - a dedicated agent doing recon and writing briefings will save more time than it costs
 - the feedback "engineers brief themselves and miss the real problem" is plausible
 
-A triple is overhead for trivial tasks. A pair leaks too much into the master's attention for big ones. See `references/triple-vs-pair.md` for a longer decision matrix with worked examples.
+A triple is overhead for trivial tasks. A pair leaks too much into the human's attention for big ones. See `references/triple-vs-pair.md` for a longer decision matrix with worked examples.
 
 ## Gated workflow (default)
 
 Both `/pair` and `/triple` enforce three quality gates before code lands on the branch. The bundled briefings already encode them; this is the high-level shape:
 
 ```
-Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Master merges
+Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges
 ```
 
-- **GATE 1 (Clarify)** — whoever owns the gate (orchestrator in triple, master in pair) calls `AskUserQuestion` directly in their own pane. The triple orchestrator does NOT ping the master for clarify — master only sees a `GATE-1-ESCALATE` if a question is outside the orchestrator's authority. Engineers wait for `PLAN-LOCKED:`.
-- **GATE 2 (Plan-Check)** — one general-purpose subagent verifies the plan goal-backward. `BLOCKER` escalates to master, no auto-retry.
+- **GATE 1 (Clarify)** — whoever owns the gate (orchestrator in triple, human in pair) calls `AskUserQuestion` directly in their own pane. The triple orchestrator does NOT ping the human for clarify — human only sees a `GATE-1-ESCALATE` if a question is outside the orchestrator's authority. Engineers wait for `PLAN-LOCKED:`.
+- **GATE 2 (Plan-Check)** — one general-purpose subagent verifies the plan goal-backward. `BLOCKER` escalates to human, no auto-retry.
 - **Implementation Loop** — standard pair protocol (`REVIEW-READY` -> `REVIEW` -> fix -> `DONE`). Standards block embedded in every briefing.
 - **GATE 3 (Final-Verify)** — two parallel subagents (goal-backward verifier + code-reviewer) check the diff against task, plan, and standards before merge.
 
@@ -78,25 +78,25 @@ The protocol is identical for both modes. Only the addressing differs.
 
    If findings, writer fixes, pings `REVIEW-READY` again. Loop.
 
-4. If the pair stalls — disagreement, missing info, suspected upstream bug — either side pings `BLOCKER: <what>` (in pair mode: to master; in triple mode: to orchestrator).
+4. If the pair stalls — disagreement, missing info, suspected upstream bug — either side pings `BLOCKER: <what>` (in pair mode: to human; in triple mode: to orchestrator).
 
 The full protocol with all event types and edge cases lives in `references/pair-protocol.md`.
 
-## Master-offload (triple mode)
+## Human-offload (triple mode)
 
-The point of the triple is that the master delegates the relay to the orchestrator. The master:
+The point of the triple is that the human delegates the relay to the orchestrator. The human:
 
 - sends the initial task only to the orchestrator, NOT to the engineers
 - sees only orchestrator-tagged pings: `[Orchestrator <window>] MAJOR-STEP / BLOCKER / DONE / ABORT`
 - does NOT relay between writer and reviewer
-- does NOT clean up worktrees during the run; cleanup decisions stay with the master, but only after `DONE`
+- does NOT clean up worktrees during the run; cleanup decisions stay with the human, but only after `DONE`
 
 The orchestrator does:
 
 - recon (read upstream docs, grep the codebase, identify pointers)
 - write writer briefing AND reviewer briefing as separate messages
 - watch the pair loop at high level (capture-pane + nudge if silent > 10 min)
-- filter engineer pings: only forward MAJOR-STEP, BLOCKER, DONE, ABORT to master
+- filter engineer pings: only forward MAJOR-STEP, BLOCKER, DONE, ABORT to human
 
 The orchestrator does NOT code, does NOT review, does NOT commit, does NOT decide on cleanup.
 
@@ -126,7 +126,7 @@ Both layouts are forced via `select-layout` after spawning, so pane order matter
 
 ## Quick start
 
-Both commands assume the master is already inside a tmux session.
+Both commands assume the human is already inside a tmux session.
 
 ```
 /pair <project-path> <base> <feature> [task...]
@@ -147,7 +147,7 @@ Each role has a template in `examples/`:
 
 - **`examples/writer-briefing.md`** — implementation brief: pointers, deliverables, pair protocol with reviewer pane id, standards.
 - **`examples/reviewer-briefing.md`** — review brief: what to check (falsifiable), how to phrase findings, pair protocol with writer pane id.
-- **`examples/orchestrator-briefing.md`** — full duty list: recon, brief engineers, watch loop, report to master.
+- **`examples/orchestrator-briefing.md`** — full duty list: recon, brief engineers, watch loop, report to human.
 
 These are starting points. Adapt to the task at hand. The bundled script generates a baseline briefing automatically; the templates are useful when overriding the briefing or when the orchestrator writes one from scratch after recon.
 
@@ -186,8 +186,8 @@ python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path>
 Where the recap comes from depends on the layer:
 
 - the orchestrator keeps a running progress log and authors re-briefs for its writer and reviewer
-- the master keeps the same kind of log for any orchestrator it spawns; orchestrators get the richest re-brief because they own the most state
-- the human compacts the master themselves; a human-authored re-brief at that layer is fine
+- the human keeps the same kind of log for any orchestrator it spawns; orchestrators get the richest re-brief because they own the most state
+- at the topmost layer the person handles their own compact; a hand-authored re-brief there is fine
 
 **When to trigger.**
 
@@ -204,9 +204,9 @@ The full list with diagnostics and recovery steps lives in `references/failure-m
 
 - **Send didn't submit.** Symptom: message visible in pane but cursor still in input. Cause: agent TUI ignored the Enter. Fix: re-send with the helper, which retries Enter; or send Enter manually.
 - **Briefing landed before agent booted.** Symptom: message appears at the shell prompt instead of inside the TUI. Cause: 14-second delay too short for slow boot. Fix: re-send manually after the agent is ready.
-- **Engineers ping master directly in triple mode.** Symptom: master inbox floods. Cause: briefing missed the "ping orchestrator, not master" instruction. Fix: orchestrator re-briefs the noisy engineer with the explicit pane id.
+- **Engineers ping human directly in triple mode.** Symptom: human inbox floods. Cause: briefing missed the "ping orchestrator, not human" instruction. Fix: orchestrator re-briefs the noisy engineer with the explicit pane id.
 - **tmux session crashed mid-run.** Symptom: panes gone, worktree intact. Recovery: re-spawn the panes manually, point them at the existing worktree, and re-send the briefings with the current state attached.
-- **Writer pushed without master OK.** Symptom: `git push` happened despite the brief saying "wait for master". Cause: briefing missing or weakly worded. Fix: spell out the push gate explicitly in the briefing template.
+- **Writer pushed without human OK.** Symptom: `git push` happened despite the brief saying "wait for human". Cause: briefing missing or weakly worded. Fix: spell out the push gate explicitly in the briefing template.
 
 ## Cleanup
 
@@ -219,7 +219,7 @@ git branch -d feature/<feature>      # after merge
 tmux kill-window -t <window-name>
 ```
 
-Cleanup is the master's call. Neither the orchestrator nor the engineers should remove worktrees, kill windows, or delete branches during a run.
+Cleanup is the human's call. Neither the orchestrator nor the engineers should remove worktrees, kill windows, or delete branches during a run.
 
 ## Additional resources
 

@@ -1,6 +1,6 @@
 # Writer briefing template
 
-Adapt the bracketed fields to the task. The bundled script generates a baseline version automatically; this template is what an orchestrator (or master) writes from scratch when overriding the default or when the task has shape that the default doesn't cover.
+Adapt the bracketed fields to the task. The bundled script generates a baseline version automatically; this template is what an orchestrator (or human) writes from scratch when overriding the default or when the task has shape that the default doesn't cover.
 
 ```
 [ROLE: Writer]
@@ -42,7 +42,7 @@ PAIR PROTOCOL
   and what was tried.
 
 PUSH GATE
-Do NOT run `git push` until master replies `PUSH-OK`. Commits are fine; pushes
+Do NOT run `git push` until human replies `PUSH-OK`. Commits are fine; pushes
 are not.
 
 STANDARDS
@@ -59,7 +59,7 @@ START. Read POINTERS, plan one logical step, code, run gates, REVIEW-READY.
 
 ## Notes on adaptation
 
-- **Pointers are mandatory.** A briefing without pointers is a briefing without recon. If you don't have pointers, do recon first or ask master.
+- **Pointers are mandatory.** A briefing without pointers is a briefing without recon. If you don't have pointers, do recon first or ask human.
 - **Gates are mandatory.** "Tests must pass" without naming the command is too soft.
 - **Push gate is mandatory.** Even if you trust the writer, the gate is cheap and catches one of the most common failure modes (see `references/failure-modes.md` §5).
 - **The pane id of the reviewer must be in the briefing.** Not "the other pane", not "the reviewer", but `%N`.

@@ -3,7 +3,7 @@
 Both `/pair` and `/triple` run through three forced quality gates before code lands on the branch:
 
 ```
-Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Master merges
+Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges
 ```
 
 Gates exist because pair-loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 2 and 3; the user enforces gate 1 via `AskUserQuestion`.
@@ -15,15 +15,15 @@ This file is the long version. The bundled briefings already encode the workflow
 | Mode | Gate 1 (Clarify) | Gate 2 (Plan-Check) | Gate 3 (Final-Verify) |
 |------|-------------------|---------------------|------------------------|
 | **triple** | Orchestrator asks user directly via `AskUserQuestion` (in its own pane) | Orchestrator spawns subagent | Orchestrator spawns two subagents (verifier + code-reviewer) |
-| **pair** | Master asks user directly via `AskUserQuestion` | Master spawns subagent from their own context | Master spawns two subagents from their own context |
+| **pair** | Human asks user directly via `AskUserQuestion` | Human spawns subagent from their own context | Human spawns two subagents from their own context |
 
-In a triple the orchestrator owns the `AskUserQuestion` call so the master stays unblocked. The master only sees major events (`MAJOR-STEP`, `BLOCKER`, `DONE`, `ABORT`, gate-3 verdicts, plus rare `GATE-1-ESCALATE` if the orchestrator hits a question outside its decision authority). In a pair the master IS the orchestrator and asks directly.
+In a triple the orchestrator owns the `AskUserQuestion` call so the human stays unblocked. The human only sees major events (`MAJOR-STEP`, `BLOCKER`, `DONE`, `ABORT`, gate-3 verdicts, plus rare `GATE-1-ESCALATE` if the orchestrator hits a question outside its decision authority). In a pair the human IS the orchestrator and asks directly.
 
 ## Gate 1: Clarify
 
 **Goal:** validate assumptions and resolve open points BEFORE planning. Empty user input on day one is the most expensive failure mode in a long pair-run.
 
-**Trigger:** orchestrator (triple) or master (pair) finished initial recon and has a list of assumptions plus open questions.
+**Trigger:** orchestrator (triple) or human (pair) finished initial recon and has a list of assumptions plus open questions.
 
 **Mechanism:**
 
@@ -31,15 +31,15 @@ In a triple the orchestrator owns the `AskUserQuestion` call so the master stays
    - assumptions (`A1..An`) the run is implicitly making (defaults, library choices, file layout)
    - open questions (`Q1..Qn`) the user must answer (explicit choices between approaches)
    - pre-flight result: does `./CLAUDE.md` exist? does `.claude/rules/` exist? if greenfield, list of rules-files to generate
-2. Triple orchestrator calls `AskUserQuestion` ITSELF in its own pane (multiple-choice preferred — forces specificity). Each question gets 2-4 concrete options; the recommended one is the first option suffixed `(Recommended)`. Max four questions per call, sequential calls if more are needed. The master is NOT pinged. Optional one-line FYI to master is fine (`[Orch <window>] GATE-1 starts: N questions to user`), but the orchestrator does not wait on the master.
-3. Pair master calls `AskUserQuestion` directly. Same option/recommendation discipline.
-4. Escalation path (triple only): if a question is outside the orchestrator's decision authority (budget, scope change, stakeholder dependency, or the user is unreachable), ping master:
+2. Triple orchestrator calls `AskUserQuestion` ITSELF in its own pane (multiple-choice preferred — forces specificity). Each question gets 2-4 concrete options; the recommended one is the first option suffixed `(Recommended)`. Max four questions per call, sequential calls if more are needed. The human is NOT pinged. Optional one-line FYI to human is fine (`[Orch <window>] GATE-1 starts: N questions to user`), but the orchestrator does not wait on the human.
+3. Pair human calls `AskUserQuestion` directly. Same option/recommendation discipline.
+4. Escalation path (triple only): if a question is outside the orchestrator's decision authority (budget, scope change, stakeholder dependency, or the user is unreachable), ping human:
    ```
    GATE-1-ESCALATE <window-name>
    <reason>
-   <questions needing master input>
+   <questions needing human input>
    ```
-   Wait for `GATE-1-DECISION` before continuing. Pair has no escalation — master is already the decision layer.
+   Wait for `GATE-1-DECISION` before continuing. Pair has no escalation — human is already the decision layer.
 
 **Skip condition:** no open questions AND every assumption is low-risk (won't change implementation). Rare. Default is: ask.
 
@@ -53,14 +53,14 @@ In a triple the orchestrator owns the `AskUserQuestion` call so the master stays
 
 **Goal:** verify the plan WILL achieve the task, before engineers burn context on the wrong plan.
 
-**Trigger:** orchestrator/master has produced a plan as 2-5 large bullets, each pointing to 1-3 files or components.
+**Trigger:** orchestrator/human has produced a plan as 2-5 large bullets, each pointing to 1-3 files or components.
 
 **Mechanism:** spawn ONE general-purpose subagent with this prompt template (rendered concretely by `_briefing_gate_prompts()` in `scripts/tmux_pair.py`):
 
 ```
 Adversarial Plan-Check vor Implementierung. Goal-backward.
 
-Task vom Master: {TASK}
+Task vom Human: {TASK}
 User-Antworten aus GATE 1: {CLARIFY_RESPONSE}
 Plan (Bullets): {PLAN_BULLETS}
 Worktree: {WT_PATH}
@@ -89,7 +89,7 @@ NOTES:
 **Verdict handling:**
 
 - `PASS` or `WARNING` -> brief engineers with `PLAN-LOCKED:` (plan + GATE-1 answers + recon pointers + pair protocol + escalation pane id).
-- `BLOCKER` -> orchestrator pings `GATE-2-BLOCKER: <reason>` to master and waits. **No auto-retry.** Master decides: re-ask the user, revise the plan manually, or abort. Pair-mode master decides directly.
+- `BLOCKER` -> orchestrator pings `GATE-2-BLOCKER: <reason>` to human and waits. **No auto-retry.** Human decides: re-ask the user, revise the plan manually, or abort. Pair-mode human decides directly.
 
 **Why no auto-retry:** an auto-retry burns subagent tokens on the same wrong assumption. Human-in-the-loop is cheaper. If the planner gets it wrong twice, the planner's mental model is broken, not the plan.
 
@@ -106,7 +106,7 @@ Standard pair protocol (`references/pair-protocol.md`). Engineers wait for `PLAN
 1. Writer codes a logical step.
 2. Writer pings reviewer with `REVIEW-READY: <summary>`.
 3. Reviewer responds `REVIEW: APPROVE` or `REVIEW: <findings>`.
-4. Loop until `APPROVE`. Writer commits and pings `DONE: <sha>` to orchestrator (triple) or master (pair).
+4. Loop until `APPROVE`. Writer commits and pings `DONE: <sha>` to orchestrator (triple) or human (pair).
 5. Engineers can ping `BLOCKER` upstream at any time.
 
 The standards block in every briefing forbids `--no-verify`, AI co-author trailers, `ae/oe/ue/ss` substitutes, anti-AI-slop vocabulary, and a pile of other slop sources. Reviewers check standards as part of their review.
@@ -124,7 +124,7 @@ The standards block in every briefing forbids `--no-verify`, AI co-author traile
 ```
 Adversarial Goal-Backward-Verification nach Implementierung.
 
-Task vom Master: {TASK}
+Task vom Human: {TASK}
 Plan (Bullets): {PLAN_BULLETS}
 User-Antworten aus GATE 1: {CLARIFY_RESPONSE}
 Worktree: {WT_PATH}
@@ -168,8 +168,8 @@ Output: VERDICT + BLOCKERS (file:line, issue, fix-snippet) + WARNINGS.
 
 **Verdict handling:**
 
-- Both `PASS` -> orchestrator/master pings `GATE-3-PASS <window>` with diff-stat and commit list. Master merges (FF or squash, master decides).
-- At least one `BLOCKER` -> orchestrator/master pings `GATE-3-BLOCKER` with consolidated findings. Master decides: send engineers back into the loop with a fix-briefing (then re-run GATE 3), revise the plan, or abort.
+- Both `PASS` -> orchestrator/human pings `GATE-3-PASS <window>` with diff-stat and commit list. Human merges (FF or squash, human decides).
+- At least one `BLOCKER` -> orchestrator/human pings `GATE-3-BLOCKER` with consolidated findings. Human decides: send engineers back into the loop with a fix-briefing (then re-run GATE 3), revise the plan, or abort.
 
 **Why two subagents in parallel:** verifier checks intent, code-reviewer checks craft. They have different failure modes and different scopes; running them sequentially doubles latency without adding signal.
 
@@ -217,21 +217,21 @@ If `CLAUDE.md` and `.claude/rules/` exist, pre-flight is skipped and existing ru
 
 | Event | From | To | Payload |
 |-------|------|-----|---------|
-| `GATE-1-ESCALATE <window>` | orchestrator | master | Triple only. Reason + question(s) outside the orchestrator's decision authority |
-| `GATE-1-DECISION` | master | orchestrator | Triple only. Master's answer to the escalated question(s) |
-| `GATE-2-BLOCKER` | orchestrator/master | master/user | subagent's BLOCKER findings |
-| `PLAN-LOCKED:` | orchestrator/master | engineers | plan + GATE-1 answers + pointers + protocol |
-| `GATE-3-PASS <window>` | orchestrator/master | master/user | diff-stat, commit list |
-| `GATE-3-BLOCKER` | orchestrator/master | master/user | subagent BLOCKERS, suggested next move |
+| `GATE-1-ESCALATE <window>` | orchestrator | human | Triple only. Reason + question(s) outside the orchestrator's decision authority |
+| `GATE-1-DECISION` | human | orchestrator | Triple only. Human's answer to the escalated question(s) |
+| `GATE-2-BLOCKER` | orchestrator/human | human/user | subagent's BLOCKER findings |
+| `PLAN-LOCKED:` | orchestrator/human | engineers | plan + GATE-1 answers + pointers + protocol |
+| `GATE-3-PASS <window>` | orchestrator/human | human/user | diff-stat, commit list |
+| `GATE-3-BLOCKER` | orchestrator/human | human/user | subagent BLOCKERS, suggested next move |
 
-`GATE-1-ESCALATE`/`GATE-1-DECISION` are the ONLY gate-1 events crossing pane boundaries in normal triples. The orchestrator's regular `AskUserQuestion`/answer cycle stays inside its own pane and never reaches the master.
+`GATE-1-ESCALATE`/`GATE-1-DECISION` are the ONLY gate-1 events crossing pane boundaries in normal triples. The orchestrator's regular `AskUserQuestion`/answer cycle stays inside its own pane and never reaches the human.
 
-These extend the base pair-protocol vocabulary (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`, etc. — see `references/pair-protocol.md`). Engineers send those; gate events go between orchestrator and master.
+These extend the base pair-protocol vocabulary (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`, etc. — see `references/pair-protocol.md`). Engineers send those; gate events go between orchestrator and human.
 
 ## Failure modes specific to gated runs
 
 - **Engineer skips PLAN-LOCKED.** Writer starts coding before the orchestrator's `PLAN-LOCKED:` arrives. Recovery: orchestrator pings `PROCESS-NEEDS-FIX` with the plan, writer reverts uncommitted work, restarts from PLAN-LOCKED. Prevention: engineer briefing should be explicit ("vor PLAN-LOCKED: KEIN Code").
-- **GATE 2 BLOCKER auto-retried.** Orchestrator silently re-runs the subagent without telling master. Symptom: same plan keeps failing GATE 2 with similar findings. Prevention: orchestrator briefing forbids auto-retry.
-- **GATE 3 BLOCKER ignored.** Master sees BLOCKER but merges anyway under time pressure. The work then breaks production. Prevention: GATE-3-BLOCKER pings should be loud (multi-line, explicit BLOCKER list, no PASS sneaking in).
+- **GATE 2 BLOCKER auto-retried.** Orchestrator silently re-runs the subagent without telling human. Symptom: same plan keeps failing GATE 2 with similar findings. Prevention: orchestrator briefing forbids auto-retry.
+- **GATE 3 BLOCKER ignored.** Human sees BLOCKER but merges anyway under time pressure. The work then breaks production. Prevention: GATE-3-BLOCKER pings should be loud (multi-line, explicit BLOCKER list, no PASS sneaking in).
 - **Standards-block violated post-GATE-3.** A late commit slips a `--no-verify` or an `ae/oe/ue` past the verifier. Recovery: revert the commit, fix, GATE 3 again. Prevention: GATE 3 verifier explicitly checks for these in the diff.
-- **AskUserQuestion abused as `Other`-only freeform.** Master uses `AskUserQuestion` with one option labelled "Other" and lets the user dump prose. Loses the structuring benefit. Prevention: each question gets 2-4 concrete options; user can still pick "Other" but the default is structured.
+- **AskUserQuestion abused as `Other`-only freeform.** Human uses `AskUserQuestion` with one option labelled "Other" and lets the user dump prose. Loses the structuring benefit. Prevention: each question gets 2-4 concrete options; user can still pick "Other" but the default is structured.

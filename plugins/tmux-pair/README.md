@@ -66,7 +66,7 @@ The defaults baked into the script are deliberately minimal: a single command pe
 
 ## Token management (long-running pairs/triples)
 
-Modern agent CLIs ship with very large context windows (1M for `claude opus 4.7` and `gpt-5.5`). Pairs/triples that run for hours can drift past the sweet spot (~200k tokens) where the model still reasons cleanly. Two helper subcommands let an orchestrator (or the human master) refresh an agent in place:
+Modern agent CLIs ship with very large context windows (1M for `claude opus 4.7` and `gpt-5.5`). Pairs/triples that run for hours can drift past the sweet spot (~200k tokens) where the model still reasons cleanly. Two helper subcommands let an orchestrator (or the human directly) refresh an agent in place:
 
 ```
 python3 <plugin>/scripts/tmux_pair.py status <pane-id>
@@ -80,7 +80,7 @@ python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path> [
 
 Sends `/compact` to the pane, polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop ≥50% as a fallback signal), then sends the re-brief from `--briefing-file` via the regular send path (with the verify+retry loop).
 
-The re-brief MUST be self-contained: after `/compact` the agent has lost the conversational state and only remembers the summary. Include role, task, current progress recap, the next concrete step, the peer protocol, and the standards. The orchestrator (which keeps its own progress log) is the natural place to author it; the master plays the same role for any orchestrators it spawns.
+The re-brief MUST be self-contained: after `/compact` the agent has lost the conversational state and only remembers the summary. Include role, task, current progress recap, the next concrete step, the peer protocol, and the standards. The orchestrator (which keeps its own progress log) is the natural place to author it; the human plays the same role for any orchestrators it spawns.
 
 Trigger windows:
 
