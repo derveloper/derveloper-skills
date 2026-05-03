@@ -1140,8 +1140,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="base ref (default: origin/main)")
     pa.add_argument("--task", default="",
                     help="task description sent to both agents")
-    pa.add_argument("--writer-agent", default="codex")
-    pa.add_argument("--reviewer-agent", default="claude")
+    pa.add_argument("--writer-agent", default="claude")
+    pa.add_argument("--reviewer-agent", default="codex")
     pa.set_defaults(func=cmd_pair)
 
     tr = sub.add_parser("triple",
@@ -1151,8 +1151,8 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--base", default="origin/main")
     tr.add_argument("--task", default="",
                     help="task description sent to the orchestrator only")
-    tr.add_argument("--writer-agent", default="codex")
-    tr.add_argument("--reviewer-agent", default="claude")
+    tr.add_argument("--writer-agent", default="claude")
+    tr.add_argument("--reviewer-agent", default="codex")
     tr.add_argument("--orchestrator-agent", default="claude")
     tr.set_defaults(func=cmd_triple)
 

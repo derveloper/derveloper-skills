@@ -19,8 +19,8 @@ This skill applies whenever the user wants to set up such a pair or triple, moni
 
 Default agent assignments (overridable):
 
-- writer: `codex` (terminal-driven, fast on pure code)
-- reviewer: `claude` (good at structural review, asks falsifiable questions)
+- writer: `claude` (strong at structured implementation, follows briefings closely)
+- reviewer: `codex` (terminal-driven, sharp on diff-level critique and edge cases)
 - orchestrator: `claude` (recon + briefing + filtering)
 
 These are defaults baked into the bundled script. Different agent CLIs work fine — point `--writer-agent`, `--reviewer-agent`, `--orchestrator-agent` at any name registered in `~/.config/tmux-pair/agents.json`.
