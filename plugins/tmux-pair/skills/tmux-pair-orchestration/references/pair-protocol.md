@@ -44,6 +44,23 @@ The orchestrator additionally prefixes its messages to the master pane with `[Or
 
 The orchestrator does NOT send `REVIEW-READY` or `REVIEW: ...` events. Those are engineer-to-engineer.
 
+## Gate events
+
+These extend the base events above. They drive the gated workflow described in `references/gated-workflow.md`. In triple mode they go between orchestrator and master; in pair mode the master originates and consumes them directly (the master IS the orchestrator).
+
+| Event | From | To | When | Payload |
+|-------|------|-----|------|---------|
+| `GATE-1-READY <window>` | orchestrator | master | Recon done, ready for clarify | assumptions (`A1..An`), open questions (`Q1..Qn`), pre-flight result |
+| `GATE-1-RESPONSE` | master | orchestrator | After `AskUserQuestion` returned answers | answers per question, validated/revised assumptions |
+| `GATE-2-BLOCKER` | orchestrator/master | master/user | Plan-check subagent returned `VERDICT: BLOCKER` | consolidated subagent BLOCKERS, suggested next step |
+| `PLAN-LOCKED:` | orchestrator/master | engineers | After Gate 2 PASS | full plan bullets, GATE-1 answers, recon pointers, pair protocol with peer pane id, escalation pane id |
+| `GATE-3-PASS <window>` | orchestrator/master | master/user | Both Gate-3 subagents returned `VERDICT: PASS` | diff-stat (`git diff --stat base..HEAD`), commit list (`git log --oneline base..HEAD`) |
+| `GATE-3-BLOCKER` | orchestrator/master | master/user | At least one Gate-3 subagent returned `VERDICT: BLOCKER` | consolidated BLOCKERS from verifier + code-reviewer, suggested fix-loop or abort |
+
+**Engineers only see `PLAN-LOCKED:`.** All other gate events are between the higher layers. Engineers respond to PLAN-LOCKED with the standard pair loop (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`).
+
+**Auto-retry forbidden.** A `GATE-2-BLOCKER` or `GATE-3-BLOCKER` always escalates to master. The orchestrator never re-runs the same subagent without a master decision: same plan failing twice means the planner's mental model is broken, not the plan.
+
 ## What "falsifiable" means in a review
 
 A finding is falsifiable if both writer and reviewer agree on a check that decides whether the finding is real.

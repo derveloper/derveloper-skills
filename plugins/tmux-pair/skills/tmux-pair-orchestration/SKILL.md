@@ -42,6 +42,23 @@ Choose **triple** when:
 
 A triple is overhead for trivial tasks. A pair leaks too much into the master's attention for big ones. See `references/triple-vs-pair.md` for a longer decision matrix with worked examples.
 
+## Gated workflow (default)
+
+Both `/pair` and `/triple` enforce three quality gates before code lands on the branch. The bundled briefings already encode them; this is the high-level shape:
+
+```
+Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Master merges
+```
+
+- **GATE 1 (Clarify)** — orchestrator (triple) or master (pair) collects assumptions and open questions after recon and asks the user via `AskUserQuestion`. Engineers wait for `PLAN-LOCKED:`.
+- **GATE 2 (Plan-Check)** — one general-purpose subagent verifies the plan goal-backward. `BLOCKER` escalates to master, no auto-retry.
+- **Implementation Loop** — standard pair protocol (`REVIEW-READY` -> `REVIEW` -> fix -> `DONE`). Standards block embedded in every briefing.
+- **GATE 3 (Final-Verify)** — two parallel subagents (goal-backward verifier + code-reviewer) check the diff against task, plan, and standards before merge.
+
+Greenfield repos (no `CLAUDE.md`, no `.claude/rules/`) get a pre-flight step: the first plan bullet is always "generate `.claude/rules/<key>.md` per detected tech stack". Engineers wait until rules are committed before touching production code.
+
+The full workflow with subagent prompt templates, gate event vocabulary, and failure modes is in `references/gated-workflow.md`. Gate events extend the base pair-protocol vocabulary documented in `references/pair-protocol.md`.
+
 ## Pair protocol (the core loop)
 
 The protocol is identical for both modes. Only the addressing differs.
@@ -208,6 +225,7 @@ Cleanup is the master's call. Neither the orchestrator nor the engineers should 
 
 ### References
 
+- **`references/gated-workflow.md`** — 4-gate workflow (Clarify, Plan-Check, Loop, Final-Verify), subagent prompt templates, gate event vocabulary, gate-specific failure modes.
 - **`references/pair-protocol.md`** — full event vocabulary, edge cases, escalation rules, and end-of-run handshake.
 - **`references/triple-vs-pair.md`** — decision matrix with worked examples for choosing the mode.
 - **`references/failure-modes.md`** — common failure modes with diagnostics, recovery steps, and prevention.
