@@ -51,9 +51,16 @@ Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> G
 ```
 
 - **GATE 1 (Clarify)** — whoever owns the gate (orchestrator in triple, human in pair) calls `AskUserQuestion` directly in their own pane. The triple orchestrator does NOT ping the human for clarify — human only sees a `GATE-1-ESCALATE` if a question is outside the orchestrator's authority. Engineers wait for `PLAN-LOCKED:`.
-- **GATE 2 (Plan-Check)** — one general-purpose subagent verifies the plan goal-backward. `BLOCKER` escalates to human, no auto-retry.
-- **Implementation Loop** — standard pair protocol (`REVIEW-READY` -> `REVIEW` -> fix -> `DONE`). Standards block embedded in every briefing.
+- **GATE 2 (Plan-Check)** — one general-purpose subagent verifies the plan goal-backward AND checks plan quality (concrete files+lines per bullet, edit strategy named, test coverage per bullet, parallelisation markers, measurable done-definition). `BLOCKER` escalates to human, no auto-retry.
+- **Implementation Loop** — standard pair protocol (`REVIEW-READY` -> `REVIEW` -> fix -> `DONE`). Smart test subset per cycle (only diff-touched tests), full suite + lint + build pre-DONE. Mid-run findings persisted to memory + rules + engineer-briefing-amendment, not just discussed in-pane.
 - **GATE 3 (Final-Verify)** — two parallel subagents (goal-backward verifier + code-reviewer) check the diff against task, plan, and standards before merge.
+
+Cross-cutting:
+
+- **Plan quality is enforced.** A skeletal "implement X" plan blocks at GATE 2.
+- **Context economy applies to every agent.** Heavy research, deep codebase reads, and web lookups go to subagents (one message, multiple parallel Task calls when independent). Diff-first reviews. Targeted Read-ranges over full-file dumps.
+- **Edit efficiency is part of the plan.** Pattern replace at >3 sites is a `sed`-job. Boilerplate generation = template + substitution. The plan names the tool.
+- **Few, descriptive commits.** Engineers commit at logical-step granularity during the loop; the human squashes before merge to `main`. Commit messages must be substantial enough that a meaningful squash message can be distilled.
 
 Greenfield repos (no `CLAUDE.md`, no `.claude/rules/`) get a pre-flight step: the first plan bullet is always "generate `.claude/rules/<key>.md` per detected tech stack". Engineers wait until rules are committed before touching production code.
 

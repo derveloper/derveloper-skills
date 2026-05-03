@@ -99,17 +99,82 @@ NOTES:
 - Watering down the subagent prompt to "review the plan". Adversarial framing matters.
 - Treating WARNING as PASS without reading the warnings. Some warnings are blockers in disguise.
 
+### Plan-quality requirements (PFLICHT)
+
+A plan that compiles past GATE 2 must be edit-optimised. Each of the (max ~5) bullets contains:
+
+1. **Concrete files + functions + line ranges.** No "somewhere in `src/`". No "implement auth". The orchestrator is allowed to delegate the search to a subagent, but the resulting plan must be specific.
+2. **Edit strategy.** State what tool fits: `sed -i s/A/B/g <files>` for pattern replace across N>3 spots, `MultiEdit` for clustered changes in one file, `Write` for new files, AST/codemod for structural changes. Avoid implicit "engineer decides" when the strategy is obvious. Three similar lines is a sed; thirty is mandatory.
+3. **Test coverage.** Per bullet: which test files cover the goal of this bullet, and what they assert. If a project is intentionally untested (`Frickel`-marker — one-shot script, demo, throwaway), say so explicitly with a one-line justification. GATE 2 BLOCKERs absent test coverage on non-Frickel projects.
+4. **Parallelisability marker.** Bullets that don't depend on each other are flagged (`PARALLEL: B2,B3`). Subagents for independent research/generation spawn in parallel (one message, multiple `Task` calls), not sequentially.
+5. **Done definition.** Measurable: test green, file exists, function returns X, lint green. Not vague ("works correctly").
+
+A skeletal plan (`add user auth`) is a `GATE-2-BLOCKER`, full stop. The fix is to expand the plan, not retry the subagent on the same input.
+
 ## Implementation Loop
 
 Standard pair protocol (`references/pair-protocol.md`). Engineers wait for `PLAN-LOCKED:` before touching code. Once briefed:
 
 1. Writer codes a logical step.
-2. Writer pings reviewer with `REVIEW-READY: <summary>`.
-3. Reviewer responds `REVIEW: APPROVE` or `REVIEW: <findings>`.
-4. Loop until `APPROVE`. Writer commits and pings `DONE: <sha>` to orchestrator (triple) or human (pair).
-5. Engineers can ping `BLOCKER` upstream at any time.
+2. Writer runs the **smart test subset** (see below) — only tests touching the diff, not the full suite.
+3. Writer pings reviewer with `REVIEW-READY: <summary>`.
+4. Reviewer responds `REVIEW: APPROVE` or `REVIEW: <findings>`.
+5. Loop until `APPROVE`. Writer commits and pings `DONE: <sha>` to orchestrator (triple) or human (pair).
+6. Engineers can ping `BLOCKER` upstream at any time.
 
 The standards block in every briefing forbids `--no-verify`, AI co-author trailers, `ae/oe/ue/ss` substitutes, anti-AI-slop vocabulary, and a pile of other slop sources. Reviewers check standards as part of their review.
+
+### Test strategy (smart subset in loop, full suite pre-DONE)
+
+Running the entire test suite on every `REVIEW-READY` is slow and wasteful. Strategy:
+
+- **In loop:** writer runs only the tests directly touching the diff (same module path, same class, shared fixtures). Target: <30s per cycle. Reviewer does NOT demand a full-suite run.
+- **Pre-DONE:** writer runs the full suite + lint + build once, all green, before pinging `DONE: <sha>`. That's the gate-3 pre-check.
+- **Long suites:** test parallelisation and CI-level splitting belong in the test runner config, not in the pair-loop. If running the full suite once takes >5 minutes, that's a separate item to track.
+
+### Mid-run persistence (don't lose findings to the pane)
+
+When the orchestrator or engineers discover a pattern, policy, or architectural decision during the loop, it MUST be persisted on three layers:
+
+1. **Memory entry** (project-scoped): `/Users/user/.claude/projects/<sanitized-project>/memory/project_<key>.md` plus the `MEMORY.md` index. Only entries that future runs need; not ephemeral loop state.
+2. **Rules file** (in repo): `.claude/rules/<key>.md` for code conventions (test policy, edit pattern, naming). Committed with the run.
+3. **Engineer briefing update** (in-run): if the discovery should change engineer behaviour during this run, the orchestrator pings `PLAN-AMENDMENT: <diff>` to writer + reviewer. Not a fresh `PLAN-LOCKED:` — that would invalidate the loop state.
+
+After persisting, the orchestrator pings the human one line: `[Orch <window>] Persisted: <what> in <where>`.
+
+This is the difference between "we discussed it" and "future runs benefit from it".
+
+### Context economy (every agent, not just the orchestrator)
+
+Each agent (orchestrator, writer, reviewer) keeps its main pane lean. Heavy reads, searches, and research go to subagents or precise tools.
+
+**General (everyone):**
+
+- File search: `rg`/`grep` with line-anchors (`:42`) instead of full `Read` on a 5000-line file.
+- Codebase research with >3 sequential file reads on the same question: spawn `Task(general-purpose)` with a concrete question and "report in <300 words". Multiple independent researches in parallel (one message, multiple Task calls).
+- Web search / doc lookup: subagent. Only the summary lands in the agent's pane.
+- Long tool outputs (stack traces, build logs, JSON dumps): pipe through `head`/`tail`/`grep`/`jq` instead of dumping raw.
+
+**Orchestrator-specific:**
+
+- GATE 2 (plan-check), GATE 3 A (verifier), GATE 3 B (code-reviewer): always subagent, never inline.
+- Re-brief engineers via `/compact` + briefing-file when their token use crosses ~200k (claude) or they feel stale (codex). Orchestrator stays active; the human compacts the orchestrator if needed.
+
+**Writer-specific:**
+
+- Pre-edit: targeted `Read` with `offset`/`limit`, not full-file when >500 lines.
+- Smart test subset (see above), not full suite per cycle.
+
+**Reviewer-specific:**
+
+- Diff-first: `git diff base..HEAD` is the entry point. Read full files only where the diff genuinely needs context.
+- Falsifiable findings ("`src/auth.rs:42` swallows expired-token errors as `None`") instead of "re-read the whole module".
+
+## Commit and merge strategy
+
+Few commits with thorough messages. Engineer commits during the loop are kept in their natural granularity (one logical step per commit, conventional-commits format), and the human squashes before merge to `main`. That means engineer commits must be **descriptive enough** that a meaningful squash message can be distilled from N of them. A commit message of "fix" or "wip" is a `REVIEW: <findings>`-grade problem, not a stylistic nit.
+
+Push happens only after human OK. The squash is the human's job, not the orchestrator's.
 
 ## Gate 3: Final-Verify
 
