@@ -50,7 +50,7 @@ Both `/pair` and `/triple` enforce three quality gates before code lands on the 
 Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Master merges
 ```
 
-- **GATE 1 (Clarify)** — orchestrator (triple) or master (pair) collects assumptions and open questions after recon and asks the user via `AskUserQuestion`. Engineers wait for `PLAN-LOCKED:`.
+- **GATE 1 (Clarify)** — whoever owns the gate (orchestrator in triple, master in pair) calls `AskUserQuestion` directly in their own pane. The triple orchestrator does NOT ping the master for clarify — master only sees a `GATE-1-ESCALATE` if a question is outside the orchestrator's authority. Engineers wait for `PLAN-LOCKED:`.
 - **GATE 2 (Plan-Check)** — one general-purpose subagent verifies the plan goal-backward. `BLOCKER` escalates to master, no auto-retry.
 - **Implementation Loop** — standard pair protocol (`REVIEW-READY` -> `REVIEW` -> fix -> `DONE`). Standards block embedded in every briefing.
 - **GATE 3 (Final-Verify)** — two parallel subagents (goal-backward verifier + code-reviewer) check the diff against task, plan, and standards before merge.

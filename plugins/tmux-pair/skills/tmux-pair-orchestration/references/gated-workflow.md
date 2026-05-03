@@ -14,10 +14,10 @@ This file is the long version. The bundled briefings already encode the workflow
 
 | Mode | Gate 1 (Clarify) | Gate 2 (Plan-Check) | Gate 3 (Final-Verify) |
 |------|-------------------|---------------------|------------------------|
-| **triple** | Orchestrator pings master, master asks user | Orchestrator spawns subagent | Orchestrator spawns two subagents (verifier + code-reviewer) |
-| **pair** | Master asks user directly | Master spawns subagent from their own context | Master spawns two subagents from their own context |
+| **triple** | Orchestrator asks user directly via `AskUserQuestion` (in its own pane) | Orchestrator spawns subagent | Orchestrator spawns two subagents (verifier + code-reviewer) |
+| **pair** | Master asks user directly via `AskUserQuestion` | Master spawns subagent from their own context | Master spawns two subagents from their own context |
 
-The split exists because the master is the only layer with `AskUserQuestion` access. In a triple the orchestrator delegates the user-facing part upward; in a pair the master IS the orchestrator.
+In a triple the orchestrator owns the `AskUserQuestion` call so the master stays unblocked. The master only sees major events (`MAJOR-STEP`, `BLOCKER`, `DONE`, `ABORT`, gate-3 verdicts, plus rare `GATE-1-ESCALATE` if the orchestrator hits a question outside its decision authority). In a pair the master IS the orchestrator and asks directly.
 
 ## Gate 1: Clarify
 
@@ -31,31 +31,15 @@ The split exists because the master is the only layer with `AskUserQuestion` acc
    - assumptions (`A1..An`) the run is implicitly making (defaults, library choices, file layout)
    - open questions (`Q1..Qn`) the user must answer (explicit choices between approaches)
    - pre-flight result: does `./CLAUDE.md` exist? does `.claude/rules/` exist? if greenfield, list of rules-files to generate
-2. Triple orchestrator pings master:
+2. Triple orchestrator calls `AskUserQuestion` ITSELF in its own pane (multiple-choice preferred — forces specificity). Each question gets 2-4 concrete options; the recommended one is the first option suffixed `(Recommended)`. Max four questions per call, sequential calls if more are needed. The master is NOT pinged. Optional one-line FYI to master is fine (`[Orch <window>] GATE-1 starts: N questions to user`), but the orchestrator does not wait on the master.
+3. Pair master calls `AskUserQuestion` directly. Same option/recommendation discipline.
+4. Escalation path (triple only): if a question is outside the orchestrator's decision authority (budget, scope change, stakeholder dependency, or the user is unreachable), ping master:
    ```
-   GATE-1-READY <window-name>
-
-   ANNAHMEN
-   - A1: ...
-   - A2: ...
-
-   OFFENE FRAGEN
-   - Q1: ... (Optionen: a/b/c)
-   - Q2: ...
-
-   PRE-FLIGHT
-   - Rules-Status: vorhanden | greenfield, generieren noetig
-   - Falls greenfield: vorgeschlagene Rules-Files = ...
+   GATE-1-ESCALATE <window-name>
+   <reason>
+   <questions needing master input>
    ```
-   Master uses `AskUserQuestion` (multiple-choice preferred — forces specificity) for each `Q`, then pings back:
-   ```
-   GATE-1-RESPONSE
-   A1: ok
-   A2: revidiert: ...
-   Q1: option B
-   Q2: option A + custom: ...
-   ```
-3. Pair master skips the ping step and asks the user directly via `AskUserQuestion`. The answers go into the master's working memory.
+   Wait for `GATE-1-DECISION` before continuing. Pair has no escalation — master is already the decision layer.
 
 **Skip condition:** no open questions AND every assumption is low-risk (won't change implementation). Rare. Default is: ask.
 
@@ -233,12 +217,14 @@ If `CLAUDE.md` and `.claude/rules/` exist, pre-flight is skipped and existing ru
 
 | Event | From | To | Payload |
 |-------|------|-----|---------|
-| `GATE-1-READY <window>` | orchestrator | master | assumptions, open questions, pre-flight result |
-| `GATE-1-RESPONSE` | master | orchestrator | answers to questions, validated assumptions |
+| `GATE-1-ESCALATE <window>` | orchestrator | master | Triple only. Reason + question(s) outside the orchestrator's decision authority |
+| `GATE-1-DECISION` | master | orchestrator | Triple only. Master's answer to the escalated question(s) |
 | `GATE-2-BLOCKER` | orchestrator/master | master/user | subagent's BLOCKER findings |
 | `PLAN-LOCKED:` | orchestrator/master | engineers | plan + GATE-1 answers + pointers + protocol |
 | `GATE-3-PASS <window>` | orchestrator/master | master/user | diff-stat, commit list |
 | `GATE-3-BLOCKER` | orchestrator/master | master/user | subagent BLOCKERS, suggested next move |
+
+`GATE-1-ESCALATE`/`GATE-1-DECISION` are the ONLY gate-1 events crossing pane boundaries in normal triples. The orchestrator's regular `AskUserQuestion`/answer cycle stays inside its own pane and never reaches the master.
 
 These extend the base pair-protocol vocabulary (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`, etc. — see `references/pair-protocol.md`). Engineers send those; gate events go between orchestrator and master.
 

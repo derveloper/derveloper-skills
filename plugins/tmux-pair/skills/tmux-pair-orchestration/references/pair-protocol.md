@@ -50,12 +50,14 @@ These extend the base events above. They drive the gated workflow described in `
 
 | Event | From | To | When | Payload |
 |-------|------|-----|------|---------|
-| `GATE-1-READY <window>` | orchestrator | master | Recon done, ready for clarify | assumptions (`A1..An`), open questions (`Q1..Qn`), pre-flight result |
-| `GATE-1-RESPONSE` | master | orchestrator | After `AskUserQuestion` returned answers | answers per question, validated/revised assumptions |
+| `GATE-1-ESCALATE <window>` | orchestrator | master | Triple only. Orchestrator can't decide a clarify question alone (budget, scope shift, stakeholder dependency, user unreachable) | reason + question(s) needing master input |
+| `GATE-1-DECISION` | master | orchestrator | Triple only. After master answered the escalation | answer(s), context |
 | `GATE-2-BLOCKER` | orchestrator/master | master/user | Plan-check subagent returned `VERDICT: BLOCKER` | consolidated subagent BLOCKERS, suggested next step |
 | `PLAN-LOCKED:` | orchestrator/master | engineers | After Gate 2 PASS | full plan bullets, GATE-1 answers, recon pointers, pair protocol with peer pane id, escalation pane id |
 | `GATE-3-PASS <window>` | orchestrator/master | master/user | Both Gate-3 subagents returned `VERDICT: PASS` | diff-stat (`git diff --stat base..HEAD`), commit list (`git log --oneline base..HEAD`) |
 | `GATE-3-BLOCKER` | orchestrator/master | master/user | At least one Gate-3 subagent returned `VERDICT: BLOCKER` | consolidated BLOCKERS from verifier + code-reviewer, suggested fix-loop or abort |
+
+GATE-1 events are exceptional. Default GATE-1 traffic stays inside the orchestrator's pane (it calls `AskUserQuestion` directly). The orchestrator only crosses pane boundaries when escalating; the master only sees `GATE-1-DECISION`-shaped events when it gets pinged with `GATE-1-ESCALATE` first.
 
 **Engineers only see `PLAN-LOCKED:`.** All other gate events are between the higher layers. Engineers respond to PLAN-LOCKED with the standard pair loop (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`).
 
