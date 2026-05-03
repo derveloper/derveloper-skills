@@ -226,7 +226,7 @@ Auftrag:
    fehlende Input-Validation, Auth-Bypass.
 4. Quality: Dead Code, ungenutzte Imports, schlechte Naming,
    fehlendes Error-Handling, Code-Duplikation.
-5. Performance NICHT pruefen ausser es ist gleichzeitig Korrektheit.
+5. Performance NICHT prüfen ausser es ist gleichzeitig Korrektheit.
 
 Output: VERDICT + BLOCKERS (file:line, issue, fix-snippet) + WARNINGS.
 ```
