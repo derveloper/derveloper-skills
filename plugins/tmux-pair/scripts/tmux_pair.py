@@ -375,15 +375,40 @@ def make_worktree(project_root: Path, feature: str, base: str) -> tuple[Path, st
     return wt_path, branch
 
 
+def _current_branch(project_root: Path) -> str:
+    rc, out, _ = subprocess_run_capture(
+        ["git", "-C", str(project_root), "rev-parse", "--abbrev-ref", "HEAD"]
+    )
+    if rc != 0 or not out:
+        return "(detached)"
+    return out
+
+
+def subprocess_run_capture(cmd: list[str]) -> tuple[int, str, str]:
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+
 def _common_pair_setup(args: argparse.Namespace) -> tuple[Path, Path, str, str, str]:
-    """Resolve project root, create worktree, return (project_root, wt_path,
-    branch, window_name, master_pane)."""
+    """Resolve project root, create worktree (or skip), return (project_root,
+    wt_path, branch, window_name, master_pane).
+
+    With --no-worktree: wt_path == project, branch == current branch on disk,
+    no `git worktree add`, no new branch. Engineers commit directly on the
+    current branch. Use when the run should land directly on the working tree
+    instead of an isolated branch+worktree pair.
+    """
     project = Path(args.project).expanduser().resolve()
     if not (project / ".git").exists():
         sys.exit(f"error: {project} is not a git repository "
                  f"(no .git directory or file)")
 
-    wt_path, branch = make_worktree(project, args.feature, args.base)
+    no_worktree = bool(getattr(args, "no_worktree", False))
+    if no_worktree:
+        wt_path = project
+        branch = _current_branch(project)
+    else:
+        wt_path, branch = make_worktree(project, args.feature, args.base)
     window_name = f"{project.name}-{slugify(args.feature)}"[:30]
 
     master_pane = os.environ.get("TMUX_PANE", "")
@@ -650,12 +675,13 @@ def _briefing_orchestrator(
     reviewer_pane: str, reviewer_agent: str,
     orchestrator_pane: str, master_pane: str,
     wt_path: Path, branch: str, base: str, project: str, window_name: str,
-    task: str,
+    task: str, mode_note: str = "",
 ) -> str:
     send_writer = _send_command(writer_pane)
     send_reviewer = _send_command(reviewer_pane)
     send_master = _send_command(master_pane)
     gate_prompts = _briefing_gate_prompts(wt_path=wt_path, base=base)
+    mode_block = f"MODE:     {mode_note}\n" if mode_note else ""
     return (
         f"[ROLE: Orchestrator (gated workflow)]\n\n"
         f"Du fuehrst Writer + Reviewer durch einen 4-Gate-Workflow:\n"
@@ -666,6 +692,7 @@ def _briefing_orchestrator(
         f"WORKTREE: {wt_path}\n"
         f"BRANCH:   {branch}\n"
         f"BASE:     {base}\n"
+        f"{mode_block}"
         f"PROJECT:  {project}\n"
         f"WINDOW:   {window_name}\n\n"
         f"PANES\n"
@@ -889,12 +916,22 @@ def cmd_triple(args: argparse.Namespace) -> int:
     _post_boot_slashes(writer_pane, args.writer_agent, writer_name)
     _post_boot_slashes(reviewer_pane, args.reviewer_agent, reviewer_name)
 
+    no_worktree = bool(getattr(args, "no_worktree", False))
+    mode_note = (
+        f"in-place run (kein separater Worktree). Engineers committen direkt "
+        f"im Project-Pfad auf branch '{branch}'. Kein FF-Merge danach noetig. "
+        f"Cleanup = nur Window kill. Fuer GATE-3-Diff: Orchestrator merkt sich "
+        f"den HEAD-SHA bei Run-Start als implicit BASE und nutzt diesen statt "
+        f"--base fuer 'git diff <SHA>..HEAD' und 'git log <SHA>..HEAD'."
+    ) if no_worktree else ""
+
     orchestrator_brief = _briefing_orchestrator(
         writer_pane=writer_pane, writer_agent=args.writer_agent,
         reviewer_pane=reviewer_pane, reviewer_agent=args.reviewer_agent,
         orchestrator_pane=orchestrator_pane, master_pane=master_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         window_name=window_name, task=args.task or "",
+        mode_note=mode_note,
     )
     writer_brief = _briefing_triple_engineer(
         role="Writer", partner_role="reviewer", partner_pane=reviewer_pane,
@@ -918,6 +955,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
     print(json.dumps({
         "mode": "triple",
         "worktree": str(wt_path),
+        "no_worktree": no_worktree,
         "branch": branch,
         "base": args.base,
         "window": window_name,
@@ -1142,6 +1180,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="task description sent to both agents")
     pa.add_argument("--writer-agent", default="claude")
     pa.add_argument("--reviewer-agent", default="codex")
+    pa.add_argument("--no-worktree", action="store_true",
+                    help="skip git worktree, run directly in --project on its current branch")
     pa.set_defaults(func=cmd_pair)
 
     tr = sub.add_parser("triple",
@@ -1154,6 +1194,8 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--writer-agent", default="claude")
     tr.add_argument("--reviewer-agent", default="codex")
     tr.add_argument("--orchestrator-agent", default="claude")
+    tr.add_argument("--no-worktree", action="store_true",
+                    help="skip git worktree, run directly in --project on its current branch")
     tr.set_defaults(func=cmd_triple)
 
     li = sub.add_parser("list", help="list panes in the current session")
