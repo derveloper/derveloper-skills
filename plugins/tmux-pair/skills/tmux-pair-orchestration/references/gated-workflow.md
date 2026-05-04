@@ -111,6 +111,19 @@ A plan that compiles past GATE 2 must be edit-optimised. Each of the (max ~5) bu
 
 A skeletal plan (`add user auth`) is a `GATE-2-BLOCKER`, full stop. The fix is to expand the plan, not retry the subagent on the same input.
 
+### Plan-Update-Commit (mid-run drift)
+
+When a bullet in the loop hits a hard cap (LOC limit, file-size cap, dependency-count cap) or its estimate drifts more than ~50%, the writer commits a `docs(plan-amendment): ...` BEFORE the implementation commit that breaks the cap. Format:
+
+```
+docs(plan-amendment): <Bullet> LOC +N split <file> -> <new-file> (Plan vN)
+docs(plan-amendment): <Bullet> Estimate +X percent because <reason> (Plan vN)
+```
+
+`REVIEW-READY` on a bullet with documented drift but no preceding amendment commit is a `BLOCK`. This catches cap-breaker drift before it lands as a one-line review-finding ("file is over the cap") at GATE 3.
+
+Source: this rule was synthesised from real BLOCKERs in the GTD/example-project runs (`chat.js` 183/200, Hermes T4 `skills.rs` 504 over cap, Plan T2 estimated 265 LOC actual 480 = 1.8x).
+
 ## Implementation Loop
 
 Standard pair protocol (`references/pair-protocol.md`). Engineers wait for `PLAN-LOCKED:` before touching code. Once briefed:
@@ -123,6 +136,37 @@ Standard pair protocol (`references/pair-protocol.md`). Engineers wait for `PLAN
 6. Engineers can ping `BLOCKER` upstream at any time.
 
 The standards block in every briefing forbids `--no-verify`, AI co-author trailers, `ae/oe/ue/ss` substitutes, anti-AI-slop vocabulary, and a pile of other slop sources. Reviewers check standards as part of their review.
+
+### Recall-Discipline + Bullet-Start-Ritual
+
+Two patterns the briefings enforce so memory and rules don't get ignored mid-run:
+
+- **Recall-discipline:** before every sensitive action (commit, push, external API, Jira post, kubectl on prod, DB mutation), the engineer cites the relevant rule file plus memory entry in their own output. Format: `Pre-Flight commit: anti-regression.md (REVIEW-READY-Format), feedback-workspace-tests.md (workspace-gate pflicht).` Trivia (local edits, read-only calls, test runs) skip the ritual.
+- **Bullet-start ritual:** before the first code edit on a new plan-bullet, the engineer posts a short block with the bullet's class (UI / Backend / Migration / Tooling / Doc), relevant rules, relevant memory, and the common BLOCKER-classes for that class. Repo's own `pre-flight-checklists.md` (if present) supplies the class-specific lists. If the class is unclear: ping orchestrator/master, don't guess.
+
+Both rituals exist because in the 48h prior to the rules-from-sessions pair-run, rules were ignored 3-4 times per cycle (workspace-test skipped, MCP tool wrong, schroeder for example-company). The fix wasn't more rules; it was forcing the engineer to put the rule in their pane-context at the moment of risk.
+
+### REVIEW-READY format (3 mandatory fields)
+
+Engineer pings without these three fields are blocked by the reviewer without code review:
+
+1. **Was geändert** — bullet/pain number + files + LOC-diff or NEW marker.
+2. **Verifikation** — concrete result. For code bullets: `workspace-gate=PASS` plus test-run output (e.g. `cargo-nextest "247 passed 0 failed"`). For doc-only: `workspace-gate=N/A doc-only`.
+3. **Bezug** — which plan-bullet / pain-point. So the reviewer knows the acceptance criterion.
+
+Workspace-gate is mandatory: code bullets must run their test suite (or smart test subset, if so planned) green BEFORE pinging `REVIEW-READY`. "Tests still running" is a discipline violation, not a status.
+
+### CLARIFY-NEEDED (engineer needs a user decision)
+
+If the engineer hits a question that requires a user decision (scope change, behavior choice, UX, architectural call) — not just a `BLOCKER` (broken test/build) — they ping:
+
+```
+CLARIFY-NEEDED: <question + 2-4 options>
+```
+
+In a pair, the master receives this and forwards via `AskUserQuestion`. In a triple, the orchestrator receives this and uses its own `AskUserQuestion` in its pane (the triple already has the orchestrator owning the user dialog so the human stays unblocked).
+
+Engineers do NOT decide user-facing questions on their own. "I'll just pick option A" with no recall is the failure mode this exists to prevent.
 
 ### Test strategy (smart subset in loop, full suite pre-DONE)
 
@@ -175,6 +219,19 @@ Each agent (orchestrator, writer, reviewer) keeps its main pane lean. Heavy read
 Few commits with thorough messages. Engineer commits during the loop are kept in their natural granularity (one logical step per commit, conventional-commits format), and the human squashes before merge to `main`. That means engineer commits must be **descriptive enough** that a meaningful squash message can be distilled from N of them. A commit message of "fix" or "wip" is a `REVIEW: <findings>`-grade problem, not a stylistic nit.
 
 Push happens only after human OK. The squash is the human's job, not the orchestrator's.
+
+### COMPLETE-Ping format (NACH GATE-3, never before)
+
+The orchestrator/master sends `COMPLETE` to the user only AFTER GATE 3 returned PASS. Required format:
+
+```
+COMPLETE: <Phase>. gate-3=PASS via <verifier-name + code-reviewer-name>.
+<diff-stat or commit list>. Bezug: <plan goals all met>.
+```
+
+If the master skips GATE 3, the reviewer is allowed to start a verify run on its own and mark the COMPLETE as premature. Master does not commit against a GATE-3 FAIL without explicit user escalation.
+
+Source: orgid Phase 2b sent COMPLETE before GATE 3, then 30 min later came back with three real bugs in B5. Trust erodes faster than the time saved.
 
 ## Gate 3: Final-Verify
 
