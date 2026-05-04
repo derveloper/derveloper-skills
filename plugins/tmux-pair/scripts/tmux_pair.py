@@ -36,6 +36,18 @@ DEFAULT_AGENTS: dict[str, str] = {
     "codex": "codex --dangerously-bypass-approvals-and-sandbox",
 }
 
+# Default Claude model. Opus 4.6 hat 200k Context-Window (vs Opus 4.7 mit 1M).
+# Override per Spawn via --claude-model. Wenn Modell wechselt, sollte auch
+# DEFAULT_COMPACT_THRESHOLD_K angepasst werden (siehe monitor-Subcommand).
+DEFAULT_CLAUDE_MODEL = "claude-opus-4-6"
+
+# Compact-Watcher Default: bei diesem Token-Wert pingt der Watcher den
+# Orchestrator. Conservative für 200k-Context-Modelle (Opus 4.6 = 200k):
+# 140k entspricht 70% Context-Auslastung, lässt 60k Headroom für Re-Brief
+# und nächste Bullet. Bei 1M-Context-Modellen (Opus 4.7) kann der User
+# --threshold-k 800 setzen.
+DEFAULT_COMPACT_THRESHOLD_K = 140
+
 CONFIG_PATH = Path.home() / ".config" / "tmux-pair" / "agents.json"
 
 
@@ -291,10 +303,16 @@ def spawn_pane(
     return pane_id
 
 
-def _post_boot_slashes(pane_id: str, agent: str, display_name: str) -> None:
-    """Inject /effort max (claude) and /rename <name> after the agent is ready.
-    Caller MUST call _wait_for_agent_ready or _wait_panes_ready first."""
+def _post_boot_slashes(
+    pane_id: str, agent: str, display_name: str,
+    claude_model: str = DEFAULT_CLAUDE_MODEL,
+) -> None:
+    """Inject /model + /effort max (claude) and /rename <name> after the agent
+    is ready. Caller MUST call _wait_for_agent_ready or _wait_panes_ready first.
+    Order matters for claude: /model BEFORE /effort max so the effort flag is
+    set on the freshly switched model."""
     if agent == "claude":
+        _send_slash_command_sync(pane_id, f"/model {claude_model}")
         _send_slash_command_sync(pane_id, "/effort max")
     if display_name:
         _send_slash_command_sync(pane_id, f"/rename {display_name}")
@@ -312,7 +330,10 @@ def cmd_spawn(args: argparse.Namespace) -> int:
 
     session = args.session or current_session()
     window_name = args.window
-    boot = agents[args.agent]
+    boot = _boot_command_with_standards(
+        agent=args.agent, agents_dict=agents,
+        window_name=window_name, role=args.name or "agent",
+    )
     if args.task:
         boot = f"{boot} {shlex.quote(args.task)}"
 
@@ -326,7 +347,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         display_name=args.name or "",
     )
     ready = _wait_for_agent_ready(pane_id, args.agent, timeout=70)
-    _post_boot_slashes(pane_id, args.agent, args.name or "")
+    _post_boot_slashes(pane_id, args.agent, args.name or "",
+                       claude_model=args.claude_model)
     print(json.dumps({"pane_id": pane_id, "window": window_name,
                       "session": session, "agent": args.agent,
                       "display_name": args.name or None,
@@ -863,6 +885,68 @@ PAIR_PROTOCOL_BLOCK = (
 )
 
 
+# Durable standards prompt: konsolidierte Standards die ÜBER /compact und
+# Context-Resets hinweg gelten müssen. Wird per --append-system-prompt in
+# claude geladen, sodass sie nicht im User-Message-Briefing alleine
+# stehen (User-Messages werden beim Compact zusammengefasst, System-Prompt
+# nicht). Codex bekommt sie weiterhin im Briefing als User-Message bis
+# eine codex-spezifische Lösung evaluiert ist.
+DURABLE_STANDARDS_PROMPT = (
+    "# tmux-pair Engineer Durable Standards\n\n"
+    "Diese Standards gelten für jede Pair- und Triple-Session. Sie überleben\n"
+    "/compact und Context-Resets weil sie im System-Prompt sitzen statt nur\n"
+    "im User-Message-Briefing.\n\n"
+    "Run-spezifischer Kontext (Plan, Pane-IDs, Task, Worktree-Pfad) kommt\n"
+    "weiterhin per User-Message-Briefing (`PLAN-LOCKED:`-Send vom Master oder\n"
+    "Orchestrator). Wenn du nach /compact wieder reinkommst und keinen Plan\n"
+    "siehst: ping deinen Master/Orchestrator mit `CLARIFY-NEEDED: state\n"
+    "verloren nach compact, brauche Re-Brief mit Plan-Bullets + aktuelle\n"
+    "Phase`. Niemals raten was der Plan war.\n\n"
+    f"{STANDARDS_BLOCK}\n"
+    f"{RECALL_DISCIPLINE_BLOCK}\n"
+    f"{BULLET_START_RITUAL_BLOCK}\n"
+    f"{PAIR_PROTOCOL_BLOCK}\n"
+    "## CLARIFY-NEEDED Vokabular\n\n"
+    "Bei User-Decision-Bedarf (Scope, Behavior, UX, Architektur, Migrations-\n"
+    "Strategie, Naming-Konflikt, Trade-off der nicht im Plan steht) ping\n"
+    "Master/Orchestrator mit:\n\n"
+    "    CLARIFY-NEEDED: <Frage + 2-4 Optionen mit Trade-offs>\n\n"
+    "Niemals selbst entscheiden. Master nutzt AskUserQuestion (Pair-Mode),\n"
+    "Orchestrator nutzt eigenes AskUserQuestion in seiner Pane (Triple-Mode,\n"
+    "Human bleibt unblocked). Anti-Pattern: 'ich nehme Option A' ohne Recall\n"
+    "ist genau die Failure-Klasse die diese Regel verhindert.\n"
+)
+
+
+def _write_durable_standards_file(window_name: str, role: str) -> Path:
+    """Materialise DURABLE_STANDARDS_PROMPT into a /tmp file so claude can
+    load it via --append-system-prompt. Path is deterministic per pane (window
+    + role) so re-spawns and inspections find the same file. Returns the path.
+    """
+    safe_window = slugify(window_name)
+    safe_role = slugify(role) if role else "agent"
+    path = Path(f"/tmp/tmux-pair-durable-{safe_window}-{safe_role}.md")
+    path.write_text(DURABLE_STANDARDS_PROMPT, encoding="utf-8")
+    return path
+
+
+def _boot_command_with_standards(
+    *, agent: str, agents_dict: dict[str, str], window_name: str, role: str,
+) -> str:
+    """Build the boot command for an agent. For claude, append the durable
+    standards file via --append-system-prompt so the standards survive
+    /compact. For other agents (codex), return the boot command unchanged
+    until a codex-specific mechanism is evaluated."""
+    boot = agents_dict[agent]
+    if agent != "claude":
+        return boot
+    standards_path = _write_durable_standards_file(window_name, role)
+    return (
+        f'{boot} --append-system-prompt '
+        f'"$(cat {shlex.quote(str(standards_path))})"'
+    )
+
+
 def _briefing_gate_prompts(*, wt_path: Path, base: str) -> str:
     """Inline subagent-call templates the orchestrator copies into Task() calls.
 
@@ -1334,12 +1418,20 @@ def cmd_pair(args: argparse.Namespace) -> int:
 
     writer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
-        agent=args.writer_agent, boot_command=agents[args.writer_agent],
+        agent=args.writer_agent,
+        boot_command=_boot_command_with_standards(
+            agent=args.writer_agent, agents_dict=agents,
+            window_name=window_name, role="writer",
+        ),
         split="none", display_name=writer_name,
     )
     reviewer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
-        agent=args.reviewer_agent, boot_command=agents[args.reviewer_agent],
+        agent=args.reviewer_agent,
+        boot_command=_boot_command_with_standards(
+            agent=args.reviewer_agent, agents_dict=agents,
+            window_name=window_name, role="reviewer",
+        ),
         split="h", display_name=reviewer_name,
     )
 
@@ -1354,8 +1446,10 @@ def cmd_pair(args: argparse.Namespace) -> int:
     )
 
     # Slash-commands now that the TUIs accept input cleanly.
-    _post_boot_slashes(writer_pane, args.writer_agent, writer_name)
-    _post_boot_slashes(reviewer_pane, args.reviewer_agent, reviewer_name)
+    _post_boot_slashes(writer_pane, args.writer_agent, writer_name,
+                       claude_model=args.claude_model)
+    _post_boot_slashes(reviewer_pane, args.reviewer_agent, reviewer_name,
+                       claude_model=args.claude_model)
 
     writer_brief = _briefing_pair(
         role="Writer", partner_role="reviewer", partner_pane=reviewer_pane,
@@ -1411,17 +1505,29 @@ def cmd_triple(args: argparse.Namespace) -> int:
     orchestrator_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
         agent=args.orchestrator_agent,
-        boot_command=agents[args.orchestrator_agent], split="none",
+        boot_command=_boot_command_with_standards(
+            agent=args.orchestrator_agent, agents_dict=agents,
+            window_name=window_name, role="orchestrator",
+        ),
+        split="none",
         display_name=orchestrator_name,
     )
     writer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
-        agent=args.writer_agent, boot_command=agents[args.writer_agent],
+        agent=args.writer_agent,
+        boot_command=_boot_command_with_standards(
+            agent=args.writer_agent, agents_dict=agents,
+            window_name=window_name, role="writer",
+        ),
         split="v", display_name=writer_name,
     )
     reviewer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
-        agent=args.reviewer_agent, boot_command=agents[args.reviewer_agent],
+        agent=args.reviewer_agent,
+        boot_command=_boot_command_with_standards(
+            agent=args.reviewer_agent, agents_dict=agents,
+            window_name=window_name, role="reviewer",
+        ),
         split="h", display_name=reviewer_name,
     )
 
@@ -1437,9 +1543,12 @@ def cmd_triple(args: argparse.Namespace) -> int:
     )
 
     # Slash-commands post-ready.
-    _post_boot_slashes(orchestrator_pane, args.orchestrator_agent, orchestrator_name)
-    _post_boot_slashes(writer_pane, args.writer_agent, writer_name)
-    _post_boot_slashes(reviewer_pane, args.reviewer_agent, reviewer_name)
+    _post_boot_slashes(orchestrator_pane, args.orchestrator_agent, orchestrator_name,
+                       claude_model=args.claude_model)
+    _post_boot_slashes(writer_pane, args.writer_agent, writer_name,
+                       claude_model=args.claude_model)
+    _post_boot_slashes(reviewer_pane, args.reviewer_agent, reviewer_name,
+                       claude_model=args.claude_model)
 
     no_worktree = bool(getattr(args, "no_worktree", False))
     mode_note = (
@@ -1771,6 +1880,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--task", default="")
     sp.add_argument("--name", default="",
                     help="display name; sent as /rename + tmux pane-title post-boot")
+    sp.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
+                    help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}). "
+                         "Sent as /model post-boot before /effort max. "
+                         "Switch to claude-opus-4-7 for 1M-Context.")
     sp.set_defaults(func=cmd_spawn)
 
     se = sub.add_parser("send", help="send text to a pane")
@@ -1791,6 +1904,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="task description sent to both agents")
     pa.add_argument("--writer-agent", default="claude")
     pa.add_argument("--reviewer-agent", default="codex")
+    pa.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
+                    help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}). "
+                         "Sent as /model post-boot before /effort max for any "
+                         "claude pane. Codex uses gpt-5.5 xhigh by default.")
     pa.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
     pa.set_defaults(func=cmd_pair)
@@ -1805,6 +1922,11 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--writer-agent", default="claude")
     tr.add_argument("--reviewer-agent", default="codex")
     tr.add_argument("--orchestrator-agent", default="claude")
+    tr.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
+                    help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}). "
+                         "Sent as /model post-boot before /effort max for any "
+                         "claude pane (Writer+Orchestrator). Codex uses gpt-5.5 "
+                         "xhigh by default.")
     tr.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
     tr.set_defaults(func=cmd_triple)
@@ -1828,8 +1950,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="orchestrator pane to ping when threshold crossed")
     mo.add_argument("--panes", nargs="+", required=True,
                     help="engineer panes to watch (1+)")
-    mo.add_argument("--threshold-k", type=int, default=180,
-                    help="token threshold in thousands (default: 180)")
+    mo.add_argument("--threshold-k", type=int, default=DEFAULT_COMPACT_THRESHOLD_K,
+                    help=f"token threshold in thousands (default: "
+                         f"{DEFAULT_COMPACT_THRESHOLD_K}, sized for 200k-Context-"
+                         f"models like Opus 4.6 = 70 percent. For 1M-Context "
+                         f"models like Opus 4.7 set --threshold-k 800).")
     mo.add_argument("--interval-sec", type=int, default=180,
                     help="poll interval in seconds (default: 180)")
     mo.add_argument("--cooldown-sec", type=int, default=600,
