@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Plan-Check → Loop → Final-Verify with REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.3.0
+version: 0.4.0
 ---
 
 # tmux-pair-orchestration
@@ -62,9 +62,9 @@ Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> G
 ```
 
 - **GATE 1 (Clarify)** — whoever owns the gate (orchestrator in triple, human in pair) calls `AskUserQuestion` directly in their own pane. The triple orchestrator does NOT ping the human for clarify — human only sees a `GATE-1-ESCALATE` if a question is outside the orchestrator's authority. Engineers wait for `PLAN-LOCKED:`.
-- **GATE 2 (Plan-Check)** — one general-purpose subagent verifies the plan goal-backward AND checks plan quality (concrete files+lines per bullet, edit strategy named, test coverage per bullet, parallelisation markers, measurable done-definition). `BLOCKER` escalates to human, no auto-retry.
+- **GATE 2 (Plan-Check)** — one scoped subagent (`tmux-pair:gate-2-plan-check`, Sonnet 4.6, Read+Grep+Glob+Bash, NO Edit/Write tools) verifies the plan goal-backward AND checks plan quality. `BLOCKER` escalates to human, no auto-retry. Scoped tools = the agent structurally cannot commit code instead of just verdicting.
 - **Implementation Loop** — standard pair protocol (`REVIEW-READY` -> `REVIEW` -> fix -> `DONE`). Smart test subset per cycle (only diff-touched tests), full suite + lint + build pre-DONE. Mid-run findings persisted to memory + rules + engineer-briefing-amendment, not just discussed in-pane.
-- **GATE 3 (Final-Verify)** — two parallel subagents (goal-backward verifier + code-reviewer) check the diff against task, plan, and standards before merge.
+- **GATE 3 (Final-Verify)** — two parallel scoped subagents check the diff: `tmux-pair:gate-3-verifier` (Haiku 4.5, runs build/test, checks plan-bullet coverage) + `tmux-pair:gate-3-code-reviewer` (Sonnet 4.6, adversarial diff review). Both PASS or human pings the master.
 
 The implementation loop adds five protocol elements that the briefings enforce:
 

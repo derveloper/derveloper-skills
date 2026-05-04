@@ -55,36 +55,18 @@ In a triple the orchestrator owns the `AskUserQuestion` call so the human stays 
 
 **Trigger:** orchestrator/human has produced a plan as 2-5 large bullets, each pointing to 1-3 files or components.
 
-**Mechanism:** spawn ONE general-purpose subagent with this prompt template (rendered concretely by `_briefing_gate_prompts()` in `scripts/tmux_pair.py`):
+**Mechanism:** spawn ONE `tmux-pair:gate-2-plan-check` subagent (Sonnet 4.6, scoped tools `Read+Grep+Glob+Bash`, NO `Edit`/`Write` so it cannot accidentally commit code instead of just verdicting). The agent's checklist + output format live in its system prompt (`agents/gate-2-plan-check.md`). The orchestrator passes only runtime inputs as the Task user-message:
 
 ```
-Adversarial Plan-Check vor Implementierung. Goal-backward.
-
 Task vom Human: {TASK}
 User-Antworten aus GATE 1: {CLARIFY_RESPONSE}
 Plan (Bullets): {PLAN_BULLETS}
 Worktree: {WT_PATH}
 Base: {BASE}
-
-Auftrag (adversariale Stance, gehe von Luecken aus):
-1. Lies CLAUDE.md und .claude/rules/*.md im Worktree.
-2. Decken die Bullets alle Anforderungen aus Task + Clarify-Antworten?
-3. Fehlt Wiring (Komponente erstellt aber nicht eingebunden)?
-4. Sind Bullets specific genug (kein 'implement auth')?
-5. Scope-Sanity: max ~5 große Bullets, sonst Split-Empfehlung.
-6. Konflikt mit existierenden Rules / CLAUDE.md?
-7. Pruefe Standards-Block (Umlaute, conventional commits, kein AI-Co-Author).
-8. Falsifiziere: was muss waehrend Implementierung schiefgehen?
-
-Output:
-VERDICT: PASS | BLOCKER | WARNING
-BLOCKERS:
-- <falsifizierbarer Punkt mit Fix-Hinweis>
-WARNINGS:
-- <Punkt>
-NOTES:
-- <freie Notizen>
+Run your checklist and return your VERDICT block.
 ```
+
+Output is `VERDICT: PASS | WARNING | BLOCKER` plus `BLOCKERS:`, `WARNINGS:`, `NOTES:` lists. The full checklist (13 items: coverage, wiring, specificity, scope-sanity, rule-conflicts, standards, falsifiability, plan-quality per bullet, tests, parallelisation, edit-efficiency, frontend-smoke + design-skill) is in the agent file, single source of truth.
 
 **Verdict handling:**
 
@@ -195,14 +177,18 @@ Each agent (orchestrator, writer, reviewer) keeps its main pane lean. Heavy read
 **General (everyone):**
 
 - File search: `rg`/`grep` with line-anchors (`:42`) instead of full `Read` on a 5000-line file.
-- Codebase research with >3 sequential file reads on the same question: spawn `Task(general-purpose)` with a concrete question and "report in <300 words". Multiple independent researches in parallel (one message, multiple Task calls).
-- Web search / doc lookup: subagent. Only the summary lands in the agent's pane.
+- Codebase research with >3 sequential file reads on the same question: spawn `Task(subagent_type='Explore')` with a concrete question and "report in <300 words". Built-in `Explore` runs on Haiku (read-only, cheap, fast). Multiple independent researches in parallel (one message, multiple Task calls).
+- Web search / external doc lookup: spawn a `general-purpose` subagent (more tools). Only the summary lands in the agent's pane.
 - Long tool outputs (stack traces, build logs, JSON dumps): pipe through `head`/`tail`/`grep`/`jq` instead of dumping raw.
 
 **Orchestrator-specific:**
 
-- GATE 2 (plan-check), GATE 3 A (verifier), GATE 3 B (code-reviewer): always subagent, never inline.
-- Re-brief engineers via `/compact` + briefing-file when their token use crosses ~200k (claude) or they feel stale (codex). Orchestrator stays active; the human compacts the orchestrator if needed.
+- GATE 2 (plan-check): `tmux-pair:gate-2-plan-check` (Sonnet 4.6, scoped).
+- GATE 3 A (verifier): `tmux-pair:gate-3-verifier` (Haiku 4.5, scoped).
+- GATE 3 B (code-reviewer): `tmux-pair:gate-3-code-reviewer` (Sonnet 4.6, scoped).
+- RECON: built-in `Explore` (Haiku, read-only).
+  Always subagent for these four roles, never inline. Never `general-purpose` for the gates: the scoped plugin agents have appropriate model + restricted tool-set, both protect against cost blowup and tool misuse (e.g. plan-check accidentally committing code).
+- Re-brief engineers via `tmux_pair.py compact <pane> --briefing-file <file> --focus '<one-liner>'` when the watcher pings (see DUTY 0). The plugin sends `/compact <focus>` directly into the engineer pane and follows up with the re-brief — never tell the engineer to run `/compact` themselves. Orchestrator stays active; the human compacts the orchestrator if needed.
 
 **Writer-specific:**
 
@@ -220,13 +206,13 @@ In pair mode the human IS the orchestrator. The plugin spawns engineers and prin
 
 The duties:
 
-1. **Recon** — read upstream docs, grep the codebase, identify pointers. Heavy reads via subagent (`Task(general-purpose)` with a concrete question and "report in <300 words").
+1. **Recon** — read upstream docs, grep the codebase, identify pointers. Heavy reads via `Task(subagent_type='Explore')` (Haiku, read-only) with a concrete question and "report in <300 words". External docs / web go to a `general-purpose` subagent.
 2. **GATE 1 (Clarify)** — call `AskUserQuestion` directly. The master is its own user-decision layer. Empty user input on day one is the most expensive failure mode in a long pair-run.
 3. **Plan** — max ~5 large bullets, each with concrete files+lines, edit strategy, test coverage, parallelisability marker, measurable done-definition.
-4. **GATE 2 (Plan-Check)** — spawn one `general-purpose` subagent with the plan-check prompt template. `BLOCKER` → revise the plan or escalate to user (don't auto-retry).
+4. **GATE 2 (Plan-Check)** — spawn one `tmux-pair:gate-2-plan-check` subagent (Sonnet 4.6, scoped, no Edit/Write). `BLOCKER` → revise the plan or escalate to user (don't auto-retry).
 5. **Brief engineers** — send `PLAN-LOCKED:` with the writer-briefing and reviewer-briefing as separate messages.
 6. **Watch loop** — engineers ping `REVIEW-READY` / `BLOCKER` / `CLARIFY-NEEDED`. Master forwards `CLARIFY-NEEDED` via `AskUserQuestion`, escalates `BLOCKER` to user when out of decision authority, otherwise nudges and waits.
-7. **GATE 3 (Final-Verify)** — spawn TWO `general-purpose` subagents in parallel (verifier + code-reviewer) after writer's `DONE` ping.
+7. **GATE 3 (Final-Verify)** — spawn TWO scoped subagents in parallel after writer's `DONE` ping: `tmux-pair:gate-3-verifier` (Haiku 4.5) + `tmux-pair:gate-3-code-reviewer` (Sonnet 4.6).
 8. **COMPLETE** — only after `GATE 3 PASS`, with `gate-3=PASS via <verifier-name + code-reviewer-name>` mandatory in the ping.
 9. **Cleanup** — merge, push, kill window, remove worktree, delete branch. Strictly the master's call, never the engineers'.
 
@@ -257,54 +243,13 @@ Source: orgid Phase 2b sent COMPLETE before GATE 3, then 30 min later came back 
 
 **Trigger:** writer pinged `DONE`, all `REVIEW-READY` cycles ended in `APPROVE`.
 
-**Mechanism:** spawn TWO general-purpose subagents in parallel.
+**Mechanism:** spawn TWO scoped subagents in parallel (one message, two Task calls):
 
-**Subagent A — Goal-Backward Verifier:**
+- **Subagent A — `tmux-pair:gate-3-verifier`** (Haiku 4.5, Read+Grep+Glob+Bash). Reads the plan + diff (`git diff base..HEAD`), runs the project's build/test commands, checks plan-bullet coverage. Cheap and fast — Haiku is sufficient for goal-backward coverage checks because the work is read-only matching of bullets to commits. Inputs passed as Task user-message: task, plan-bullets, clarify-answers, worktree, base, diff-stat, commit-log. The full checklist (9 items: rules-read, goal-backward, deep-file-reads, wiring, real-vs-stub tests, build/test commands by language, standards, frontend-smoke, worktree-clean) lives in `agents/gate-3-verifier.md`.
 
-```
-Adversarial Goal-Backward-Verification nach Implementierung.
+- **Subagent B — `tmux-pair:gate-3-code-reviewer`** (Sonnet 4.6, Read+Grep+Glob+Bash). Adversarial diff review against project rules. Sonnet here, not Haiku — style-subtleties, security edge cases, anti-AI-slop detection need nuance Haiku misses. Inputs: worktree, base, diff-range. The full checklist (9 items: rules-read, bugs, security, quality, performance-only-if-correctness, worktree-state, frontend-smoke, anti-AI-slop, standards conformance) lives in `agents/gate-3-code-reviewer.md`.
 
-Task vom Human: {TASK}
-Plan (Bullets): {PLAN_BULLETS}
-User-Antworten aus GATE 1: {CLARIFY_RESPONSE}
-Worktree: {WT_PATH}
-Base: {BASE}
-Diff-Stat: {DIFF_STAT}
-Commit-Log: {COMMIT_LOG}
-
-Auftrag (adversariale Stance, gehe von 'Goal nicht erreicht' aus):
-1. Lies CLAUDE.md + .claude/rules/*.md im Worktree.
-2. Goal-backward: Liefert der aktuelle Code-Stand wirklich was Task verlangt?
-3. Lies relevante Files (nicht nur Commit-Messages, nicht nur Diff).
-4. Wiring: Sind erstellte Komponenten auch eingebunden?
-5. Tests: Sind sie real (Behaviour) oder Stub (existieren nur)?
-6. Standards: pruefe Umlaute, conventional commits, kein AI-Co-Author,
-   keine ae/oe/ue/ss-Ersatzschreibung, kein --no-verify in Hooks-Output.
-7. Falsifiziere etwaige SUMMARY-Behauptungen der Engineers.
-
-Output: VERDICT + BLOCKERS + WARNINGS + NOTES (same shape as GATE 2).
-```
-
-**Subagent B — Code-Reviewer:**
-
-```
-Adversariales Code-Review der Diff vor Final-Merge.
-
-Worktree: {WT_PATH}
-Base: {BASE}
-Diff-Range: {COMMIT_LOG}
-
-Auftrag:
-1. Lies CLAUDE.md + .claude/rules/*.md.
-2. Bugs: Logikfehler, Null-Checks, Edge Cases, Off-by-One, Race Conditions.
-3. Security: Injection, XSS, hardcoded Secrets, unsafe Crypto,
-   fehlende Input-Validation, Auth-Bypass.
-4. Quality: Dead Code, ungenutzte Imports, schlechte Naming,
-   fehlendes Error-Handling, Code-Duplikation.
-5. Performance NICHT prüfen ausser es ist gleichzeitig Korrektheit.
-
-Output: VERDICT + BLOCKERS (file:line, issue, fix-snippet) + WARNINGS.
-```
+Output for both: `VERDICT: PASS | WARNING | BLOCKER` plus `BLOCKERS:`, `WARNINGS:`, `NOTES:` lists with `file:line` falsifiable findings.
 
 **Verdict handling:**
 
