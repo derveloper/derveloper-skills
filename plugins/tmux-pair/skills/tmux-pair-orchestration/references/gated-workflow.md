@@ -214,6 +214,24 @@ Each agent (orchestrator, writer, reviewer) keeps its main pane lean. Heavy read
 - Diff-first: `git diff base..HEAD` is the entry point. Read full files only where the diff genuinely needs context.
 - Falsifiable findings ("`src/auth.rs:42` swallows expired-token errors as `None`") instead of "re-read the whole module".
 
+## Pair-Master duties (when there's no orchestrator)
+
+In pair mode the human IS the orchestrator. The plugin spawns engineers and prints a JSON receipt with pane IDs; everything beyond that is the master's job. The master's duties echo the orchestrator-briefing block from `_briefing_orchestrator` in `scripts/tmux_pair.py`, but live in the master's conversation context (the human's own `claude` session) instead of a kodifizierten briefing block. If you maintain a long-running master (e.g. a daily session), keep these duties in the master's system context (`~/.claude/CLAUDE.md`, project `CLAUDE.md`, or a memory file).
+
+The duties:
+
+1. **Recon** — read upstream docs, grep the codebase, identify pointers. Heavy reads via subagent (`Task(general-purpose)` with a concrete question and "report in <300 words").
+2. **GATE 1 (Clarify)** — call `AskUserQuestion` directly. The master is its own user-decision layer. Empty user input on day one is the most expensive failure mode in a long pair-run.
+3. **Plan** — max ~5 large bullets, each with concrete files+lines, edit strategy, test coverage, parallelisability marker, measurable done-definition.
+4. **GATE 2 (Plan-Check)** — spawn one `general-purpose` subagent with the plan-check prompt template. `BLOCKER` → revise the plan or escalate to user (don't auto-retry).
+5. **Brief engineers** — send `PLAN-LOCKED:` with the writer-briefing and reviewer-briefing as separate messages.
+6. **Watch loop** — engineers ping `REVIEW-READY` / `BLOCKER` / `CLARIFY-NEEDED`. Master forwards `CLARIFY-NEEDED` via `AskUserQuestion`, escalates `BLOCKER` to user when out of decision authority, otherwise nudges and waits.
+7. **GATE 3 (Final-Verify)** — spawn TWO `general-purpose` subagents in parallel (verifier + code-reviewer) after writer's `DONE` ping.
+8. **COMPLETE** — only after `GATE 3 PASS`, with `gate-3=PASS via <verifier-name + code-reviewer-name>` mandatory in the ping.
+9. **Cleanup** — merge, push, kill window, remove worktree, delete branch. Strictly the master's call, never the engineers'.
+
+The master does NOT code, does NOT review, does NOT commit on behalf of the engineers, does NOT decide user-facing questions on its own. The triple orchestrator does the same job but in a dedicated pane; if you find yourself in pair-mode running a task that needs all of duties 1-9, switch to triple next time.
+
 ## Commit and merge strategy
 
 Few commits with thorough messages. Engineer commits during the loop are kept in their natural granularity (one logical step per commit, conventional-commits format), and the human squashes before merge to `main`. That means engineer commits must be **descriptive enough** that a meaningful squash message can be distilled from N of them. A commit message of "fix" or "wip" is a `REVIEW: <findings>`-grade problem, not a stylistic nit.

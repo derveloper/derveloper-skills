@@ -137,3 +137,79 @@ git -C <main-repo> branch -D feature/<feature>   # if the branch is also stale
 Then re-run the spawn.
 
 **Prevention:** Cleanup hygiene. After every `DONE`, remove the worktree and delete the branch (after merge). Stale worktrees pile up fast otherwise.
+
+## 9. Compact-Watcher exited silently
+
+**Symptom:** Engineer-pane has crossed the threshold token-count (visible in claude footer or via `status`-subcommand) but no `[Compact-Watcher] %X bei Yk tokens`-ping arrived at the orchestrator. The orchestrator never triggered a `compact`-Re-Brief, the engineer drifts.
+
+**Cause:** Watcher process died (orchestrator-pane disappeared earlier than expected, watcher's auto-exit triggered after 5 empty captures; OR the original `Bash(run_in_background=true)` lost its handle on tmux-restart; OR the watcher was never spawned because DUTY 0 was skipped).
+
+**Diagnosis:**
+
+```
+ps -ef | grep tmux_pair.py | grep monitor
+```
+
+If no process shows up, the watcher is gone.
+
+**Recovery:** Orchestrator restarts the watcher manually:
+
+```
+python3 <plugin>/scripts/tmux_pair.py monitor \
+  --orch-pane <orch-pane> \
+  --panes <writer-pane> <reviewer-pane> \
+  --threshold-k <model-aware-value>
+```
+
+Use the model-aware threshold (140k for 200k-context models, 700k for 1M-context). Override per-call if the model is unusual.
+
+**Prevention:** Orchestrator briefing makes the watcher-spawn DUTY 0 (the very first action post-recon, before GATE 1). The watcher is fire-and-forget but the orchestrator should `ps` for it once after Gate 2 plan-lock to confirm it's still running.
+
+## 10. Repo-owned AGENTS.md conflicts with plugin standards
+
+**Symptom:** Codex pane (in worktree-mode) does not reference the plugin's standards (no Umlaut-discipline, no REVIEW-READY 3-field format, no recall-discipline). Engineers' codex partner contradicts the writer's own standards.
+
+**Cause:** The repo already shipped an `AGENTS.md` at its root. The plugin sees a pre-existing file and respects it (does NOT overwrite, does NOT append) so the worktree carries the repo's standards but not the plugin's. Codex reads the repo file and never sees the plugin standards. Documented behaviour in `_write_codex_standards_to_worktree`.
+
+**Diagnosis:**
+
+```
+ls -la <worktree>/AGENTS.md
+head -5 <worktree>/AGENTS.md
+```
+
+If the file exists and looks like a project-specific standards file (not the plugin-generated one), the plugin skipped its write.
+
+**Recovery (per-run):** orchestrator copies the plugin standards into the briefing user-message anyway (the `STANDARDS_BLOCK` + `RECALL_DISCIPLINE_BLOCK` + `BULLET_START_RITUAL_BLOCK` + `PAIR_PROTOCOL_BLOCK` are still injected via the briefing). Codex sees them once at boot but loses them at `/compact`.
+
+**Recovery (long-term):** append the plugin's standards to the repo's AGENTS.md as a tagged subsection (`## Plugin: tmux-pair durable standards`) and commit. Future runs in that repo carry both standards.
+
+**Prevention:** plugin-side append-mode is on the backlog. For now, repos that own AGENTS.md should consume the plugin standards manually (or the user does the merge once per repo).
+
+## 11. Durable-standards file missing for claude
+
+**Symptom:** Claude pane boots without `--append-system-prompt-file` argument, or the argument points at a nonexistent file. Standards do not survive `/compact`.
+
+**Cause:** (a) `agents.json` override that doesn't start with the bare `claude`-token (the plugin then leaves the boot command unchanged on purpose); OR (b) `/tmp` got cleared between spawn and read (rare, OS-level cleanup); OR (c) the plugin ran out of disk space and `_write_durable_standards_file` failed silently (write_text raises but caller doesn't catch).
+
+**Diagnosis:**
+
+```
+ls -la /tmp/tmux-pair-durable-<window>-*.md
+ps -ef | grep claude | grep append-system-prompt
+```
+
+**Recovery:** regenerate the file from the running plugin process and re-spawn the claude pane:
+
+```
+python3 -c "
+import sys
+sys.path.insert(0, '<plugin>/scripts')
+import tmux_pair
+print(tmux_pair.DURABLE_STANDARDS_PROMPT)
+" > /tmp/tmux-pair-durable-<window>-<role>.md
+```
+
+Then kill and re-spawn the pane, or pass the path manually via `claude --append-system-prompt-file <path>`.
+
+**Prevention:** none mid-run. For (a), if you intentionally use a wrapper, point it at the standards file yourself. For (b)/(c), the plugin should be hardened to fail loudly; that's on the backlog.

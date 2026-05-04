@@ -64,31 +64,48 @@ Add or replace agent commands in `~/.config/tmux-pair/agents.json`:
 
 The defaults baked into the script are deliberately minimal: a single command per agent, nothing project-specific.
 
+## Model selection and Compact-Watcher
+
+The default claude model is `claude-opus-4-6` (200k context). Override per spawn:
+
+```
+/pair  ~/code/myapp main session-tokens --claude-model claude-opus-4-7
+/triple ~/code/myapp main session-tokens --claude-model claude-opus-4-7
+```
+
+The compact-watcher threshold scales with the context window automatically: 200k → 140k threshold (70%), 1M → 700k threshold. Override with `monitor --threshold-k <N>` if needed. Codex always uses `gpt-5.5 xhigh` per user setup; not parameterised.
+
+## Durable standards
+
+Standards survive `/compact` and context resets because they sit in the system prompt:
+
+- **claude panes** boot with `--append-system-prompt-file <path>` (the plugin writes a per-spawn standards file under `/tmp/tmux-pair-durable-<window>-<role>.md`).
+- **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created. With `--no-worktree` the plugin skips the AGENTS.md write to avoid polluting the project repo; codex receives standards via the briefing only in that mode.
+- `agents.json` overrides are respected: if the user has remapped `claude` to a wrapper, the plugin does not inject `--append-system-prompt-file` blindly.
+
 ## Token management (long-running pairs/triples)
 
-Modern agent CLIs ship with very large context windows (1M for `claude opus 4.7` and `gpt-5.5`). Pairs/triples that run for hours can drift past the sweet spot (~200k tokens) where the model still reasons cleanly. Two helper subcommands let an orchestrator (or the human directly) refresh an agent in place:
+Three helper subcommands let an orchestrator (or the human directly) refresh an agent in place:
 
 ```
 python3 <plugin>/scripts/tmux_pair.py status <pane-id>
-```
-
-Returns JSON with the detected agent, current token count (parsed from claude's footer; codex rarely prints one and shows up as `null`, so callers fall back to a time/event heuristic), and the raw matched footer line.
-
-```
 python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path> [--timeout 300]
+python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> <id2> [...] [--threshold-k <N>]
 ```
 
-Sends `/compact` to the pane, polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop ≥50% as a fallback signal), then sends the re-brief from `--briefing-file` via the regular send path (with the verify+retry loop).
+`status` returns JSON with the detected agent, current token count (parsed from claude's footer; codex usually shows up as `null` so callers fall back to a time/event heuristic), and the raw matched footer line.
 
-The re-brief MUST be self-contained: after `/compact` the agent has lost the conversational state and only remembers the summary. Include role, task, current progress recap, the next concrete step, the peer protocol, and the standards. The orchestrator (which keeps its own progress log) is the natural place to author it; the human plays the same role for any orchestrators it spawns.
+`compact` sends `/compact` to the pane, polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop ≥50% as a fallback signal), then sends the re-brief from `--briefing-file` via the regular send path. The re-brief MUST be self-contained: after `/compact` the agent has lost the conversational state and only remembers the summary. Include role, task, current progress recap, the next concrete step, the peer protocol, and the standards.
 
-Trigger windows:
+`monitor` runs as a background watcher. The triple orchestrator briefing kicks one off automatically as DUTY 0; pair-mode does not auto-start it (the human is in the loop).
+
+Trigger windows for manual `compact`:
 
 - between REVIEW cycles when the engineer is idle, never mid-edit or mid-tool-call
-- claude pane > ~200k tokens (visible in the footer)
-- codex pane: by feel — no inline counter, use elapsed wall-time + number of major events as a proxy
+- the watcher's threshold ping (model-aware: 140k for 200k-context models, 700k for 1M-context)
+- before a known long phase (e.g. starting Wave N) so the agent enters it fresh
 
-To compact both engineers in a triple in parallel, run two `compact` calls with `&` from the orchestrator's shell; each call blocks for the duration of its own poll loop.
+To compact both engineers in a triple in parallel, run two `compact` calls with `&` from the orchestrator's shell.
 
 ## Skill
 

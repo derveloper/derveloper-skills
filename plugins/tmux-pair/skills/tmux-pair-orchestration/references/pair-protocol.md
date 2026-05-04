@@ -17,18 +17,20 @@ The orchestrator additionally prefixes its messages to the human pane with `[Orc
 
 | Event | When | Payload |
 |-------|------|---------|
-| `REVIEW-READY` | Writer finished one logical step, local checks green | one-line summary of the change |
+| `REVIEW-READY` | Writer finished one logical step, local checks green | THREE mandatory fields (sonst BLOCK ohne Code-Review): (1) what changed (file:line + LOC-diff), (2) verification (`workspace-gate=PASS` + test counts, or `workspace-gate=N/A doc-only`), (3) plan-bullet/pain reference |
 | `DONE` | After `REVIEW: APPROVE` and commit | commit SHA + branch state (e.g. `pushed`, `local only`) |
-| `BLOCKER` | Stuck on something the reviewer can't unblock | what is blocked, what was tried |
+| `BLOCKER` | Stuck on something the reviewer can't unblock — broken build, broken test, missing dependency | what is blocked, what was tried |
+| `CLARIFY-NEEDED` | Stuck on a question only the user can answer (scope, behavior, UX, architecture choice, naming conflict, trade-off not in plan) | the question + 2-4 concrete options with trade-offs. In a pair sent to the master; in a triple sent to the orchestrator. The receiver translates this into an `AskUserQuestion` call — engineers do NOT decide user-facing questions on their own. |
 | `STATUS` | Reviewer asks for an update | one-line state |
 
 ## Reviewer events
 
 | Event | When | Payload |
 |-------|------|---------|
-| `REVIEW: APPROVE` | Change is good as-is | optional one-line note |
-| `REVIEW: <findings>` | Findings exist | numbered, falsifiable: file:line, problem, suggested direction |
+| `REVIEW: APPROVE` | Change is good as-is, all Pre-APPROVE checks pass | optional one-line note. Pre-APPROVE checks: `git status` clean, REVIEW-READY had the 3 mandatory fields, no `--no-verify` / AI-co-author, no Drift-Signale (em-dashes, progress markers, etc.) |
+| `REVIEW: BLOCK <reason>` | Findings exist OR Pre-APPROVE check fails | numbered, falsifiable: file:line, problem, suggested direction. No vague "consider improving" |
 | `BLOCKER` | Reviewer can't review (missing info, can't reproduce) | what is needed |
+| `CLARIFY-NEEDED` | Reviewer hits a user-decision question (e.g. accept-as-is vs require fix) | same shape as writer's CLARIFY-NEEDED — question + options. Receiver triggers `AskUserQuestion` |
 
 ## Orchestrator events (triple mode only)
 
@@ -56,6 +58,8 @@ These extend the base events above. They drive the gated workflow described in `
 | `PLAN-LOCKED:` | orchestrator/human | engineers | After Gate 2 PASS | full plan bullets, GATE-1 answers, recon pointers, pair protocol with peer pane id, escalation pane id |
 | `GATE-3-PASS <window>` | orchestrator/human | human/user | Both Gate-3 subagents returned `VERDICT: PASS` | diff-stat (`git diff --stat base..HEAD`), commit list (`git log --oneline base..HEAD`) |
 | `GATE-3-BLOCKER` | orchestrator/human | human/user | At least one Gate-3 subagent returned `VERDICT: BLOCKER` | consolidated BLOCKERS from verifier + code-reviewer, suggested fix-loop or abort |
+| `COMPLETE: <Phase>` | orchestrator/human | human/user | After GATE-3-PASS, ready for merge | `gate-3=PASS via <verifier-name + code-reviewer-name>` (mandatory field), diff-stat, plan-bullet coverage. Sent only AFTER GATE 3 returned PASS, never before — orgid Phase 2b sent COMPLETE pre-GATE-3 and came back with three real bugs 30 minutes later, costing trust |
+| `PLAN-AMENDMENT:` | engineer/orchestrator | engineers (in-loop) | mid-run plan change without invalidating loop state. Required when a bullet hits a hard cap (LOC limit, file-size cap) or estimate drifts >50% | what changed in the plan, why. Must be preceded by a `docs(plan-amendment): ...` commit on the branch. `REVIEW-READY` on a bullet with documented drift but no preceding amendment commit is a `BLOCK` |
 
 GATE-1 events are exceptional. Default GATE-1 traffic stays inside the orchestrator's pane (it calls `AskUserQuestion` directly). The orchestrator only crosses pane boundaries when escalating; the human only sees `GATE-1-DECISION`-shaped events when it gets pinged with `GATE-1-ESCALATE` first.
 

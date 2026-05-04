@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
-description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, briefing templates, and recovery from common failure modes.
-version: 0.1.0
+description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Plan-Check → Loop → Final-Verify with REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
+version: 0.3.0
 ---
 
 # tmux-pair-orchestration
@@ -42,6 +42,17 @@ Choose **triple** when:
 
 A triple is overhead for trivial tasks. A pair leaks too much into the human's attention for big ones. See `references/triple-vs-pair.md` for a longer decision matrix with worked examples.
 
+## Durable standards
+
+Standards survive `/compact` and context resets because they sit in the system prompt, not in the briefing user-message that gets summarised on compaction.
+
+- **claude panes** boot with `--append-system-prompt-file <path>` pointing at `/tmp/tmux-pair-durable-<window>-<role>.md`. The file is generated per-spawn from a single in-script constant (`DURABLE_STANDARDS_PROMPT`) so updates to standards land in the next spawn automatically.
+- **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created (i.e. not when `--no-worktree` is passed). If the repo already owns an `AGENTS.md`, the plugin leaves it alone — repo standards win.
+- **`--no-worktree` runs** (direct on the project branch) skip the AGENTS.md write to avoid polluting the repo. Codex in that mode receives standards via the briefing only — same behaviour as before durable standards existed.
+- **`agents.json` overrides** are respected: if the user has remapped `claude` to a wrapper or alternative binary, the plugin does NOT inject `--append-system-prompt-file` blindly. The wrapper can read the standards file itself.
+
+The standards block covers: real Umlaute (no ASCII substitutes), Conventional Commits with no `--no-verify` and no AI-co-author trailer, the REVIEW-READY 3-field format, the honesty protocol (past-tense claims need same-turn tool evidence), drift signals (em-dashes, progress markers, ALL-CAPS headers, "should I"-after-clear-directive, etc.), the `incidental:` format for PostToolUse-hook fmt drift, the worktree-as-sandbox rule, the no-pre-existing-issues rule, recall-discipline (cite the relevant rule + memory before sensitive actions), and the bullet-start ritual (class + relevant rules + common BLOCKER-classes before the first edit on a bullet).
+
 ## Gated workflow (default)
 
 Both `/pair` and `/triple` enforce three quality gates before code lands on the branch. The bundled briefings already encode them; this is the high-level shape:
@@ -54,6 +65,14 @@ Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> G
 - **GATE 2 (Plan-Check)** — one general-purpose subagent verifies the plan goal-backward AND checks plan quality (concrete files+lines per bullet, edit strategy named, test coverage per bullet, parallelisation markers, measurable done-definition). `BLOCKER` escalates to human, no auto-retry.
 - **Implementation Loop** — standard pair protocol (`REVIEW-READY` -> `REVIEW` -> fix -> `DONE`). Smart test subset per cycle (only diff-touched tests), full suite + lint + build pre-DONE. Mid-run findings persisted to memory + rules + engineer-briefing-amendment, not just discussed in-pane.
 - **GATE 3 (Final-Verify)** — two parallel subagents (goal-backward verifier + code-reviewer) check the diff against task, plan, and standards before merge.
+
+The implementation loop adds five protocol elements that the briefings enforce:
+
+- **REVIEW-READY 3 mandatory fields** — every `REVIEW-READY:` ping carries (1) what changed (file:line + LOC-diff), (2) verification (`workspace-gate=PASS` + test counts, or `workspace-gate=N/A doc-only`), (3) plan-bullet/pain reference. Pings without these fields are blocked by the reviewer without code review.
+- **CLARIFY-NEEDED** — when an engineer hits a user-decision question mid-loop (scope, behavior, UX, architecture choice, naming conflict, trade-off not in the plan), they ping `CLARIFY-NEEDED: <question + 2-4 options>`. In a pair the master receives this and forwards via `AskUserQuestion`. In a triple the orchestrator handles it with its own `AskUserQuestion`. Engineers do NOT decide user-facing questions on their own.
+- **Plan-Update-Commit** — if a bullet hits a hard cap (LOC limit, file-size cap) or the estimate drifts more than ~50%, the writer commits a `docs(plan-amendment): ...` BEFORE the implementation commit that breaks the cap. `REVIEW-READY` on a bullet with documented drift but no preceding amendment commit is a `BLOCK`.
+- **COMPLETE-Ping format** — orchestrator/master sends `COMPLETE: <Phase>. gate-3=PASS via <verifier-name + code-reviewer-name>. <diff-stat>. Bezug: <plan goals all met>.` only AFTER GATE 3 returned PASS, never before.
+- **Recall-Discipline + Bullet-Start-Ritual** — engineers cite the relevant rule + memory entry before any sensitive action (commit, push, external API), and post a class + rules + common BLOCKER-classes block before the first edit on each new plan-bullet.
 
 Cross-cutting:
 
@@ -170,12 +189,17 @@ Multi-line messages are submitted via `load-buffer` + `paste-buffer` to avoid th
 
 ## Token management & re-briefs
 
-Long-running pairs/triples drift past the sweet spot (~200k tokens) where the agent still reasons cleanly, even though the model context window is much larger. Two helper subcommands let any layer refresh the layer below in place:
+The default claude model is `claude-opus-4-6` (200k context). For 1M-context runs, use `--claude-model claude-opus-4-7` on `/pair` or `/triple`. The compact-watcher threshold scales automatically: 200k → 140k threshold (70%), 1M → 700k threshold. Override per-call with `python3 <plugin>/scripts/tmux_pair.py monitor --threshold-k <N>`.
+
+Long-running pairs/triples drift past the model-specific sweet spot where the agent still reasons cleanly. Three helper subcommands let any layer refresh the layer below:
 
 ```
 python3 <plugin>/scripts/tmux_pair.py status <pane-id>
 python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path>
+python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> <id2> [...]
 ```
+
+The orchestrator briefing kicks off `monitor` automatically as DUTY 0 (background watcher polls every 180s, pings the orchestrator when an engineer crosses the threshold; cooldown 600s between repeat pings on the same pane). Pair-mode does not auto-start the watcher — the human is in the loop and notices manually.
 
 `status` returns JSON with the detected agent and the parsed token count. Claude prints `N tokens` in its footer, so the count is reliable. Codex usually does not, so its `tokens` field comes back `null` — fall back to a feel-based heuristic (elapsed wall-time, number of REVIEW cycles, whether the agent is repeating itself).
 

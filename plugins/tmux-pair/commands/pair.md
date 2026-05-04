@@ -20,6 +20,13 @@ Spawn a writer + reviewer pair in a fresh `git worktree`, each in its own tmux p
 
 - `/pair ~/code/myapp origin/main retry-budget`
 - `/pair ~/code/myapp main webhook-backoff implement exponential backoff for outbound webhooks`
+- `/pair ~/code/myapp main hotfix-x --no-worktree` (work directly on the project's current branch)
+- `/pair ~/code/myapp main big-job --claude-model claude-opus-4-7` (1M context, threshold scales auto)
+
+## Optional flags
+
+- `--no-worktree` — skip `git worktree add`. Engineers commit directly on the project's current branch in the project directory. Use sparingly: any uncommitted work in the project becomes pair-visible. With `--no-worktree`, the plugin skips writing AGENTS.md (codex receives standards via the briefing only).
+- `--claude-model <slug>` — claude model to switch into post-boot via `/model <slug>` (default `claude-opus-4-6`, 200k context). Switch to `claude-opus-4-7` for 1M context; the compact-watcher threshold rescales automatically. Codex always uses `gpt-5.5 xhigh` per user setup.
 
 ## Action
 
@@ -30,7 +37,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py pair \
   --project <project-path> \
   --base <base> \
   --feature <feature> \
-  --task "<task>"
+  --task "<task>" \
+  [--no-worktree] [--claude-model <slug>]
 ```
 
 If the feature description is missing or ambiguous, ask the user before spawning. Spawning idle agents costs more than asking one short question.
