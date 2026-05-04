@@ -1403,9 +1403,15 @@ def _briefing_orchestrator(
         f"   1. Erstelle state-aware Re-Brief-Datei in /tmp/compact-resume-\n"
         f"      {window_name}-<role>.md mit: Plan-Bullet + REVIEW-Status +\n"
         f"      nächster Schritt + Standards-Verweis + Peer-Pane-IDs.\n"
-        f"   2. Rufe `tmux_pair.py compact <pane> --briefing-file <file>` auf.\n"
-        f"      Das schickt /compact + wartet auf Settling + sendet den Re-Brief.\n"
+        f"   2. Rufe `tmux_pair.py compact <pane> --briefing-file <file>\n"
+        f"      --focus \"...\"` direkt aus DEINEM Bash-Tool auf. Das schickt\n"
+        f"      /compact <focus> in den Engineer-Pane (claude form\n"
+        f"      /compact [instructions]), wartet auf Settle, sendet dann den\n"
+        f"      Re-Brief.\n"
         f"   3. Engineer macht weiter.\n"
+        f"   NIEMALS den Engineer per send-cmd anweisen, sich selbst zu\n"
+        f"   compacten. Compact ist eine Orchestrator-Aktion, kein Engineer-\n"
+        f"   Self-Service.\n"
         f"\n"
         f"   Watcher exitet automatisch wenn Orch-Pane gone (5 leere Captures).\n"
         f"\n"
@@ -1502,12 +1508,18 @@ def _briefing_orchestrator(
         f"     Bei Engineer-Fix: zurück zu Schritt 6, dann erneut GATE 3.\n\n"
         f"8. CLEANUP\n"
         f"   Du entscheidest NICHT über Cleanup. Nach GATE-3-PASS warten auf Human.\n\n"
-        f"9. TOKEN-MANAGEMENT\n"
+        f"9. TOKEN-MANAGEMENT (KRITISCH: du compactest, nicht der Engineer)\n"
         f"   Probe Engineers zwischen Cycles, nie mid-edit:\n"
         f"     python3 {_scripts_dir() / 'tmux_pair.py'} status <pane-id>\n"
-        f"   Compact bei ~200k claude tokens oder codex 'fuehlt sich stale an':\n"
+        f"   Compact bei Watcher-Ping oder >70%% Threshold:\n"
         f"     python3 {_scripts_dir() / 'tmux_pair.py'} compact <pane-id> \\\n"
-        f"       --briefing-file <re-brief.txt>\n"
+        f"       --briefing-file <re-brief.txt> \\\n"
+        f"       --focus \"keep current plan, REVIEW-READY status, peer-protocol\"\n"
+        f"   Das Plugin schickt /compact (mit Focus-Instructions, claude form\n"
+        f"   /compact [instructions]) DIREKT in den Engineer-Pane, wartet auf\n"
+        f"   Settle, sendet dann den Re-Brief. NIEMALS Engineer per send-cmd\n"
+        f"   anweisen er möge sich selbst /compact tippen: das ist die Failure-\n"
+        f"   Klasse die diese Regel verhindert.\n"
         f"   Re-Brief muss self-contained sein: Role, Plan-Bullets, GATE-1-Response,\n"
         f"   Progress, nächster Schritt, Peer-Protokoll mit aktuellen Pane-IDs, Standards.\n"
         f"   Human compactet DICH bei Bedarf, dafür machst du nichts.\n\n"
@@ -1903,13 +1915,27 @@ def cmd_monitor(args: argparse.Namespace) -> int:
                         cooldown_elapsed = (now - last) > cooldown
                         if crossed or cooldown_elapsed:
                             tk = tokens // 1000
+                            scripts_dir = Path(__file__).resolve().parent
                             msg = (
-                                f"[Compact-Watcher] {pane} bei {tk}k tokens "
-                                f"(> {args.threshold_k}k). Bitte /compact + "
-                                f"Re-Brief schicken (state-aware Brief mit Plan-"
-                                f"Bullet, REVIEW-Status, Standards). Watcher "
-                                f"pingt erneut nach {cooldown}s falls weiter "
-                                f"über Threshold."
+                                f"[Compact-Watcher] Engineer-Pane {pane} bei "
+                                f"{tk}k tokens (> {args.threshold_k}k). DU "
+                                f"compactest den Engineer (NICHT der Engineer "
+                                f"selbst). Vorgehen:\n"
+                                f"1. Schreibe state-aware Re-Brief (Plan-Bullet, "
+                                f"REVIEW-Status, nächster Schritt, Peer-Protokoll, "
+                                f"Standards) in /tmp/compact-resume-<role>.md.\n"
+                                f"2. Rufe in DEINEM Bash-Tool auf:\n"
+                                f"   python3 {scripts_dir / 'tmux_pair.py'} "
+                                f"compact {pane} --briefing-file <pfad> "
+                                f"--focus 'keep current plan, REVIEW-READY "
+                                f"status, peer-protocol'\n"
+                                f"Das schickt /compact + Focus direkt in den "
+                                f"Engineer-Pane, wartet auf Settle, sendet dann "
+                                f"den Re-Brief. Engineer macht weiter.\n"
+                                f"NIEMALS den Engineer per send anweisen, "
+                                f"/compact selbst zu tippen. Watcher pingt "
+                                f"erneut nach {cooldown}s falls weiter über "
+                                f"Threshold."
                             )
                             send_args = argparse.Namespace(
                                 pane=args.orch_pane, text=msg, no_enter=False,
@@ -1937,10 +1963,23 @@ def cmd_monitor(args: argparse.Namespace) -> int:
 def cmd_compact(args: argparse.Namespace) -> int:
     """Send /compact to a pane, wait for completion, then re-brief.
 
+    Sequence:
+      1. Send `/compact [focus]` directly into the pane (NOT a request to the
+         agent to compact itself). claude understands /compact [instructions]
+         per the official docs (code.claude.com/docs/en/commands): the focus
+         hint shapes the summary so the agent retains the right context.
+      2. Wait for done-marker or token-count drop.
+      3. Send the full re-brief as a normal user message so the agent has
+         role, plan, progress, next step, peer-protocol, and standards.
+
     The re-brief is sent verbatim from --briefing-file (preferred for multi-
     line) or --briefing. It MUST contain the agent's role, task, current
     progress recap, next concrete step, peer-protocol, and standards: after
     /compact the agent has lost its conversational state.
+
+    --focus is optional. If omitted, /compact is sent without instructions.
+    A short focus line (e.g. 'keep the current plan, REVIEW-READY status,
+    and peer-protocol') noticeably improves what survives compaction.
 
     Compaction-done detection:
       - claude prints 'Conversation compacted' / similar markers
@@ -1961,9 +2000,14 @@ def cmd_compact(args: argparse.Namespace) -> int:
     pre_tokens = _parse_tokens(_pane_tail(pane, 15))
     print(f"[compact {pane}] pre-tokens: {pre_tokens}", file=sys.stderr)
 
-    rc, _, err = tmux_safe("send-keys", "-t", pane, "-l", "/compact")
+    focus = (args.focus or "").strip()
+    if focus:
+        slash = f"/compact {focus}"
+    else:
+        slash = "/compact"
+    rc, _, err = tmux_safe("send-keys", "-t", pane, "-l", slash)
     if rc != 0:
-        sys.exit(f"error: send-keys /compact failed: {err}")
+        sys.exit(f"error: send-keys {slash!r} failed: {err}")
     time.sleep(0.3)
     tmux_safe("send-keys", "-t", pane, "C-m")
 
@@ -2115,6 +2159,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="path to a file with the post-compact re-brief")
     co.add_argument("--briefing",
                     help="inline re-brief text (prefer --briefing-file for multi-line)")
+    co.add_argument("--focus", default="",
+                    help="optional focus hint sent inline as `/compact <focus>` "
+                         "(claude /compact [instructions] form). Shapes the "
+                         "summary so the agent retains the right context. "
+                         "Example: 'keep current plan, REVIEW-READY status, "
+                         "peer-protocol'.")
     co.add_argument("--timeout", type=int, default=300,
                     help="max seconds to wait for compaction (default: 300)")
     co.set_defaults(func=cmd_compact)
