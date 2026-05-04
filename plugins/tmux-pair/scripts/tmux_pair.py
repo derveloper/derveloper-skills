@@ -431,6 +431,11 @@ def _common_pair_setup(args: argparse.Namespace) -> tuple[Path, Path, str, str, 
         branch = _current_branch(project)
     else:
         wt_path, branch = make_worktree(project, args.feature, args.base)
+        # Drop DURABLE_STANDARDS_PROMPT as AGENTS.md in the fresh worktree
+        # so codex auto-loads it (codex has no --append-system-prompt flag).
+        # Skipped when no_worktree: pollution-risk on the project repo.
+        # Skipped when AGENTS.md already exists: repo owns its standards.
+        _write_codex_standards_to_worktree(wt_path)
     window_name = f"{project.name}-{slugify(args.feature)}"[:30]
 
     human_pane = os.environ.get("TMUX_PANE", "")
@@ -935,8 +940,10 @@ def _boot_command_with_standards(
 ) -> str:
     """Build the boot command for an agent. For claude, append the durable
     standards file via --append-system-prompt so the standards survive
-    /compact. For other agents (codex), return the boot command unchanged
-    until a codex-specific mechanism is evaluated."""
+    /compact. For codex, the standards are loaded via AGENTS.md placed in
+    the worktree root by _write_codex_standards_to_worktree (only when a
+    real worktree exists; --no-worktree skips it to avoid project-repo
+    pollution)."""
     boot = agents_dict[agent]
     if agent != "claude":
         return boot
@@ -945,6 +952,64 @@ def _boot_command_with_standards(
         f'{boot} --append-system-prompt '
         f'"$(cat {shlex.quote(str(standards_path))})"'
     )
+
+
+def _worktree_gitdir(wt_path: Path) -> Path | None:
+    """Resolve the per-worktree gitdir. In a regular repo this is .git/. In
+    a git-worktree it's <main-repo>/.git/worktrees/<name>/, accessed via the
+    gitdir: pointer file at .git. Uses `git rev-parse --git-dir` so both
+    cases are handled."""
+    proc = subprocess.run(
+        ["git", "rev-parse", "--git-dir"],
+        cwd=str(wt_path), capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    raw = proc.stdout.strip()
+    if not raw:
+        return None
+    p = Path(raw)
+    if not p.is_absolute():
+        p = (wt_path / p).resolve()
+    return p
+
+
+def _write_codex_standards_to_worktree(wt_path: Path) -> bool:
+    """Drop DURABLE_STANDARDS_PROMPT as AGENTS.md in the worktree root so
+    codex auto-loads it. Codex 0.128 has no --append-system-prompt flag;
+    the AGENTS.md hierarchy is the documented mechanism (codex walks from
+    git-root down to cwd, concatenating closer-wins).
+
+    Only call from worktree-mode spawns. With --no-worktree we'd modify the
+    project repo, which is not acceptable.
+
+    If a project-owned AGENTS.md already lives in the worktree root (e.g.
+    the repo committed one), we leave it alone: the repo's standards take
+    priority and codex reads them via the same mechanism. The plugin's
+    standards still ride along via the briefing user-message in that case.
+
+    The freshly written AGENTS.md is added to the worktree's local
+    .git/info/exclude so it doesn't show up as drift in `git status` and
+    doesn't get committed accidentally. The exclude is per-worktree (not
+    shared with the main repo).
+
+    Returns True if written, False if pre-existing or not applicable.
+    """
+    target = wt_path / "AGENTS.md"
+    if target.exists():
+        return False
+    target.write_text(DURABLE_STANDARDS_PROMPT, encoding="utf-8")
+    gitdir = _worktree_gitdir(wt_path)
+    if gitdir is not None:
+        exclude = gitdir / "info" / "exclude"
+        if exclude.exists():
+            existing = exclude.read_text(encoding="utf-8")
+            if "AGENTS.md" not in existing.splitlines():
+                exclude.write_text(
+                    existing.rstrip() + "\nAGENTS.md\n",
+                    encoding="utf-8",
+                )
+    return True
 
 
 def _briefing_gate_prompts(*, wt_path: Path, base: str) -> str:
