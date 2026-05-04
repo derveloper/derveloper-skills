@@ -961,6 +961,30 @@ def _briefing_orchestrator(
         f"{FRONTEND_SMOKE_BLOCK}\n"
         f"{PRE_FLIGHT_BLOCK}\n"
         f"DUTIES IN ORDER\n\n"
+        f"0. COMPACT-WATCHER STARTEN (allererster Schritt, einmalig)\n"
+        f"   Du startest sofort einen Background-Watcher der alle 180s die\n"
+        f"   Token-Counts der Engineer-Panes prüft und dich pingt wenn ein\n"
+        f"   Engineer über 180k Tokens kommt. Die manuelle 'guck ab und zu\n"
+        f"   selbst nach' Praxis funktioniert nicht.\n"
+        f"\n"
+        f"   Bash-Aufruf MIT run_in_background=true:\n"
+        f"     python3 /Users/user/Projects/derveloper-skills/plugins/tmux-pair/scripts/tmux_pair.py monitor \\\n"
+        f"       --orch-pane {orchestrator_pane} \\\n"
+        f"       --panes {writer_pane} {reviewer_pane} \\\n"
+        f"       --threshold-k 180 \\\n"
+        f"       --interval-sec 180 \\\n"
+        f"       --cooldown-sec 600\n"
+        f"\n"
+        f"   Bei Ping vom Watcher ('[Compact-Watcher] %X bei Yk tokens'):\n"
+        f"   1. Erstelle state-aware Re-Brief-Datei in /tmp/compact-resume-\n"
+        f"      {window_name}-<role>.md mit: Plan-Bullet + REVIEW-Status +\n"
+        f"      nächster Schritt + Standards-Verweis + Peer-Pane-IDs.\n"
+        f"   2. Rufe `tmux_pair.py compact <pane> --briefing-file <file>` auf.\n"
+        f"      Das schickt /compact + wartet auf Settling + sendet den Re-Brief.\n"
+        f"   3. Engineer macht weiter.\n"
+        f"\n"
+        f"   Watcher exitet automatisch wenn Orch-Pane gone (5 leere Captures).\n"
+        f"\n"
         f"1. RECON (Subagent wenn tief, siehe KONTEXT-ÖKONOMIE)\n"
         f"   - Pre-Flight-Check: existiert ./CLAUDE.md? existiert .claude/rules/?\n"
         f"     Wenn nicht (greenfield): notiere, dass Rules-Generierung Teil des Plans wird.\n"
@@ -1362,6 +1386,92 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_monitor(args: argparse.Namespace) -> int:
+    """Background watcher: poll engineer panes for token count, ping orch when
+    threshold crossed. Run via Bash tool with run_in_background=true.
+
+    Per-pane state machine:
+      - below threshold -> sleeping
+      - crosses threshold -> single ping to orch, mark above
+      - stays above -> next ping only after cooldown_sec since last ping
+      - drops below -> reset, next crossing pings again
+
+    Exits cleanly when orch pane is gone (capture returns empty repeatedly).
+    Defensive: never crashes, logs warnings to stderr (which Bash tool captures).
+    """
+    threshold = args.threshold_k * 1000
+    cooldown = args.cooldown_sec
+    interval = args.interval_sec
+    panes = list(args.panes)
+    state = {p: {"last_ping_at": 0.0, "above": False, "miss_count": 0} for p in panes}
+    orch_dead_misses = 0
+
+    print(f"[monitor] watching {panes} threshold={args.threshold_k}k "
+          f"interval={interval}s cooldown={cooldown}s orch={args.orch_pane}",
+          file=sys.stderr, flush=True)
+
+    while True:
+        try:
+            orch_tail = _pane_tail(args.orch_pane, 5)
+            if not orch_tail.strip():
+                orch_dead_misses += 1
+                if orch_dead_misses >= 5:
+                    print(f"[monitor] orch pane {args.orch_pane} appears dead "
+                          f"({orch_dead_misses} consecutive empty captures); exiting",
+                          file=sys.stderr, flush=True)
+                    return 0
+            else:
+                orch_dead_misses = 0
+
+            for pane in panes:
+                try:
+                    tail = _pane_tail(pane, 15)
+                    if not tail.strip():
+                        state[pane]["miss_count"] += 1
+                        continue
+                    state[pane]["miss_count"] = 0
+                    tokens = _parse_tokens(tail)
+                    if tokens is None:
+                        continue
+
+                    now = time.time()
+                    if tokens > threshold:
+                        last = state[pane]["last_ping_at"]
+                        crossed = not state[pane]["above"]
+                        cooldown_elapsed = (now - last) > cooldown
+                        if crossed or cooldown_elapsed:
+                            tk = tokens // 1000
+                            msg = (
+                                f"[Compact-Watcher] {pane} bei {tk}k tokens "
+                                f"(> {args.threshold_k}k). Bitte /compact + "
+                                f"Re-Brief schicken (state-aware Brief mit Plan-"
+                                f"Bullet, REVIEW-Status, Standards). Watcher "
+                                f"pingt erneut nach {cooldown}s falls weiter "
+                                f"über Threshold."
+                            )
+                            send_args = argparse.Namespace(
+                                pane=args.orch_pane, text=msg, no_enter=False,
+                            )
+                            cmd_send(send_args)
+                            state[pane]["last_ping_at"] = now
+                            print(f"[monitor] pinged orch about {pane} "
+                                  f"({tk}k)", file=sys.stderr, flush=True)
+                        state[pane]["above"] = True
+                    else:
+                        state[pane]["above"] = False
+                except Exception as e:
+                    print(f"[monitor] {pane} probe failed: {e}",
+                          file=sys.stderr, flush=True)
+
+            time.sleep(interval)
+        except KeyboardInterrupt:
+            print("[monitor] interrupted, exiting", file=sys.stderr, flush=True)
+            return 0
+        except Exception as e:
+            print(f"[monitor] unexpected: {e}", file=sys.stderr, flush=True)
+            time.sleep(interval)
+
+
 def cmd_compact(args: argparse.Namespace) -> int:
     """Send /compact to a pane, wait for completion, then re-brief.
 
@@ -1485,6 +1595,20 @@ def build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser("status", help="probe pane for agent + token-count")
     st.add_argument("pane")
     st.set_defaults(func=cmd_status)
+
+    mo = sub.add_parser("monitor",
+                        help="background watcher: ping orch when watched panes cross token threshold")
+    mo.add_argument("--orch-pane", required=True,
+                    help="orchestrator pane to ping when threshold crossed")
+    mo.add_argument("--panes", nargs="+", required=True,
+                    help="engineer panes to watch (1+)")
+    mo.add_argument("--threshold-k", type=int, default=180,
+                    help="token threshold in thousands (default: 180)")
+    mo.add_argument("--interval-sec", type=int, default=180,
+                    help="poll interval in seconds (default: 180)")
+    mo.add_argument("--cooldown-sec", type=int, default=600,
+                    help="min seconds between repeat pings for same pane (default: 600)")
+    mo.set_defaults(func=cmd_monitor)
 
     co = sub.add_parser("compact",
                         help="send /compact to a pane, wait for completion, re-brief")
