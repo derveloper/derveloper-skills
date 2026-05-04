@@ -939,18 +939,33 @@ def _boot_command_with_standards(
     *, agent: str, agents_dict: dict[str, str], window_name: str, role: str,
 ) -> str:
     """Build the boot command for an agent. For claude, append the durable
-    standards file via --append-system-prompt so the standards survive
+    standards file via --append-system-prompt-file so the standards survive
     /compact. For codex, the standards are loaded via AGENTS.md placed in
     the worktree root by _write_codex_standards_to_worktree (only when a
     real worktree exists; --no-worktree skips it to avoid project-repo
-    pollution)."""
+    pollution).
+
+    Robustness: only inject the standards-file flag if the boot command
+    starts with a bare 'claude' token. If the user has overridden the
+    agents.json entry with a wrapper or alternative binary, we leave the
+    boot command alone instead of appending a flag the wrapper may not
+    understand. The user's wrapper can read the standards file itself if it
+    wants to.
+
+    Why --append-system-prompt-file over --append-system-prompt + cat:
+    the file form is quoting-safe (no shell command-substitution), so the
+    standards content can hold backticks, $() or quotes without injection.
+    """
     boot = agents_dict[agent]
     if agent != "claude":
         return boot
+    boot_tokens = shlex.split(boot)
+    if not boot_tokens or boot_tokens[0] != "claude":
+        return boot
     standards_path = _write_durable_standards_file(window_name, role)
     return (
-        f'{boot} --append-system-prompt '
-        f'"$(cat {shlex.quote(str(standards_path))})"'
+        f'{boot} --append-system-prompt-file '
+        f'{shlex.quote(str(standards_path))}'
     )
 
 
@@ -1001,14 +1016,13 @@ def _write_codex_standards_to_worktree(wt_path: Path) -> bool:
     target.write_text(DURABLE_STANDARDS_PROMPT, encoding="utf-8")
     gitdir = _worktree_gitdir(wt_path)
     if gitdir is not None:
-        exclude = gitdir / "info" / "exclude"
-        if exclude.exists():
-            existing = exclude.read_text(encoding="utf-8")
-            if "AGENTS.md" not in existing.splitlines():
-                exclude.write_text(
-                    existing.rstrip() + "\nAGENTS.md\n",
-                    encoding="utf-8",
-                )
+        info_dir = gitdir / "info"
+        info_dir.mkdir(parents=True, exist_ok=True)
+        exclude = info_dir / "exclude"
+        existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+        if "AGENTS.md" not in existing.splitlines():
+            new_content = (existing.rstrip() + "\nAGENTS.md\n").lstrip("\n")
+            exclude.write_text(new_content, encoding="utf-8")
     return True
 
 
@@ -1294,18 +1308,31 @@ def _briefing_triple_engineer(
     )
 
 
+def _threshold_for_model(claude_model: str) -> int:
+    """Pick a compact-watcher threshold matching the model's context window
+    at ~70 percent. Opus 4.6 = 200k -> 140k. Opus 4.7 = 1M -> 700k. Anything
+    else falls back to DEFAULT_COMPACT_THRESHOLD_K (the 200k-sized default).
+    Heuristic on slug substrings; no hard model-list."""
+    if "4-7" in claude_model or "4.7" in claude_model:
+        return 700
+    return DEFAULT_COMPACT_THRESHOLD_K
+
+
 def _briefing_orchestrator(
     *, writer_pane: str, writer_agent: str,
     reviewer_pane: str, reviewer_agent: str,
     orchestrator_pane: str, human_pane: str,
     wt_path: Path, branch: str, base: str, project: str, window_name: str,
     task: str, mode_note: str = "",
+    claude_model: str = DEFAULT_CLAUDE_MODEL,
 ) -> str:
     send_writer = _send_command(writer_pane)
     send_reviewer = _send_command(reviewer_pane)
     send_human = _send_command(human_pane)
     gate_prompts = _briefing_gate_prompts(wt_path=wt_path, base=base)
     mode_block = f"MODE:     {mode_note}\n" if mode_note else ""
+    threshold_k = _threshold_for_model(claude_model)
+    interval_sec = 180  # poll cadence stays at 3 min regardless of context size
     return (
         f"[ROLE: Orchestrator (gated workflow)]\n\n"
         f"Du fuehrst Writer + Reviewer durch einen 4-Gate-Workflow:\n"
@@ -1337,17 +1364,18 @@ def _briefing_orchestrator(
         f"{PRE_FLIGHT_BLOCK}\n"
         f"DUTIES IN ORDER\n\n"
         f"0. COMPACT-WATCHER STARTEN (allererster Schritt, einmalig)\n"
-        f"   Du startest sofort einen Background-Watcher der alle 180s die\n"
+        f"   Du startest sofort einen Background-Watcher der alle {interval_sec}s die\n"
         f"   Token-Counts der Engineer-Panes prüft und dich pingt wenn ein\n"
-        f"   Engineer über 180k Tokens kommt. Die manuelle 'guck ab und zu\n"
-        f"   selbst nach' Praxis funktioniert nicht.\n"
+        f"   Engineer über {threshold_k}k Tokens kommt (sized auf ~70 Prozent\n"
+        f"   des aktiven Modells {claude_model}: 200k Context -> 140k, 1M -> 700k).\n"
+        f"   Die manuelle 'guck ab und zu selbst nach'-Praxis funktioniert nicht.\n"
         f"\n"
         f"   Bash-Aufruf MIT run_in_background=true:\n"
         f"     python3 /Users/user/Projects/derveloper-skills/plugins/tmux-pair/scripts/tmux_pair.py monitor \\\n"
         f"       --orch-pane {orchestrator_pane} \\\n"
         f"       --panes {writer_pane} {reviewer_pane} \\\n"
-        f"       --threshold-k 180 \\\n"
-        f"       --interval-sec 180 \\\n"
+        f"       --threshold-k {threshold_k} \\\n"
+        f"       --interval-sec {interval_sec} \\\n"
         f"       --cooldown-sec 600\n"
         f"\n"
         f"   Bei Ping vom Watcher ('[Compact-Watcher] %X bei Yk tokens'):\n"
@@ -1422,11 +1450,18 @@ def _briefing_orchestrator(
         f"     {send_writer} \"PLAN-LOCKED: <writer briefing>\"\n"
         f"     {send_reviewer} \"PLAN-LOCKED: <reviewer briefing>\"\n\n"
         f"6. WATCH THE LOOP + MID-RUN-PERSISTENCE\n"
-        f"   Engineers pingen dich: REVIEW-READY / REVIEW-DONE / BLOCKER / ESCALATION.\n"
+        f"   Engineers pingen dich: REVIEW-READY / REVIEW-DONE / BLOCKER /\n"
+        f"   CLARIFY-NEEDED / ESCALATION.\n"
         f"   Bei Stille > 10min: capture-pane probieren, Engineer nudgen.\n"
         f"   Nicht mikromanagen. Major-Events an Human:\n"
         f"     {send_human} \"[Orch {window_name}] <max 4 Zeilen>\"\n"
         f"   Trigger: MAJOR-STEP, BLOCKER, GATE-Pings, DONE, ABORT. Nicht Trivia.\n"
+        f"\n"
+        f"   CLARIFY-NEEDED von einem Engineer (User-Decision während Loop:\n"
+        f"   Scope, Behavior, UX, Architektur): du nutzt AskUserQuestion in\n"
+        f"   DEINEM Pane (gleicher Mechanismus wie GATE 1). Nach User-Antwort\n"
+        f"   per send-cmd Decision an den fragenden Engineer (und ggf. Partner)\n"
+        f"   weiterreichen. Niemals selbst entscheiden.\n"
         f"\n"
         f"   PERSISTENCE: wenn im Loop eine Pattern/Policy/Architektur-Erkenntnis\n"
         f"   entsteht, MUSS sie persistiert werden (siehe MID-RUN-PERSISTENCE-Block):\n"
@@ -1631,6 +1666,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         window_name=window_name, task=args.task or "",
         mode_note=mode_note,
+        claude_model=args.claude_model,
     )
     writer_brief = _briefing_triple_engineer(
         role="Writer", partner_role="reviewer", partner_pane=reviewer_pane,
@@ -1946,9 +1982,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--name", default="",
                     help="display name; sent as /rename + tmux pane-title post-boot")
     sp.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
-                    help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}). "
-                         "Sent as /model post-boot before /effort max. "
-                         "Switch to claude-opus-4-7 for 1M-Context.")
+                    help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
+                         "200k Context). Sent as /model post-boot before /effort "
+                         "max. Switch to claude-opus-4-7 for 1M Context.")
     sp.set_defaults(func=cmd_spawn)
 
     se = sub.add_parser("send", help="send text to a pane")
@@ -1970,9 +2006,11 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--writer-agent", default="claude")
     pa.add_argument("--reviewer-agent", default="codex")
     pa.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
-                    help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}). "
-                         "Sent as /model post-boot before /effort max for any "
-                         "claude pane. Codex uses gpt-5.5 xhigh by default.")
+                    help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
+                         "200k Context). Sent as /model post-boot before /effort "
+                         "max for any claude pane. Switch to claude-opus-4-7 for "
+                         "1M Context (compact-watcher threshold scales auto). "
+                         "Codex uses gpt-5.5 xhigh by default.")
     pa.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
     pa.set_defaults(func=cmd_pair)
@@ -1988,10 +2026,12 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--reviewer-agent", default="codex")
     tr.add_argument("--orchestrator-agent", default="claude")
     tr.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
-                    help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}). "
-                         "Sent as /model post-boot before /effort max for any "
-                         "claude pane (Writer+Orchestrator). Codex uses gpt-5.5 "
-                         "xhigh by default.")
+                    help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
+                         "200k Context). Sent as /model post-boot before /effort "
+                         "max for any claude pane (Writer+Orchestrator). Switch "
+                         "to claude-opus-4-7 for 1M Context (compact-watcher "
+                         "threshold scales auto). Codex uses gpt-5.5 xhigh by "
+                         "default.")
     tr.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
     tr.set_defaults(func=cmd_triple)
