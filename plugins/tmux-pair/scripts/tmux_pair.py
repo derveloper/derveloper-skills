@@ -41,6 +41,15 @@ DEFAULT_AGENTS: dict[str, str] = {
 # DEFAULT_COMPACT_THRESHOLD_K angepasst werden (siehe monitor-Subcommand).
 DEFAULT_CLAUDE_MODEL = "claude-opus-4-6"
 
+# Default Claude effort level. "max" gibt dem Orchestrator + Engineer das
+# höchste Reasoning-Budget. Wird als --effort <level> im Boot-Command gesetzt
+# statt als /effort slash post-boot, weil der slash gelegentlich 'unknown or
+# future model' verweigert wenn er zu schnell nach /model gesendet wird (Race).
+# Der CLI-Flag ist race-free. Override per Spawn via --claude-effort. Leer ("")
+# = flag NICHT setzen, claude default oder CLAUDE_CODE_EFFORT_LEVEL env-var
+# greift.
+DEFAULT_CLAUDE_EFFORT = "max"
+
 # Compact-Watcher Default: bei diesem Token-Wert pingt der Watcher den
 # Orchestrator. Conservative für 200k-Context-Modelle (Opus 4.6 = 200k):
 # 140k entspricht 70% Context-Auslastung, lässt 60k Headroom für Re-Brief
@@ -307,13 +316,19 @@ def _post_boot_slashes(
     pane_id: str, agent: str, display_name: str,
     claude_model: str = DEFAULT_CLAUDE_MODEL,
 ) -> None:
-    """Inject /model + /effort max (claude) and /rename <name> after the agent
-    is ready. Caller MUST call _wait_for_agent_ready or _wait_panes_ready first.
-    Order matters for claude: /model BEFORE /effort max so the effort flag is
-    set on the freshly switched model."""
+    """Inject /model (claude) and /rename <name> after the agent is ready.
+    Caller MUST call _wait_for_agent_ready or _wait_panes_ready first.
+
+    /effort wird NICHT mehr als post-boot slash gesendet, sondern direkt im
+    Boot-Command via --effort <level> gesetzt (siehe
+    _boot_command_with_standards). /effort als slash existiert weiterhin
+    (https://code.claude.com/docs/en/commands), wird aber nach einem
+    /model-Switch gelegentlich mit 'unknown or future model' verweigert
+    (Race). Der CLI-Flag greift vor dem TUI-Start und hat keine Race-Bedingung
+    mit dem Model-Switch.
+    """
     if agent == "claude":
         _send_slash_command_sync(pane_id, f"/model {claude_model}")
-        _send_slash_command_sync(pane_id, "/effort max")
     if display_name:
         _send_slash_command_sync(pane_id, f"/rename {display_name}")
 
@@ -333,6 +348,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     boot = _boot_command_with_standards(
         agent=args.agent, agents_dict=agents,
         window_name=window_name, role=args.name or "agent",
+        claude_effort=args.claude_effort,
     )
     if args.task:
         boot = f"{boot} {shlex.quote(args.task)}"
@@ -937,20 +953,22 @@ def _write_durable_standards_file(window_name: str, role: str) -> Path:
 
 def _boot_command_with_standards(
     *, agent: str, agents_dict: dict[str, str], window_name: str, role: str,
+    claude_effort: str = DEFAULT_CLAUDE_EFFORT,
 ) -> str:
     """Build the boot command for an agent. For claude, append the durable
     standards file via --append-system-prompt-file so the standards survive
-    /compact. For codex, the standards are loaded via AGENTS.md placed in
-    the worktree root by _write_codex_standards_to_worktree (only when a
-    real worktree exists; --no-worktree skips it to avoid project-repo
-    pollution).
+    /compact, plus --effort <level> to set reasoning budget directly at boot
+    (the /effort slash-command is deprecated in current claude-code).
 
-    Robustness: only inject the standards-file flag if the boot command
-    starts with a bare 'claude' token. If the user has overridden the
-    agents.json entry with a wrapper or alternative binary, we leave the
-    boot command alone instead of appending a flag the wrapper may not
-    understand. The user's wrapper can read the standards file itself if it
-    wants to.
+    For codex, the standards are loaded via AGENTS.md placed in the worktree
+    root by _write_codex_standards_to_worktree (only when a real worktree
+    exists; --no-worktree skips it to avoid project-repo pollution).
+
+    Robustness: only inject the flags if the boot command starts with a bare
+    'claude' token. If the user has overridden the agents.json entry with a
+    wrapper or alternative binary, we leave the boot command alone instead
+    of appending flags the wrapper may not understand. The user's wrapper
+    can read the standards file itself if it wants to.
 
     Why --append-system-prompt-file over --append-system-prompt + cat:
     the file form is quoting-safe (no shell command-substitution), so the
@@ -963,10 +981,13 @@ def _boot_command_with_standards(
     if not boot_tokens or boot_tokens[0] != "claude":
         return boot
     standards_path = _write_durable_standards_file(window_name, role)
-    return (
-        f'{boot} --append-system-prompt-file '
-        f'{shlex.quote(str(standards_path))}'
+    parts = [boot]
+    if claude_effort:
+        parts.append(f"--effort {shlex.quote(claude_effort)}")
+    parts.append(
+        f"--append-system-prompt-file {shlex.quote(str(standards_path))}"
     )
+    return " ".join(parts)
 
 
 def _worktree_gitdir(wt_path: Path) -> Path | None:
@@ -1522,6 +1543,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
         boot_command=_boot_command_with_standards(
             agent=args.writer_agent, agents_dict=agents,
             window_name=window_name, role="writer",
+            claude_effort=args.claude_effort,
         ),
         split="none", display_name=writer_name,
     )
@@ -1531,6 +1553,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
         boot_command=_boot_command_with_standards(
             agent=args.reviewer_agent, agents_dict=agents,
             window_name=window_name, role="reviewer",
+            claude_effort=args.claude_effort,
         ),
         split="h", display_name=reviewer_name,
     )
@@ -1608,6 +1631,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
         boot_command=_boot_command_with_standards(
             agent=args.orchestrator_agent, agents_dict=agents,
             window_name=window_name, role="orchestrator",
+            claude_effort=args.claude_effort,
         ),
         split="none",
         display_name=orchestrator_name,
@@ -1618,6 +1642,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
         boot_command=_boot_command_with_standards(
             agent=args.writer_agent, agents_dict=agents,
             window_name=window_name, role="writer",
+            claude_effort=args.claude_effort,
         ),
         split="v", display_name=writer_name,
     )
@@ -1627,6 +1652,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
         boot_command=_boot_command_with_standards(
             agent=args.reviewer_agent, agents_dict=agents,
             window_name=window_name, role="reviewer",
+            claude_effort=args.claude_effort,
         ),
         split="h", display_name=reviewer_name,
     )
@@ -1983,8 +2009,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="display name; sent as /rename + tmux pane-title post-boot")
     sp.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
                     help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
-                         "200k Context). Sent as /model post-boot before /effort "
-                         "max. Switch to claude-opus-4-7 for 1M Context.")
+                         "200k Context). Sent as /model post-boot. Switch to "
+                         "claude-opus-4-7 for 1M Context.")
+    sp.add_argument("--claude-effort", default=DEFAULT_CLAUDE_EFFORT,
+                    help=f"claude effort level (default: {DEFAULT_CLAUDE_EFFORT}). "
+                         "Choices: low|medium|high|xhigh|max. Set as --effort "
+                         "<level> in boot command (race-free vs /effort slash). "
+                         "Empty string skips the flag (claude default applies).")
     sp.set_defaults(func=cmd_spawn)
 
     se = sub.add_parser("send", help="send text to a pane")
@@ -2007,10 +2038,15 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--reviewer-agent", default="codex")
     pa.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
                     help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
-                         "200k Context). Sent as /model post-boot before /effort "
-                         "max for any claude pane. Switch to claude-opus-4-7 for "
-                         "1M Context (compact-watcher threshold scales auto). "
-                         "Codex uses gpt-5.5 xhigh by default.")
+                         "200k Context). Sent as /model post-boot for any "
+                         "claude pane. Switch to claude-opus-4-7 for 1M Context "
+                         "(compact-watcher threshold scales auto). Codex uses "
+                         "gpt-5.5 xhigh by default.")
+    pa.add_argument("--claude-effort", default=DEFAULT_CLAUDE_EFFORT,
+                    help=f"claude effort level (default: {DEFAULT_CLAUDE_EFFORT}). "
+                         "Choices: low|medium|high|xhigh|max. Set as --effort "
+                         "<level> in boot command for any claude pane. Empty "
+                         "string skips the flag (claude default applies).")
     pa.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
     pa.set_defaults(func=cmd_pair)
@@ -2027,11 +2063,17 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--orchestrator-agent", default="claude")
     tr.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
                     help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
-                         "200k Context). Sent as /model post-boot before /effort "
-                         "max for any claude pane (Writer+Orchestrator). Switch "
-                         "to claude-opus-4-7 for 1M Context (compact-watcher "
+                         "200k Context). Sent as /model post-boot for any "
+                         "claude pane (Writer+Orchestrator). Switch to "
+                         "claude-opus-4-7 for 1M Context (compact-watcher "
                          "threshold scales auto). Codex uses gpt-5.5 xhigh by "
                          "default.")
+    tr.add_argument("--claude-effort", default=DEFAULT_CLAUDE_EFFORT,
+                    help=f"claude effort level (default: {DEFAULT_CLAUDE_EFFORT}). "
+                         "Choices: low|medium|high|xhigh|max. Set as --effort "
+                         "<level> in boot command for any claude pane "
+                         "(Writer+Orchestrator). Empty string skips the flag "
+                         "(claude default applies).")
     tr.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
     tr.set_defaults(func=cmd_triple)
