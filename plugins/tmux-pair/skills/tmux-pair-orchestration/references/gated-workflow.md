@@ -71,7 +71,7 @@ Auftrag (adversariale Stance, gehe von Luecken aus):
 2. Decken die Bullets alle Anforderungen aus Task + Clarify-Antworten?
 3. Fehlt Wiring (Komponente erstellt aber nicht eingebunden)?
 4. Sind Bullets specific genug (kein 'implement auth')?
-5. Scope-Sanity: max ~5 grosse Bullets, sonst Split-Empfehlung.
+5. Scope-Sanity: max ~5 große Bullets, sonst Split-Empfehlung.
 6. Konflikt mit existierenden Rules / CLAUDE.md?
 7. Pruefe Standards-Block (Umlaute, conventional commits, kein AI-Co-Author).
 8. Falsifiziere: was muss waehrend Implementierung schiefgehen?
