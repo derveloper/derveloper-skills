@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.6.0
+version: 0.7.0
 ---
 
 # tmux-pair-orchestration
@@ -23,7 +23,7 @@ Default agent assignments (overridable):
 - reviewer: `codex` (terminal-driven, sharp on diff-level critique and edge cases)
 - orchestrator: `claude` (recon + briefing + filtering)
 
-These are defaults baked into the bundled script. Different agent CLIs work fine — point `--writer-agent`, `--reviewer-agent`, `--orchestrator-agent` at any name registered in `~/.config/tmux-pair/agents.json`.
+These are defaults baked into the bundled script. Different agent CLIs work fine: point `--writer-agent`, `--reviewer-agent`, `--orchestrator-agent` at any name registered in `~/.config/tmux-pair/agents.json`.
 
 ## When to use which mode
 
@@ -47,33 +47,33 @@ A triple is overhead for trivial tasks. A pair leaks too much into the human's a
 Standards survive `/compact` and context resets because they sit in the system prompt, not in the briefing user-message that gets summarised on compaction.
 
 - **claude panes** boot with `--append-system-prompt-file <path>` pointing at `/tmp/tmux-pair-durable-<window>-<role>.md`. The file is generated per-spawn from a single in-script constant (`DURABLE_STANDARDS_PROMPT`) so updates to standards land in the next spawn automatically.
-- **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created (i.e. not when `--no-worktree` is passed). If the repo already owns an `AGENTS.md`, the plugin leaves it alone — repo standards win.
-- **`--no-worktree` runs** (direct on the project branch) skip the AGENTS.md write to avoid polluting the repo. Codex in that mode receives standards via the briefing only — same behaviour as before durable standards existed.
+- **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created (i.e. not when `--no-worktree` is passed). If the repo already owns an `AGENTS.md`, the plugin leaves it alone: repo standards win.
+- **`--no-worktree` runs** (direct on the project branch) skip the AGENTS.md write to avoid polluting the repo. Codex in that mode receives standards via the briefing only: same behaviour as before durable standards existed.
 - **`agents.json` overrides** are respected: if the user has remapped `claude` to a wrapper or alternative binary, the plugin does NOT inject `--append-system-prompt-file` blindly. The wrapper can read the standards file itself.
 
 The standards block covers: real Umlaute (no ASCII substitutes), Conventional Commits with no `--no-verify` and no AI-co-author trailer, the REVIEW-READY 3-field format, the honesty protocol (past-tense claims need same-turn tool evidence), drift signals (em-dashes, progress markers, ALL-CAPS headers, "should I"-after-clear-directive, etc.), the `incidental:` format for PostToolUse-hook fmt drift, the worktree-as-sandbox rule, the no-pre-existing-issues rule, recall-discipline (cite the relevant rule + memory before sensitive actions), and the bullet-start ritual (class + relevant rules + common BLOCKER-classes before the first edit on a bullet).
 
 ## Gated workflow (default)
 
-Both `/pair` and `/triple` enforce four quality gates before code lands on the branch. The bundled briefings already encode them; this is the high-level shape:
+Both `/pair` and `/triple` enforce five quality gates before code lands on the branch. The bundled briefings already encode them; this is the high-level shape:
 
 ```
 Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges
 ```
 
-- **GATE 1 (Clarify)** — whoever owns the gate (orchestrator in triple, human in pair) calls `AskUserQuestion` directly in their own pane. The triple orchestrator does NOT ping the human for clarify — human only sees a `GATE-1-ESCALATE` if a question is outside the orchestrator's authority. Engineers wait for `PLAN-LOCKED:`.
-- **GATE 1.5 (Reviewer-Readiness)** — one scoped subagent (`tmux-pair:reviewer-readiness-check`, Sonnet 4.6, Read+Grep+Glob+Bash, NO Edit/Write) reads `.claude/rules/*.md` and scores an 8-item checklist (style, tests, architecture, anti-patterns, naming, security, build, domain). On `NEEDS-RULES`, the orchestrator runs a bootstrap loop: per gap one `AskUserQuestion`, then `tmux-pair:rules-bootstrap` (Sonnet 4.6, R+G+G+B+Edit+Write) bakes `.claude/rules/<topic>.md` from plugin language templates (Rust, TypeScript, Python, Go, JavaScript, Java, generic) + repo recon + user answers, then re-run readiness-check. Loop terminates at READY or after iteration 3 with user-decided abort/partial-coverage/manual-amend. Optional opt-in `/gepa` pass after fresh rules; the plugin does not call `/gepa` automatically.
-- **GATE 2 (Plan-Check)** — one scoped subagent (`tmux-pair:gate-2-plan-check`, Sonnet 4.6, Read+Grep+Glob+Bash, NO Edit/Write tools) verifies the plan goal-backward AND checks plan quality. `BLOCKER` escalates to human, no auto-retry. Scoped tools = the agent structurally cannot commit code instead of just verdicting.
-- **Implementation Loop** — standard pair protocol (`REVIEW-READY` -> `REVIEW` -> fix -> `DONE`). Smart test subset per cycle (only diff-touched tests), full suite + lint + build pre-DONE. Mid-run findings persisted to memory + rules + engineer-briefing-amendment, not just discussed in-pane.
-- **GATE 3 (Final-Verify)** — two parallel scoped subagents check the diff: `tmux-pair:gate-3-verifier` (Haiku 4.5, runs build/test, checks plan-bullet coverage) + `tmux-pair:gate-3-code-reviewer` (Sonnet 4.6, adversarial diff review). Both PASS or human pings the master.
+- **GATE 1 (Clarify)**. Whoever owns the gate (orchestrator in triple, human in pair) calls `AskUserQuestion` directly in their own pane. The triple orchestrator does NOT ping the human for clarify: human only sees a `GATE-1-ESCALATE` if a question is outside the orchestrator's authority. Engineers wait for `PLAN-LOCKED:`.
+- **GATE 1.5 (Reviewer-Readiness)**: one scoped subagent (`tmux-pair:reviewer-readiness-check`, Sonnet 4.6, Read+Grep+Glob+Bash, NO Edit/Write) reads `.claude/rules/*.md` and scores an 8-item checklist (style, tests, architecture, anti-patterns, naming, security, build, domain). On `NEEDS-RULES`, the orchestrator runs a bootstrap loop: per gap one `AskUserQuestion`, then `tmux-pair:rules-bootstrap` (Sonnet 4.6, R+G+G+B+Edit+Write) bakes `.claude/rules/<topic>.md` from plugin language templates (Rust, TypeScript, Python, Go, JavaScript, Java, generic) + repo recon + user answers, then re-run readiness-check. Loop terminates at READY or after iteration 3 with user-decided abort/partial-coverage/manual-amend. Optional opt-in `/gepa` pass after fresh rules; the plugin does not call `/gepa` automatically.
+- **GATE 2 (Plan-Check)**: one scoped subagent (`tmux-pair:gate-2-plan-check`, Sonnet 4.6, Read+Grep+Glob+Bash, NO Edit/Write tools) verifies the plan goal-backward AND checks plan quality. `BLOCKER` escalates to human, no auto-retry. Scoped tools = the agent structurally cannot commit code instead of just verdicting.
+- **Implementation Loop**: standard pair protocol (`REVIEW-READY` -> `REVIEW` -> fix -> `DONE`). Smart test subset per cycle (only diff-touched tests), full suite + lint + build pre-DONE. Mid-run findings persisted to memory + rules + engineer-briefing-amendment, not just discussed in-pane.
+- **GATE 3 (Final-Verify)**. Two parallel scoped subagents check the diff: `tmux-pair:gate-3-verifier` (Haiku 4.5, runs build/test, checks plan-bullet coverage) + `tmux-pair:gate-3-code-reviewer` (Sonnet 4.6, adversarial diff review). Both PASS or human pings the master.
 
 The implementation loop adds five protocol elements that the briefings enforce:
 
-- **REVIEW-READY 3 mandatory fields** — every `REVIEW-READY:` ping carries (1) what changed (file:line + LOC-diff), (2) verification (`workspace-gate=PASS` + test counts, or `workspace-gate=N/A doc-only`), (3) plan-bullet/pain reference. Pings without these fields are blocked by the reviewer without code review.
-- **CLARIFY-NEEDED** — when an engineer hits a user-decision question mid-loop (scope, behavior, UX, architecture choice, naming conflict, trade-off not in the plan), they ping `CLARIFY-NEEDED: <question + 2-4 options>`. In a pair the master receives this and forwards via `AskUserQuestion`. In a triple the orchestrator handles it with its own `AskUserQuestion`. Engineers do NOT decide user-facing questions on their own.
-- **Plan-Update-Commit** — if a bullet hits a hard cap (LOC limit, file-size cap) or the estimate drifts more than ~50%, the writer commits a `docs(plan-amendment): ...` BEFORE the implementation commit that breaks the cap. `REVIEW-READY` on a bullet with documented drift but no preceding amendment commit is a `BLOCK`.
-- **COMPLETE-Ping format** — orchestrator/master sends `COMPLETE: <Phase>. gate-3=PASS via <verifier-name + code-reviewer-name>. <diff-stat>. Bezug: <plan goals all met>.` only AFTER GATE 3 returned PASS, never before.
-- **Recall-Discipline + Bullet-Start-Ritual** — engineers cite the relevant rule + memory entry before any sensitive action (commit, push, external API), and post a class + rules + common BLOCKER-classes block before the first edit on each new plan-bullet.
+- **REVIEW-READY 3 mandatory fields**: every `REVIEW-READY:` ping carries (1) what changed (file:line + LOC-diff), (2) verification (`workspace-gate=PASS` + test counts, or `workspace-gate=N/A doc-only`), (3) plan-bullet/pain reference. Pings without these fields are blocked by the reviewer without code review.
+- **CLARIFY-NEEDED**. When an engineer hits a user-decision question mid-loop (scope, behavior, UX, architecture choice, naming conflict, trade-off not in the plan), they ping `CLARIFY-NEEDED: <question + 2-4 options>`. In a pair the master receives this and forwards via `AskUserQuestion`. In a triple the orchestrator handles it with its own `AskUserQuestion`. Engineers do NOT decide user-facing questions on their own.
+- **Plan-Update-Commit**. If a bullet hits a hard cap (LOC limit, file-size cap) or the estimate drifts more than ~50%, the writer commits a `docs(plan-amendment): ...` BEFORE the implementation commit that breaks the cap. `REVIEW-READY` on a bullet with documented drift but no preceding amendment commit is a `BLOCK`.
+- **COMPLETE-Ping format**. Orchestrator/master sends `COMPLETE: <Phase>. gate-3=PASS via <verifier-name + code-reviewer-name>. <diff-stat>. Bezug: <plan goals all met>.` only AFTER GATE 3 returned PASS, never before.
+- **Recall-Discipline + Bullet-Start-Ritual**: engineers cite the relevant rule + memory entry before any sensitive action (commit, push, external API), and post a class + rules + common BLOCKER-classes block before the first edit on each new plan-bullet.
 
 Cross-cutting:
 
@@ -98,14 +98,14 @@ The protocol is identical for both modes. Only the addressing differs.
 
 2. Reviewer reads the change, the tests, and the writer's summary. Replies with one of:
 
-   - `REVIEW: APPROVE` — change is good as-is.
-   - `REVIEW: <findings>` — concrete, falsifiable findings (file:line, problem, suggested direction). No vague "consider improving".
+   - `REVIEW: APPROVE`: change is good as-is.
+   - `REVIEW: <findings>`: concrete, falsifiable findings (file:line, problem, suggested direction). No vague "consider improving".
 
 3. If `APPROVE`, writer commits (Conventional Commits, no `--no-verify`, no AI co-author trailer) and pings `DONE: <commit-sha> <branch-state>`.
 
    If findings, writer fixes, pings `REVIEW-READY` again. Loop.
 
-4. If the pair stalls — disagreement, missing info, suspected upstream bug — either side pings `BLOCKER: <what>` (in pair mode: to human; in triple mode: to orchestrator).
+4. If the pair stalls (disagreement, missing info, suspected upstream bug) either side pings `BLOCKER: <what>` (in pair mode: to human; in triple mode: to orchestrator).
 
 The full protocol with all event types and edge cases lives in `references/pair-protocol.md`.
 
@@ -172,9 +172,9 @@ The script:
 
 Each role has a template in `examples/`:
 
-- **`examples/writer-briefing.md`** — implementation brief: pointers, deliverables, pair protocol with reviewer pane id, standards.
-- **`examples/reviewer-briefing.md`** — review brief: what to check (falsifiable), how to phrase findings, pair protocol with writer pane id.
-- **`examples/orchestrator-briefing.md`** — full duty list: recon, brief engineers, watch loop, report to human.
+- **`examples/writer-briefing.md`**. Implementation brief: pointers, deliverables, pair protocol with reviewer pane id, standards.
+- **`examples/reviewer-briefing.md`**. Review brief: what to check (falsifiable), how to phrase findings, pair protocol with writer pane id.
+- **`examples/orchestrator-briefing.md`**. Full duty list: recon, brief engineers, watch loop, report to human.
 
 These are starting points. Adapt to the task at hand. The bundled script generates a baseline briefing automatically; the templates are useful when overriding the briefing or when the orchestrator writes one from scratch after recon.
 
@@ -200,9 +200,9 @@ python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path>
 python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> <id2> [...]
 ```
 
-The orchestrator briefing kicks off `monitor` automatically as DUTY 0 (background watcher polls every 180s, pings the orchestrator when an engineer crosses the threshold; cooldown 600s between repeat pings on the same pane). Pair-mode does not auto-start the watcher — the human is in the loop and notices manually.
+The orchestrator briefing kicks off `monitor` automatically as DUTY 0 (background watcher polls every 180s, pings the orchestrator when an engineer crosses the threshold; cooldown 600s between repeat pings on the same pane). Pair-mode does not auto-start the watcher: the human is in the loop and notices manually.
 
-`status` returns JSON with the detected agent and the parsed token count. Claude prints `N tokens` in its footer, so the count is reliable. Codex usually does not, so its `tokens` field comes back `null` — fall back to a feel-based heuristic (elapsed wall-time, number of REVIEW cycles, whether the agent is repeating itself).
+`status` returns JSON with the detected agent and the parsed token count. Claude prints `N tokens` in its footer, so the count is reliable. Codex usually does not, so its `tokens` field comes back `null`: fall back to a feel-based heuristic (elapsed wall-time, number of REVIEW cycles, whether the agent is repeating itself).
 
 `compact` sends `/compact` to the pane, polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop ≥50% as a fallback), and then sends the re-brief from `--briefing-file` through the regular submit-with-retry path.
 
@@ -220,6 +220,15 @@ Where the recap comes from depends on the layer:
 - the orchestrator keeps a running progress log and authors re-briefs for its writer and reviewer
 - the human keeps the same kind of log for any orchestrator it spawns; orchestrators get the richest re-brief because they own the most state
 - at the topmost layer the person handles their own compact; a hand-authored re-brief there is fine
+
+**Self-compact (engineer-driven).** Engineers may compact themselves between cycles. Pattern:
+
+1. Write a self-re-brief file at `/tmp/self-compact-<role>-<window>.md` with plan-bullet, REVIEW-state, next step, peer pane ids, relevant standards.
+2. Send to your own pane: `python3 <plugin>/scripts/tmux_pair.py send <eigener_pane> "/compact <focus>"`. The focus hint MUST mention plan + REVIEW-state + peer-protocol so claude's summary preserves them.
+3. After settle (claude prints `Conversation compacted`), read the self-re-brief file and continue.
+4. Signal `SELF-COMPACT-PLANNED: <bullet> <focus>` to the orchestrator/master once before triggering, so the watcher does not race with a parallel compact on the same pane.
+
+Self-compact is the proactive path; orchestrator-compact is the reactive backstop driven by the watcher in DUTY 0. Codex panes have no `/compact` form; self-compact is claude-only.
 
 **When to trigger.**
 
@@ -257,8 +266,8 @@ Cleanup is the human's call. Neither the orchestrator nor the engineers should r
 
 The plugin ships two companion skills, both plugin-namespaced so they do not collide with user-local installs of the same names:
 
-- **`/tmux-pair:gepa`** — Genetic-Pareto prompt/text-artifact optimization (paper arXiv:2507.19457). Used opt-in after rules-bootstrap to optimize the freshly generated `.claude/rules/*.md` against user-supplied test diffs. The orchestrator suggests it after a fresh bootstrap; the user runs it in their own pane (GEPA needs test diffs the orchestrator does not have). Skill files live under `skills/gepa/` (SKILL.md, scripts/gepa-loop.py, references/{patterns,gepa-library}.md).
-- **`/tmux-pair:dg`** — Dinesh-vs-Gilfoyle adversarial code review. Two AI personas (one attacker, one defender) debate a diff or file until the defender concedes, defends, or the round limit hits. Useful as an optional pre-GATE-3 step on security/concurrency/auth/crypto/migration bullets where extra adversarial pressure pays off. Skill files live under `skills/dg/` (SKILL.md, gilfoyle-agent.md, dinesh-agent.md).
+- **`/tmux-pair:gepa`**: Genetic-Pareto prompt/text-artifact optimization (paper arXiv:2507.19457). Used opt-in after rules-bootstrap to optimize the freshly generated `.claude/rules/*.md` against user-supplied test diffs. The orchestrator suggests it after a fresh bootstrap; the user runs it in their own pane (GEPA needs test diffs the orchestrator does not have). Skill files live under `skills/gepa/` (SKILL.md, scripts/gepa-loop.py, references/{patterns,gepa-library}.md).
+- **`/tmux-pair:dg`**: Dinesh-vs-Gilfoyle adversarial code review. Two AI personas (one attacker, one defender) debate a diff or file until the defender concedes, defends, or the round limit hits. Useful as an optional pre-GATE-3 step on security/concurrency/auth/crypto/migration bullets where extra adversarial pressure pays off. Skill files live under `skills/dg/` (SKILL.md, gilfoyle-agent.md, dinesh-agent.md).
 
 External companion (NOT bundled, install separately if you want it): the official `code-simplifier` plugin from `claude-plugins-official` for refactor-passes after a feature lands.
 
@@ -266,13 +275,13 @@ External companion (NOT bundled, install separately if you want it): the officia
 
 ### References
 
-- **`references/gated-workflow.md`** — 5-gate workflow (Clarify, Reviewer-Readiness, Plan-Check, Loop, Final-Verify), subagent prompt templates, gate event vocabulary, gate-specific failure modes.
-- **`references/pair-protocol.md`** — full event vocabulary, edge cases, escalation rules, and end-of-run handshake.
-- **`references/triple-vs-pair.md`** — decision matrix with worked examples for choosing the mode.
-- **`references/failure-modes.md`** — common failure modes with diagnostics, recovery steps, and prevention.
+- **`references/gated-workflow.md`**: 5-gate workflow (Clarify, Reviewer-Readiness, Plan-Check, Loop, Final-Verify), subagent prompt templates, gate event vocabulary, gate-specific failure modes.
+- **`references/pair-protocol.md`**: full event vocabulary, edge cases, escalation rules, and end-of-run handshake.
+- **`references/triple-vs-pair.md`**: decision matrix with worked examples for choosing the mode.
+- **`references/failure-modes.md`**: common failure modes with diagnostics, recovery steps, and prevention.
 
 ### Examples
 
-- **`examples/writer-briefing.md`** — writer briefing template.
-- **`examples/reviewer-briefing.md`** — reviewer briefing template.
-- **`examples/orchestrator-briefing.md`** — orchestrator briefing template (the largest of the three).
+- **`examples/writer-briefing.md`**: writer briefing template.
+- **`examples/reviewer-briefing.md`**: reviewer briefing template.
+- **`examples/orchestrator-briefing.md`**: orchestrator briefing template (the largest of the three).

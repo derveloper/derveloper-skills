@@ -235,7 +235,9 @@ Each agent (orchestrator, writer, reviewer) keeps its main pane lean. Heavy read
 - GATE 3 B (code-reviewer): `tmux-pair:gate-3-code-reviewer` (Sonnet 4.6, scoped).
 - RECON: built-in `Explore` (Haiku, read-only).
   Always subagent for these four roles, never inline. Never `general-purpose` for the gates: the scoped plugin agents have appropriate model + restricted tool-set, both protect against cost blowup and tool misuse (e.g. plan-check accidentally committing code).
-- Re-brief engineers via `tmux_pair.py compact <pane> --briefing-file <file> --focus '<one-liner>'` when the watcher pings (see DUTY 0). The plugin sends `/compact <focus>` directly into the engineer pane and follows up with the re-brief — never tell the engineer to run `/compact` themselves. Orchestrator stays active; the human compacts the orchestrator if needed.
+- Re-brief engineers via `tmux_pair.py compact <pane> --briefing-file <file> --focus '<one-liner>'` when the watcher pings (see DUTY 0). The plugin sends `/compact <focus>` directly into the engineer pane and follows up with the re-brief.
+- Engineers may also self-compact between cycles via `tmux_pair.py send <eigener_pane> "/compact <focus>"` after preparing their own self-re-brief file. Self-compact is the proactive path; orchestrator-compact is the reactive backstop driven by the watcher. Engineers signal `SELF-COMPACT-PLANNED: <bullet> <focus>` to the orchestrator so watcher-driven compact does not race the self-compact. Codex panes have no `/compact` form; self-compact is claude-only.
+- Orchestrator stays active; the human compacts the orchestrator if needed.
 
 **Writer-specific:**
 
