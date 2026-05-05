@@ -66,14 +66,14 @@ The defaults baked into the script are deliberately minimal: a single command pe
 
 ## Model selection and Compact-Watcher
 
-The default claude model is `claude-opus-4-6` (200k context). Override per spawn:
+The default claude model is `claude-opus-4-7` (1M context). Override per spawn:
 
 ```
-/pair  ~/code/myapp main session-tokens --claude-model claude-opus-4-7
-/triple ~/code/myapp main session-tokens --claude-model claude-opus-4-7
+/pair  ~/code/myapp main session-tokens --claude-model claude-opus-4-6
+/triple ~/code/myapp main session-tokens --claude-model claude-opus-4-6
 ```
 
-The compact-watcher threshold scales with the context window automatically: 200k → 140k threshold (70%), 1M → 700k threshold. Override with `monitor --threshold-k <N>` if needed. Codex always uses `gpt-5.5 xhigh` per user setup; not parameterised.
+The compact-watcher threshold scales with the context window automatically: 1M → 700k threshold (70%), 200k → 140k threshold. Override with `monitor --threshold-k <N>` if needed. Codex always uses `gpt-5.5 xhigh` per user setup; not parameterised.
 
 ## Durable standards
 

@@ -22,13 +22,13 @@ The human gets to dispatch the spawn and step away. They are not the recon agent
 
 - `/triple ~/code/myapp origin/main session-tokens`
 - `/triple ~/code/myapp main rate-limit-redesign rebuild the rate limiter so it survives the redis failover scenario from incident 2026-01`
-- `/triple ~/code/myapp main bigfeature --claude-model claude-opus-4-7` (1M context for orchestrator + writer)
+- `/triple ~/code/myapp main smallfeature --claude-model claude-opus-4-6` (200k context, cheaper for short tasks)
 - `/triple ~/code/myapp main resume-existing --no-worktree --project ~/code/myapp-wt-existing` (reuse an existing worktree directly)
 
 ## Optional flags
 
 - `--no-worktree` — skip `git worktree add`. Use when resuming on an existing worktree (point `--project` at the worktree path) or running directly on the project branch. With `--no-worktree`, the plugin skips writing AGENTS.md to the project repo; codex picks up standards via the briefing only.
-- `--claude-model <slug>` — claude model to switch into post-boot for orchestrator + writer (default `claude-opus-4-6`, 200k context). Switch to `claude-opus-4-7` for 1M context; the compact-watcher threshold rescales automatically (140k → 700k). Codex always uses `gpt-5.5 xhigh` per user setup.
+- `--claude-model <slug>` — claude model to switch into post-boot for orchestrator + writer (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically (700k → 140k). Codex always uses `gpt-5.5 xhigh` per user setup.
 
 ## When to use triple instead of pair
 

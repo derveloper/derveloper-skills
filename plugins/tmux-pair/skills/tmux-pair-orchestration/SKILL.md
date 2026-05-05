@@ -189,7 +189,7 @@ Multi-line messages are submitted via `load-buffer` + `paste-buffer` to avoid th
 
 ## Token management & re-briefs
 
-The default claude model is `claude-opus-4-6` (200k context). For 1M-context runs, use `--claude-model claude-opus-4-7` on `/pair` or `/triple`. The compact-watcher threshold scales automatically: 200k → 140k threshold (70%), 1M → 700k threshold. Override per-call with `python3 <plugin>/scripts/tmux_pair.py monitor --threshold-k <N>`.
+The default claude model is `claude-opus-4-7` (1M context). For 200k-context runs (cheaper, faster turn-around), use `--claude-model claude-opus-4-6` on `/pair` or `/triple`. The compact-watcher threshold scales automatically: 1M → 700k threshold (70%), 200k → 140k threshold. Override per-call with `python3 <plugin>/scripts/tmux_pair.py monitor --threshold-k <N>`.
 
 Long-running pairs/triples drift past the model-specific sweet spot where the agent still reasons cleanly. Three helper subcommands let any layer refresh the layer below:
 

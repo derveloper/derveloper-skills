@@ -36,10 +36,11 @@ DEFAULT_AGENTS: dict[str, str] = {
     "codex": "codex --dangerously-bypass-approvals-and-sandbox",
 }
 
-# Default Claude model. Opus 4.6 hat 200k Context-Window (vs Opus 4.7 mit 1M).
-# Override per Spawn via --claude-model. Wenn Modell wechselt, sollte auch
-# DEFAULT_COMPACT_THRESHOLD_K angepasst werden (siehe monitor-Subcommand).
-DEFAULT_CLAUDE_MODEL = "claude-opus-4-6"
+# Default Claude model. Opus 4.7 hat 1M Context-Window (vs Opus 4.6 mit 200k).
+# Override per Spawn via --claude-model. Wenn Modell wechselt, passt der
+# monitor-Subcommand DEFAULT_COMPACT_THRESHOLD_K automatisch an (700k bei 1M,
+# 140k bei 200k).
+DEFAULT_CLAUDE_MODEL = "claude-opus-4-7"
 
 # Default Claude effort level. "max" gibt dem Orchestrator + Engineer das
 # höchste Reasoning-Budget. Wird als --effort <level> im Boot-Command gesetzt
@@ -2013,8 +2014,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="display name; sent as /rename + tmux pane-title post-boot")
     sp.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
                     help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
-                         "200k Context). Sent as /model post-boot. Switch to "
-                         "claude-opus-4-7 for 1M Context.")
+                         "1M Context). Sent as /model post-boot. Switch to "
+                         "claude-opus-4-6 for 200k Context.")
     sp.add_argument("--claude-effort", default=DEFAULT_CLAUDE_EFFORT,
                     help=f"claude effort level (default: {DEFAULT_CLAUDE_EFFORT}). "
                          "Choices: low|medium|high|xhigh|max. Set as --effort "
@@ -2042,8 +2043,8 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--reviewer-agent", default="codex")
     pa.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
                     help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
-                         "200k Context). Sent as /model post-boot for any "
-                         "claude pane. Switch to claude-opus-4-7 for 1M Context "
+                         "1M Context). Sent as /model post-boot for any "
+                         "claude pane. Switch to claude-opus-4-6 for 200k Context "
                          "(compact-watcher threshold scales auto). Codex uses "
                          "gpt-5.5 xhigh by default.")
     pa.add_argument("--claude-effort", default=DEFAULT_CLAUDE_EFFORT,
@@ -2067,9 +2068,9 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--orchestrator-agent", default="claude")
     tr.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
                     help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
-                         "200k Context). Sent as /model post-boot for any "
+                         "1M Context). Sent as /model post-boot for any "
                          "claude pane (Writer+Orchestrator). Switch to "
-                         "claude-opus-4-7 for 1M Context (compact-watcher "
+                         "claude-opus-4-6 for 200k Context (compact-watcher "
                          "threshold scales auto). Codex uses gpt-5.5 xhigh by "
                          "default.")
     tr.add_argument("--claude-effort", default=DEFAULT_CLAUDE_EFFORT,
