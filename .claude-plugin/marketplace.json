@@ -12,8 +12,8 @@
     {
       "name": "tmux-pair",
       "source": "./plugins/tmux-pair",
-      "description": "Spawn writer/reviewer agent pairs (or writer/reviewer/orchestrator triples) in fresh git worktrees, wired up via tmux. Includes the orchestration script, slash commands, and the tmux-pair-orchestration skill.",
-      "version": "0.1.0",
+      "description": "Spawn writer/reviewer agent pairs (or writer/reviewer/orchestrator triples) in fresh git worktrees, wired up via tmux. Includes the orchestration script, slash commands, the tmux-pair-orchestration skill, scoped subagents for the gates, and shipped rules templates for 7 stacks.",
+      "version": "0.5.0",
       "category": "workflow",
       "tags": ["tmux", "git-worktree", "pair-programming", "orchestration"]
     }
