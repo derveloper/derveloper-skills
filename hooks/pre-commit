@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# pre-commit: enforce plugin/marketplace version sync before any commit lands.
+#
+# Activate once per clone:
+#   git config core.hooksPath hooks
+#
+# Bypass (rare, document in commit body why):
+#   git commit --no-verify
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT="${REPO_ROOT}/scripts/check-plugin-versions.py"
+
+if [[ ! -x "${SCRIPT}" ]]; then
+  echo "pre-commit: ${SCRIPT} missing or not executable" >&2
+  exit 1
+fi
+
+python3 "${SCRIPT}"
