@@ -81,7 +81,7 @@ Output: `VERDICT: READY | NEEDS-RULES` plus `LANGUAGES`, `COVERAGE` per topic, `
   1. Per gap, orchestrator/human calls `AskUserQuestion` with 2-4 concrete options ("Welcher Linter blockiert Merges?", "Welcher Test-Runner ist Pflicht?", etc.). Recommended option first, suffix `(Recommended)`.
   2. Spawn `tmux-pair:rules-bootstrap` subagent (Sonnet 4.6, `Read+Grep+Glob+Bash+Edit+Write`). Inputs: GAPS list, user-answer block, detected languages, plugin templates path (`${CLAUDE_PLUGIN_ROOT}/templates/rules/`). Subagent bakes `.claude/rules/<topic>.md` from templates + repo recon + user answers.
   3. Re-run readiness-check. If `READY` -> proceed. If `NEEDS-RULES` after a third iteration: `AskUserQuestion` "abort, manually amend, or accept partial coverage?". No master ping; the orchestrator owns the loop.
-- `READY` after a fresh bootstrap (rules just generated): orchestrator may ask the user via `AskUserQuestion` whether to run a `/gepa` optimization pass on the new rules. Default: skip. The plugin does NOT call `/gepa` automatically — the GEPA skill is optional user setup; if the user opts in, they trigger `/gepa` themselves out-of-band after the run.
+- `READY` after a fresh bootstrap (rules just generated): orchestrator may ask the user via `AskUserQuestion` whether to run a `/tmux-pair:gepa` optimization pass on the new rules. Default: skip. GEPA is shipped as a plugin skill (`skills/gepa/`, Genetic-Pareto algorithm, paper arXiv:2507.19457). The orchestrator does NOT call GEPA autonomously — it requires user-supplied test diffs (3-5 known-bug diffs in `.gepa/test-diffs/`) for the eval script. If the user opts in and has those inputs, the orchestrator points them at `/tmux-pair:gepa init` and the user runs the loop in their own pane. Without test diffs the optimization score is wishful thinking; the orchestrator skips rather than fake it.
 
 **Why a separate gate, not part of GATE 2:** the rules state SHAPES the plan (which test runner, which architecture boundary, which security check). The plan-check then verifies the plan against those rules. Doing both in GATE 2 confuses two different judgements (intent vs craft).
 
@@ -151,7 +151,7 @@ docs(plan-amendment): <Bullet> Estimate +X percent because <reason> (Plan vN)
 
 `REVIEW-READY` on a bullet with documented drift but no preceding amendment commit is a `BLOCK`. This catches cap-breaker drift before it lands as a one-line review-finding ("file is over the cap") at GATE 3.
 
-Source: this rule was synthesised from real BLOCKERs in the GTD/example-project runs (`chat.js` 183/200, Hermes T4 `skills.rs` 504 over cap, Plan T2 estimated 265 LOC actual 480 = 1.8x).
+Source: this rule was synthesised from real BLOCKERs in past pair runs (a frontend file at 183/200 LOC after a "should be quick" estimate, a Rust skills module at 504 LOC against a 200 cap, a plan task estimated at 265 LOC and shipped at 480 — 1.8x drift). Each one would have been caught by a plan-amendment commit; none were, and each one surfaced as a pile-up of single-line review findings.
 
 ## Implementation Loop
 
@@ -173,7 +173,7 @@ Two patterns the briefings enforce so memory and rules don't get ignored mid-run
 - **Recall-discipline:** before every sensitive action (commit, push, external API, Jira post, kubectl on prod, DB mutation), the engineer cites the relevant rule file plus memory entry in their own output. Format: `Pre-Flight commit: anti-regression.md (REVIEW-READY-Format), feedback-workspace-tests.md (workspace-gate pflicht).` Trivia (local edits, read-only calls, test runs) skip the ritual.
 - **Bullet-start ritual:** before the first code edit on a new plan-bullet, the engineer posts a short block with the bullet's class (UI / Backend / Migration / Tooling / Doc), relevant rules, relevant memory, and the common BLOCKER-classes for that class. Repo's own `pre-flight-checklists.md` (if present) supplies the class-specific lists. If the class is unclear: ping orchestrator/master, don't guess.
 
-Both rituals exist because in the 48h prior to the rules-from-sessions pair-run, rules were ignored 3-4 times per cycle (workspace-test skipped, MCP tool wrong, schroeder for example-company). The fix wasn't more rules; it was forcing the engineer to put the rule in their pane-context at the moment of risk.
+Both rituals exist because in pair-runs prior to the rules-from-sessions changes, established rules were ignored 3-4 times per cycle: workspace-tests skipped, the wrong MCP tool reached for, an inappropriate remote agent invoked for a local task. The fix wasn't more rules; it was forcing the engineer to put the rule in their pane-context at the moment of risk.
 
 ### REVIEW-READY format (3 mandatory fields)
 
@@ -209,7 +209,7 @@ Running the entire test suite on every `REVIEW-READY` is slow and wasteful. Stra
 
 When the orchestrator or engineers discover a pattern, policy, or architectural decision during the loop, it MUST be persisted on three layers:
 
-1. **Memory entry** (project-scoped): `/Users/user/.claude/projects/<sanitized-project>/memory/project_<key>.md` plus the `MEMORY.md` index. Only entries that future runs need; not ephemeral loop state.
+1. **Memory entry** (project-scoped): `~/.claude/projects/<sanitized-project>/memory/project_<key>.md` plus the `MEMORY.md` index. Only entries that future runs need; not ephemeral loop state.
 2. **Rules file** (in repo): `.claude/rules/<key>.md` for code conventions (test policy, edit pattern, naming). Committed with the run.
 3. **Engineer briefing update** (in-run): if the discovery should change engineer behaviour during this run, the orchestrator pings `PLAN-AMENDMENT: <diff>` to writer + reviewer. Not a fresh `PLAN-LOCKED:` — that would invalidate the loop state.
 
@@ -282,13 +282,15 @@ COMPLETE: <Phase>. gate-3=PASS via <verifier-name + code-reviewer-name>.
 
 If the master skips GATE 3, the reviewer is allowed to start a verify run on its own and mark the COMPLETE as premature. Master does not commit against a GATE-3 FAIL without explicit user escalation.
 
-Source: orgid Phase 2b sent COMPLETE before GATE 3, then 30 min later came back with three real bugs in B5. Trust erodes faster than the time saved.
+Source: a recent run sent COMPLETE before GATE 3, then ~30 minutes later came back with three real bugs in the last bullet. Trust erodes faster than the time GATE 3 would have cost.
 
 ## Gate 3: Final-Verify
 
 **Goal:** verify the code actually delivers the task before merge, and verify it meets project standards. Catches the gap between "tasks completed" and "goal achieved".
 
 **Trigger:** writer pinged `DONE`, all `REVIEW-READY` cycles ended in `APPROVE`.
+
+**Optional pre-step for security/concurrency/auth/crypto/migration bullets:** the orchestrator can suggest the reviewer-engineer run `/tmux-pair:dg` (Plugin-shipped Dinesh-vs-Gilfoyle adversarial debate skill, `skills/dg/`) on the diff before GATE 3 spawns. The reviewer decides whether to use it; not mandatory. Output is an extra findings block that either resolves in the REVIEW loop or surfaces as a GATE 3 BLOCKER.
 
 **Mechanism:** spawn TWO scoped subagents in parallel (one message, two Task calls):
 

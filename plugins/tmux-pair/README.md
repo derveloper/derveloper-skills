@@ -130,16 +130,15 @@ Trigger windows for manual `compact`:
 
 To compact both engineers in a triple in parallel, run two `compact` calls with `&` from the orchestrator's shell.
 
-## Skill
+## Skills
 
-The bundled skill `tmux-pair-orchestration` documents:
+The plugin ships three skills:
 
-- the pair protocol (`REVIEW-READY` → `REVIEW` → loop)
-- when to choose pair vs. triple
-- briefing templates for each role
-- failure modes and how to recover
+- **`tmux-pair-orchestration`** — documents the pair protocol (`REVIEW-READY` → `REVIEW` → loop), when to choose pair vs. triple, briefing templates for each role, and failure modes. Triggers when the user asks for things like "spin up a writer/reviewer pair", "run two agents on this", "set up an orchestrator + pair", or names the workflow directly.
+- **`/tmux-pair:gepa`** — Genetic-Pareto prompt/text-artifact optimization (paper arXiv:2507.19457). Used opt-in after rules-bootstrap to optimize freshly generated `.claude/rules/*.md` against user-supplied test diffs. Plugin-namespaced so it does not collide with a user-local `/gepa` install. Skill files: `skills/gepa/`.
+- **`/tmux-pair:dg`** — Dinesh-vs-Gilfoyle adversarial code review. Two AI personas (attacker + defender) debate a diff or file until convergence. Useful as an optional pre-GATE-3 step on security/concurrency/auth/crypto/migration bullets. Skill files: `skills/dg/`.
 
-It triggers when the user asks for things like "spin up a writer/reviewer pair", "run two agents on this", "set up an orchestrator + pair", or names the workflow directly.
+External companion (NOT bundled, install separately): the official `code-simplifier` plugin from `claude-plugins-official` for refactor-passes after a feature lands.
 
 ## License
 

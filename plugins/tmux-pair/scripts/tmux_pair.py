@@ -632,8 +632,9 @@ PLAN_QUALITY_BLOCK = (
     "    docs(plan-amendment): <Bullet> Estimate +X Prozent wegen <Grund> (Plan vN)\n"
     "  REVIEW-READY auf einem Bullet ohne Amendment-Commit bei dokumentiertem\n"
     "  Drift = BLOCK. Verhindert Cap-Reisser-Drift, der erst beim Final-Verify\n"
-    "  auffällt (Atlas-Beweise: chat.js 183/200, Hermes T4 skills.rs 504 over\n"
-    "  cap, Plan T2 estimated 265 LOC actual 480 = 1.8x).\n"
+    "  auffällt (Beispiele aus früheren Runs: Frontend-File 183/200 LOC nach\n"
+    "  'sollte schnell gehen'-Estimate, Rust-Module 504 LOC gegen 200-Cap, Bullet\n"
+    "  estimated 265 LOC und shipped als 480 LOC = 1.8x Drift).\n"
     "\n"
     "COMPLETE-PING-FORMAT (Master/Orchestrator, NACH GATE-3, NICHT vorher):\n"
     "  COMPLETE-Ping NACH GATE-3-Verify, NIEMALS davor. GATE-3 (Verifier-Subagent\n"
@@ -675,7 +676,7 @@ MID_RUN_PERSISTENCE_BLOCK = (
     "  Erkenntnisse die im Loop entstehen MÜSSEN persistiert werden, nicht\n"
     "  nur im Pane besprochen. Drei Layer:\n"
     "  1. Memory: projekt-spezifischer Eintrag unter\n"
-    "     /Users/user/.claude/projects/<sanitized-project>/memory/project_<key>.md\n"
+    "     ~/.claude/projects/<sanitized-project>/memory/project_<key>.md\n"
     "     plus MEMORY.md-Index. Nur Erkenntnisse die future runs brauchen\n"
     "     (nicht ephemere Loop-State).\n"
     "  2. Rules: .claude/rules/<key>.md im Repo, wenn die Erkenntnis Code-\n"
@@ -817,8 +818,9 @@ PRE_FLIGHT_BLOCK = (
 # Recall-Discipline: Engineers/Orch zitieren VOR sensiblen Aktionen (commit,
 # push, externe API, Jira-Post, Slack-Post, kubectl-prod, DB-Mutation) explizit
 # WELCHE Rule + WELCHER Memory-Eintrag relevant ist. Ohne Recall driften sie
-# weg von Memory/Rules. Source: example-project .claude/rules/recall-discipline.md
-# (Pain 2 Atlas).
+# weg von Memory/Rules. Pattern entstand aus mehreren Runs in denen Rules
+# existierten aber konsequent ignoriert wurden, bis das Recall-Ritual sie
+# wieder ins aktive Pane-Context zog.
 RECALL_DISCIPLINE_BLOCK = (
     "RECALL-DISCIPLINE (PFLICHT vor sensiblen Aktionen)\n"
     "  Memory + Rules existieren. Sie greifen nur wenn explizit referenziert.\n"
@@ -840,7 +842,7 @@ RECALL_DISCIPLINE_BLOCK = (
     "  Inspection) brauchen kein Recall-Ritual.\n"
     "\n"
     "  Memory-Standorte (Auto-Read-Hinweis im Briefing):\n"
-    "  - User-Memory: /Users/user/.claude/projects/<sanitized-project>/memory/\n"
+    "  - User-Memory: ~/.claude/projects/<sanitized-project>/memory/\n"
     "    MEMORY.md ist Index, immer auto-loaded. Einzelne Files NICHT auto-\n"
     "    loaded, müssen explizit gelesen werden wenn relevant.\n"
     "  - Project-Rules: <repo>/.claude/rules/*.md (CLAUDE.md verweist drauf).\n"
@@ -851,7 +853,7 @@ RECALL_DISCIPLINE_BLOCK = (
 # Bullet-Start-Ritual: vor erstem Code-Edit eines Plan-Bullets zitiert der
 # Engineer die Bullet-Klasse (UI/Backend/Migration/Tooling/Doc) + relevante
 # Rules + Common-BLOCKER-Klassen. Verhindert 3+ FINDINGS-Runden auf bekannte
-# Pain-Klassen. Source: example-project .claude/rules/recall-discipline.md.
+# Pain-Klassen.
 BULLET_START_RITUAL_BLOCK = (
     "BULLET-START-RITUAL (PFLICHT vor erstem Code-Edit pro Bullet)\n"
     "  Vor dem ersten Edit eines neuen Plan-Bullets postet der Engineer einen\n"
@@ -873,10 +875,10 @@ BULLET_START_RITUAL_BLOCK = (
 
 
 # Pair-Protocol: Send-Tool-Wahl + ACK-Mechanism + Timeout-Disziplin.
-# 67-78 Prozent der Pair-Sends in den letzten 48h sind via raw send-keys im
-# Pane-Buffer hängen geblieben. tmux_pair.py send macht load-buffer + paste
-# + Probe-Retry + 6 Enter-Retries und ist damit Pflicht. Source: example-project
-# .claude/rules/pair-protocol.md.
+# In früheren Runs sind 67-78 Prozent der Pair-Sends via raw send-keys im
+# Pane-Buffer hängen geblieben (TUI ignoriert das erste Enter wenn ein
+# Tool-Call läuft). tmux_pair.py send macht load-buffer + paste-buffer
+# + Probe-Retry + 6 Enter-Retries und ist damit Pflicht.
 PAIR_PROTOCOL_BLOCK = (
     "PAIR-PROTOCOL (Send-Tool-Wahl, ACK, Timeouts)\n"
     "  TOOL-WAHL für Pair-Sends:\n"
@@ -1389,7 +1391,7 @@ def _briefing_orchestrator(
         f"   Die manuelle 'guck ab und zu selbst nach'-Praxis funktioniert nicht.\n"
         f"\n"
         f"   Bash-Aufruf MIT run_in_background=true:\n"
-        f"     python3 /Users/user/Projects/derveloper-skills/plugins/tmux-pair/scripts/tmux_pair.py monitor \\\n"
+        f"     python3 {_scripts_dir() / 'tmux_pair.py'} monitor \\\n"
         f"       --orch-pane {orchestrator_pane} \\\n"
         f"       --panes {writer_pane} {reviewer_pane} \\\n"
         f"       --threshold-k {threshold_k} \\\n"
@@ -1470,11 +1472,20 @@ def _briefing_orchestrator(
         f"           'Abbruch oder manuell ergänzen?'. KEIN Master-Ping. Du löst\n"
         f"           es im Loop oder eskalierst nach User-Antwort.\n"
         f"\n"
-        f"   d) Optional nach READY (vor GATE 2): wenn frisch gebackene Rules,\n"
-        f"      User via AskUserQuestion ob GEPA-Optimization gewünscht. Default:\n"
-        f"      skip. Wenn ja: Hinweis im finalen Plan-Bullet ('User triggert\n"
-        f"      /gepa nach diesem Run, out-of-band'). Plugin macht GEPA NICHT\n"
-        f"      automatisch — der GEPA-Skill ist optionales User-Setup.\n"
+        f"   d) Optional nach READY (vor GATE 2): wenn Rules frisch gebacken oder\n"
+        f"      erweitert wurden, User via AskUserQuestion ob GEPA-Optimization\n"
+        f"      gewünscht. Default: skip. Plugin shippt /tmux-pair:gepa als Skill\n"
+        f"      (Genetic-Pareto Prompt-Optimization, arXiv:2507.19457). Wenn der\n"
+        f"      User opt-in:\n"
+        f"      - Erkläre die Voraussetzungen: 3-5 Test-Diffs mit bekannten Bugs\n"
+        f"        in .gepa/test-diffs/ + ein eval.sh das ein gate-3-code-reviewer\n"
+        f"        Subagent gegen die Rules+Test-Diffs scort.\n"
+        f"      - Wenn der User die Inputs hat: ping `/tmux-pair:gepa init` als\n"
+        f"        Hinweis im PLAN-AMENDMENT (User triggert selbst aus seinem\n"
+        f"        Pane, da GEPA-Loop den Test-Diff-Set vom User braucht).\n"
+        f"      - Wenn der User die Inputs nicht hat: skip, weiter zu Schritt 4.\n"
+        f"      Plugin ruft GEPA NICHT autonom auf, weil ohne Test-Diffs der\n"
+        f"      Optimization-Score reines Wunschdenken ist.\n"
         f"\n"
         f"   e) Reminder: bei greenfield (keine .claude/rules/) liefert NEEDS-RULES\n"
         f"      automatisch alle 8 Topics als GAPS. Bootstrap-Loop initialisiert\n"
@@ -1539,6 +1550,15 @@ def _briefing_orchestrator(
         f"   an Engineers. Nicht nur im Pane besprechen. KEIN Master-Ping dafür.\n\n"
         f"8. GATE 3: FINAL-VERIFY (Subagents scoped, PARALLEL spawnen)\n"
         f"   Sobald Engineers DONE pingen UND alle Reviews APPROVE:\n"
+        f"\n"
+        f"   Optional pre-step für besonders heikle Bullets (Security, Concurrency,\n"
+        f"   Distributed-Systems, Auth, Crypto, DB-Migrations): zusätzlicher Adversarial-\n"
+        f"   Diff-Review via /tmux-pair:dg (Plugin-Skill, Dinesh-vs-Gilfoyle Debate).\n"
+        f"   Empfehle das dem Reviewer-Engineer als REVIEW-AMENDMENT, NICHT autonom.\n"
+        f"   Reviewer entscheidet ob er es einsetzt; nicht Pflicht. Output von /dg ist\n"
+        f"   ein zusätzlicher Findings-Block, der entweder schon im REVIEW-Loop\n"
+        f"   geklärt wurde oder als BLOCKER im Loop nochmal auftaucht.\n"
+        f"\n"
         f"   Spawn ZWEI Subagents PARALLEL in EINER Nachricht (zwei Task-Calls):\n"
         f"     - subagent_type='tmux-pair:gate-3-verifier' (Haiku 4.5, runs\n"
         f"       build/test, checks plan coverage)\n"

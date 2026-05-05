@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
-description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.5.0
+description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
+version: 0.6.0
 ---
 
 # tmux-pair-orchestration
@@ -253,11 +253,20 @@ tmux kill-window -t <window-name>
 
 Cleanup is the human's call. Neither the orchestrator nor the engineers should remove worktrees, kill windows, or delete branches during a run.
 
+## Companion skills (bundled)
+
+The plugin ships two companion skills, both plugin-namespaced so they do not collide with user-local installs of the same names:
+
+- **`/tmux-pair:gepa`** — Genetic-Pareto prompt/text-artifact optimization (paper arXiv:2507.19457). Used opt-in after rules-bootstrap to optimize the freshly generated `.claude/rules/*.md` against user-supplied test diffs. The orchestrator suggests it after a fresh bootstrap; the user runs it in their own pane (GEPA needs test diffs the orchestrator does not have). Skill files live under `skills/gepa/` (SKILL.md, scripts/gepa-loop.py, references/{patterns,gepa-library}.md).
+- **`/tmux-pair:dg`** — Dinesh-vs-Gilfoyle adversarial code review. Two AI personas (one attacker, one defender) debate a diff or file until the defender concedes, defends, or the round limit hits. Useful as an optional pre-GATE-3 step on security/concurrency/auth/crypto/migration bullets where extra adversarial pressure pays off. Skill files live under `skills/dg/` (SKILL.md, gilfoyle-agent.md, dinesh-agent.md).
+
+External companion (NOT bundled, install separately if you want it): the official `code-simplifier` plugin from `claude-plugins-official` for refactor-passes after a feature lands.
+
 ## Additional resources
 
 ### References
 
-- **`references/gated-workflow.md`** — 4-gate workflow (Clarify, Plan-Check, Loop, Final-Verify), subagent prompt templates, gate event vocabulary, gate-specific failure modes.
+- **`references/gated-workflow.md`** — 5-gate workflow (Clarify, Reviewer-Readiness, Plan-Check, Loop, Final-Verify), subagent prompt templates, gate event vocabulary, gate-specific failure modes.
 - **`references/pair-protocol.md`** — full event vocabulary, edge cases, escalation rules, and end-of-run handshake.
 - **`references/triple-vs-pair.md`** — decision matrix with worked examples for choosing the mode.
 - **`references/failure-modes.md`** — common failure modes with diagnostics, recovery steps, and prevention.
