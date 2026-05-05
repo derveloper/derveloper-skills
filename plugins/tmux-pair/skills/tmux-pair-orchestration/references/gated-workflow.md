@@ -1,21 +1,21 @@
 # Gated Workflow
 
-Both `/pair` and `/triple` run through three forced quality gates before code lands on the branch:
+Both `/pair` and `/triple` run through four forced quality gates before code lands on the branch:
 
 ```
-Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges
+Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges
 ```
 
-Gates exist because pair-loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 2 and 3; the user enforces gate 1 via `AskUserQuestion`.
+Gates exist because pair-loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 1.5, 2, and 3; the user enforces gate 1 via `AskUserQuestion`.
 
 This file is the long version. The bundled briefings already encode the workflow — read this when adapting briefings, debugging a stuck gate, or deciding when to force a `BLOCKER`.
 
 ## Who runs which gate
 
-| Mode | Gate 1 (Clarify) | Gate 2 (Plan-Check) | Gate 3 (Final-Verify) |
-|------|-------------------|---------------------|------------------------|
-| **triple** | Orchestrator asks user directly via `AskUserQuestion` (in its own pane) | Orchestrator spawns subagent | Orchestrator spawns two subagents (verifier + code-reviewer) |
-| **pair** | Human asks user directly via `AskUserQuestion` | Human spawns subagent from their own context | Human spawns two subagents from their own context |
+| Mode | Gate 1 (Clarify) | Gate 1.5 (Reviewer-Readiness) | Gate 2 (Plan-Check) | Gate 3 (Final-Verify) |
+|------|-------------------|-------------------------------|---------------------|------------------------|
+| **triple** | Orchestrator asks user directly via `AskUserQuestion` (in its own pane) | Orchestrator spawns readiness-check subagent; if NEEDS-RULES, runs bootstrap loop with `AskUserQuestion` per gap | Orchestrator spawns subagent | Orchestrator spawns two subagents (verifier + code-reviewer) |
+| **pair** | Human asks user directly via `AskUserQuestion` | Human spawns readiness-check subagent; bootstrap loop owned by human | Human spawns subagent from their own context | Human spawns two subagents from their own context |
 
 In a triple the orchestrator owns the `AskUserQuestion` call so the human stays unblocked. The human only sees major events (`MAJOR-STEP`, `BLOCKER`, `DONE`, `ABORT`, gate-3 verdicts, plus rare `GATE-1-ESCALATE` if the orchestrator hits a question outside its decision authority). In a pair the human IS the orchestrator and asks directly.
 
@@ -48,6 +48,53 @@ In a triple the orchestrator owns the `AskUserQuestion` call so the human stays 
 - Planning without GATE 1. The plan reflects the orchestrator's guesses, not the user's intent.
 - `AskUserQuestion` with vague options ("how should we approach this?"). Always concrete: option A vs option B with clear consequences each.
 - Forwarding raw user prose as a "decision" without normalising it back into `A`/`Q` form.
+
+## Gate 1.5: Reviewer-Readiness
+
+**Goal:** make sure the reviewer has enough project-specific guidance to do a solid review BEFORE engineers start coding. A reviewer without rules says "looks fine" and lets bad code land.
+
+**Trigger:** GATE 1 produced clarify-answers; orchestrator/human about to plan.
+
+**Mechanism:** spawn ONE `tmux-pair:reviewer-readiness-check` subagent (Sonnet 4.6, scoped tools `Read+Grep+Glob+Bash`, NO `Edit`/`Write`). The agent reads `.claude/rules/*.md` plus `CLAUDE.md` and scores an 8-item hard checklist:
+
+1. Style & Format
+2. Tests
+3. Architecture & Boundaries
+4. Anti-Patterns
+5. Naming
+6. Security & Privacy
+7. Build & Verification
+8. Domain (project-specific)
+
+Each topic gets one of three classifications:
+
+- `COVERED`: a `.claude/rules/<file>.md` cites concrete tools, thresholds, or patterns. The reviewer can quote it.
+- `NA`: explicitly not applicable, with a one-line reason (e.g., "no domain rules for a generic CLI utility"). NA is a real claim, not a soft skip.
+- `MISSING`: no project-specific guidance found.
+
+Output: `VERDICT: READY | NEEDS-RULES` plus `LANGUAGES`, `COVERAGE` per topic, `GAPS` (falsifiable list), `NOTES`.
+
+**Verdict handling:**
+
+- `READY` -> proceed to plan + GATE 2.
+- `NEEDS-RULES` -> bootstrap loop:
+  1. Per gap, orchestrator/human calls `AskUserQuestion` with 2-4 concrete options ("Welcher Linter blockiert Merges?", "Welcher Test-Runner ist Pflicht?", etc.). Recommended option first, suffix `(Recommended)`.
+  2. Spawn `tmux-pair:rules-bootstrap` subagent (Sonnet 4.6, `Read+Grep+Glob+Bash+Edit+Write`). Inputs: GAPS list, user-answer block, detected languages, plugin templates path (`${CLAUDE_PLUGIN_ROOT}/templates/rules/`). Subagent bakes `.claude/rules/<topic>.md` from templates + repo recon + user answers.
+  3. Re-run readiness-check. If `READY` -> proceed. If `NEEDS-RULES` after a third iteration: `AskUserQuestion` "abort, manually amend, or accept partial coverage?". No master ping; the orchestrator owns the loop.
+- `READY` after a fresh bootstrap (rules just generated): orchestrator may ask the user via `AskUserQuestion` whether to run a `/gepa` optimization pass on the new rules. Default: skip. The plugin does NOT call `/gepa` automatically — the GEPA skill is optional user setup; if the user opts in, they trigger `/gepa` themselves out-of-band after the run.
+
+**Why a separate gate, not part of GATE 2:** the rules state SHAPES the plan (which test runner, which architecture boundary, which security check). The plan-check then verifies the plan against those rules. Doing both in GATE 2 confuses two different judgements (intent vs craft).
+
+**Privacy boundary:** plugin templates are sanitized skeletons (Rust, TypeScript, Python, Go, JavaScript, Java, generic). They do NOT carry company-specific naming, ADRs, or domain references. Project-specific content comes from repo recon + user answers, baked into the user's own `.claude/rules/`.
+
+**Anti-patterns:**
+
+- Skipping GATE 1.5 because "the project already has rules". Rules-thinness is the point of the check; if the reviewer can't cite a concrete tool, the rule isn't there in a useful form.
+- Reviewer-readiness as soft self-judgement. The 8 topics are mandatory; each needs a falsifiable verdict (COVERED/NA/MISSING).
+- Bootstrap-without-AskUser. Generating rules from templates alone misses project specifics; the user-answer step is the magic.
+- Rules-bootstrap touching topics already COVERED. The agent only writes rules for GAPS; existing rules are owned by the project.
+- Auto-running `/gepa`. GEPA is optional, opt-in, out-of-band. The plugin does not depend on user-installed skills.
+- ASCII substitutes (ae/oe/ue/ss) in generated rules. Real Umlauts ä/ö/ü/ß everywhere.
 
 ## Gate 2: Plan-Check
 
@@ -288,15 +335,11 @@ GATE 2 and GATE 3 explicitly check the diff against these standards.
 
 ## Pre-flight (greenfield repos)
 
-If `./CLAUDE.md` and `.claude/rules/` are absent, the run is greenfield and engineers do NOT touch production code first. Pre-flight:
+GATE 1.5 handles greenfield automatically. With no `.claude/rules/` directory, the readiness-check returns `NEEDS-RULES` with all 8 topics as gaps; the bootstrap loop initialises the complete rules set from plugin templates + user answers + repo recon. Engineers are briefed AFTER rules exist, not before.
 
-1. Detect tech stack from manifest files: `Cargo.toml`, `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, `deps.edn`, `*.csproj`.
-2. Generate one rules file per relevant component in `.claude/rules/<key>.md`. Each file: patterns, anti-patterns, tooling, test strategy, security points, privacy/compliance, extensibility.
-   Examples: `rust.md`, `frontend-tailwind-alpine.md`, `prometheus-metrics.md`, `security-input-handling.md`.
-3. Rules-generation is the FIRST plan bullet. It goes through GATE 2 like everything else.
-4. Engineers wait until rules are committed before writing production code.
+The orchestrator does NOT make rules-generation the first plan bullet anymore — rules land in GATE 1.5, before planning. That keeps the plan focused on the actual feature work.
 
-If `CLAUDE.md` and `.claude/rules/` exist, pre-flight is skipped and existing rules are respected.
+For projects with thin or partial rules, GATE 1.5 fills only the missing topics (`GAPS`); existing rules are not rewritten.
 
 ## Gate event vocabulary
 
@@ -304,6 +347,8 @@ If `CLAUDE.md` and `.claude/rules/` exist, pre-flight is skipped and existing ru
 |-------|------|-----|---------|
 | `GATE-1-ESCALATE <window>` | orchestrator | human | Triple only. Reason + question(s) outside the orchestrator's decision authority |
 | `GATE-1-DECISION` | human | orchestrator | Triple only. Human's answer to the escalated question(s) |
+| `GATE-1.5-NEEDS-RULES` | orchestrator-internal | orchestrator-internal | readiness-check output; not crossed pane boundary, drives bootstrap loop |
+| `GATE-1.5-READY` | orchestrator-internal | orchestrator-internal | readiness-check pass; orchestrator proceeds to plan |
 | `GATE-2-BLOCKER` | orchestrator/human | human/user | subagent's BLOCKER findings |
 | `PLAN-LOCKED:` | orchestrator/human | engineers | plan + GATE-1 answers + pointers + protocol |
 | `GATE-3-PASS <window>` | orchestrator/human | human/user | diff-stat, commit list |
@@ -315,6 +360,7 @@ These extend the base pair-protocol vocabulary (`REVIEW-READY`, `REVIEW`, `DONE`
 
 ## Failure modes specific to gated runs
 
+- **GATE 1.5 bootstrap-loop diverges.** Reviewer never says READY because each round flags new gaps. Recovery: after iteration 3, orchestrator asks user via `AskUserQuestion` to decide between abort, partial-coverage with explicit accept, or manual rules edit. Prevention: bootstrap subagent only writes rules for items in the GAPS list, does not invent new gaps. Readiness-check must classify every topic as COVERED/NA/MISSING (no "kinda" verdicts).
 - **Engineer skips PLAN-LOCKED.** Writer starts coding before the orchestrator's `PLAN-LOCKED:` arrives. Recovery: orchestrator pings `PROCESS-NEEDS-FIX` with the plan, writer reverts uncommitted work, restarts from PLAN-LOCKED. Prevention: engineer briefing should be explicit ("vor PLAN-LOCKED: KEIN Code").
 - **GATE 2 BLOCKER auto-retried.** Orchestrator silently re-runs the subagent without telling human. Symptom: same plan keeps failing GATE 2 with similar findings. Prevention: orchestrator briefing forbids auto-retry.
 - **GATE 3 BLOCKER ignored.** Human sees BLOCKER but merges anyway under time pressure. The work then breaks production. Prevention: GATE-3-BLOCKER pings should be loud (multi-line, explicit BLOCKER list, no PASS sneaking in).

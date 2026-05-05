@@ -1,7 +1,7 @@
 {
   "name": "tmux-pair",
-  "version": "0.4.0",
-  "description": "Spawn writer/reviewer agent pairs (or writer/reviewer/orchestrator triples) in fresh git worktrees, wired up via tmux. Each agent runs in its own pane and talks to its peer through a small Python helper. Includes a 4-gate workflow (Clarify, Plan-Check, Implementation Loop, Final-Verify) with scoped plugin-agents for the gates (gate-2-plan-check on Sonnet, gate-3-verifier on Haiku, gate-3-code-reviewer on Sonnet, RECON via built-in Explore on Haiku), durable standards via claude --append-system-prompt-file + codex AGENTS.md, --effort flag in boot-command, and a model-aware compact-watcher with /compact [focus] support.",
+  "version": "0.5.0",
+  "description": "Spawn writer/reviewer agent pairs (or writer/reviewer/orchestrator triples) in fresh git worktrees, wired up via tmux. Each agent runs in its own pane and talks to its peer through a small Python helper. Includes a 5-gate workflow (Clarify, Reviewer-Readiness with rules-bootstrap loop, Plan-Check, Implementation Loop, Final-Verify) with scoped plugin-agents for the gates (reviewer-readiness-check + rules-bootstrap on Sonnet, gate-2-plan-check on Sonnet, gate-3-verifier on Haiku, gate-3-code-reviewer on Sonnet, RECON via built-in Explore on Haiku), shipped rules templates for 7 stacks (Rust, TypeScript, Python, Go, JavaScript, Java, generic), durable standards via claude --append-system-prompt-file + codex AGENTS.md, --effort flag in boot-command, and a model-aware compact-watcher with /compact [focus] support.",
   "author": {
     "name": "derveloper",
     "url": "https://github.com/derveloper"

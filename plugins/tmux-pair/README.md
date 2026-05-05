@@ -89,12 +89,20 @@ The orchestrator's gate-checks and recon are routed to plugin-namespaced subagen
 
 | Role | Subagent | Model | Tools | Why |
 |------|----------|-------|-------|-----|
+| GATE 1.5 Readiness-Check | `tmux-pair:reviewer-readiness-check` | Sonnet 4.6 | Read + Grep + Glob + Bash | Reviews `.claude/rules/*.md` against an 8-item checklist (style, tests, architecture, anti-patterns, naming, security, build, domain). Returns READY or NEEDS-RULES. NO Edit/Write so it cannot bake rules itself. |
+| GATE 1.5 Rules-Bootstrap | `tmux-pair:rules-bootstrap` | Sonnet 4.6 | Read + Grep + Glob + Bash + Edit + Write | Bakes `.claude/rules/<topic>.md` from plugin language templates + repo recon + orchestrator-collected user answers. Edit+Write because writing rules files IS the job. Does not call AskUserQuestion itself; orchestrator owns the user dialog. |
 | GATE 2 Plan-Check | `tmux-pair:gate-2-plan-check` | Sonnet 4.6 | Read + Grep + Glob + Bash | Plan validation needs reasoning. NO Edit/Write so the agent cannot accidentally commit code. |
 | GATE 3 Verifier | `tmux-pair:gate-3-verifier` | Haiku 4.5 | Read + Grep + Glob + Bash | Goal-backward coverage check + build/test runs are deterministic; Haiku is sufficient and ~5x cheaper than Sonnet. |
 | GATE 3 Code-Reviewer | `tmux-pair:gate-3-code-reviewer` | Sonnet 4.6 | Read + Grep + Glob + Bash | Style nuance, security edge cases, anti-AI-slop detection need Sonnet's nuance. |
 | RECON | built-in `Explore` | Haiku 4.5 | read-only | File-snippet lookups + pointer extraction; Anthropic's stock Explore agent fits. |
 
 Net effect: ~60-70 percent token savings vs all-Opus subagents, no quality loss on gate-tasks. The agent files live in `agents/` and ship with the plugin; per-spawn customisation goes in those files, not in the orchestrator briefing.
+
+### Reviewer-Readiness + rules-bootstrap (GATE 1.5)
+
+A reviewer without rules says "looks fine" — that is the failure mode GATE 1.5 prevents. The orchestrator runs the readiness-check before planning. On `NEEDS-RULES`, it loops: per gap one `AskUserQuestion`, then the bootstrap subagent generates `.claude/rules/<topic>.md` from one of seven shipped language templates (Rust, TypeScript, Python, Go, JavaScript, Java, generic skeleton) plus repo recon plus user answers. Templates ship in `templates/rules/` and are sanitized — no company-specific naming, ADRs, or domain references. Project-specific content comes from the user's own answers, baked into the user's own repo.
+
+Optional opt-in `/gepa` pass after fresh rules; the plugin does not call `/gepa` automatically because the GEPA skill is optional user setup. If the user opts in, they trigger `/gepa` themselves out-of-band after the run.
 
 ## Token management (long-running pairs/triples)
 

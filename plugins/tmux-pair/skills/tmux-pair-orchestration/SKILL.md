@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
-description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Plan-Check → Loop → Final-Verify with REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.4.0
+description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
+version: 0.5.0
 ---
 
 # tmux-pair-orchestration
@@ -55,13 +55,14 @@ The standards block covers: real Umlaute (no ASCII substitutes), Conventional Co
 
 ## Gated workflow (default)
 
-Both `/pair` and `/triple` enforce three quality gates before code lands on the branch. The bundled briefings already encode them; this is the high-level shape:
+Both `/pair` and `/triple` enforce four quality gates before code lands on the branch. The bundled briefings already encode them; this is the high-level shape:
 
 ```
-Recon -> GATE 1 Clarify -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges
+Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges
 ```
 
 - **GATE 1 (Clarify)** — whoever owns the gate (orchestrator in triple, human in pair) calls `AskUserQuestion` directly in their own pane. The triple orchestrator does NOT ping the human for clarify — human only sees a `GATE-1-ESCALATE` if a question is outside the orchestrator's authority. Engineers wait for `PLAN-LOCKED:`.
+- **GATE 1.5 (Reviewer-Readiness)** — one scoped subagent (`tmux-pair:reviewer-readiness-check`, Sonnet 4.6, Read+Grep+Glob+Bash, NO Edit/Write) reads `.claude/rules/*.md` and scores an 8-item checklist (style, tests, architecture, anti-patterns, naming, security, build, domain). On `NEEDS-RULES`, the orchestrator runs a bootstrap loop: per gap one `AskUserQuestion`, then `tmux-pair:rules-bootstrap` (Sonnet 4.6, R+G+G+B+Edit+Write) bakes `.claude/rules/<topic>.md` from plugin language templates (Rust, TypeScript, Python, Go, JavaScript, Java, generic) + repo recon + user answers, then re-run readiness-check. Loop terminates at READY or after iteration 3 with user-decided abort/partial-coverage/manual-amend. Optional opt-in `/gepa` pass after fresh rules; the plugin does not call `/gepa` automatically.
 - **GATE 2 (Plan-Check)** — one scoped subagent (`tmux-pair:gate-2-plan-check`, Sonnet 4.6, Read+Grep+Glob+Bash, NO Edit/Write tools) verifies the plan goal-backward AND checks plan quality. `BLOCKER` escalates to human, no auto-retry. Scoped tools = the agent structurally cannot commit code instead of just verdicting.
 - **Implementation Loop** — standard pair protocol (`REVIEW-READY` -> `REVIEW` -> fix -> `DONE`). Smart test subset per cycle (only diff-touched tests), full suite + lint + build pre-DONE. Mid-run findings persisted to memory + rules + engineer-briefing-amendment, not just discussed in-pane.
 - **GATE 3 (Final-Verify)** — two parallel scoped subagents check the diff: `tmux-pair:gate-3-verifier` (Haiku 4.5, runs build/test, checks plan-bullet coverage) + `tmux-pair:gate-3-code-reviewer` (Sonnet 4.6, adversarial diff review). Both PASS or human pings the master.
@@ -81,7 +82,7 @@ Cross-cutting:
 - **Edit efficiency is part of the plan.** Pattern replace at >3 sites is a `sed`-job. Boilerplate generation = template + substitution. The plan names the tool.
 - **Few, descriptive commits.** Engineers commit at logical-step granularity during the loop; the human squashes before merge to `main`. Commit messages must be substantial enough that a meaningful squash message can be distilled.
 
-Greenfield repos (no `CLAUDE.md`, no `.claude/rules/`) get a pre-flight step: the first plan bullet is always "generate `.claude/rules/<key>.md` per detected tech stack". Engineers wait until rules are committed before touching production code.
+Greenfield repos (no `CLAUDE.md`, no `.claude/rules/`) are handled by GATE 1.5 automatically: the readiness-check returns `NEEDS-RULES` with all 8 topics as gaps, the bootstrap loop generates the full rules set from plugin templates + user answers + repo recon, and engineers are briefed only AFTER rules exist. Plan stays focused on the actual feature work; rules-generation is no longer a plan bullet.
 
 The full workflow with subagent prompt templates, gate event vocabulary, and failure modes is in `references/gated-workflow.md`. Gate events extend the base pair-protocol vocabulary documented in `references/pair-protocol.md`.
 
