@@ -2191,8 +2191,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="base ref (default: origin/main)")
     pa.add_argument("--task", default="",
                     help="task description sent to both agents")
-    pa.add_argument("--writer-agent", default="claude")
-    pa.add_argument("--reviewer-agent", default="codex")
+    pa.add_argument("--writer-agent", default="codex")
+    pa.add_argument("--reviewer-agent", default="claude")
     pa.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
                     help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
                          "1M Context). Sent as /model post-boot for any "
@@ -2215,8 +2215,8 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--base", default="origin/main")
     tr.add_argument("--task", default="",
                     help="task description sent to the orchestrator only")
-    tr.add_argument("--writer-agent", default="claude")
-    tr.add_argument("--reviewer-agent", default="codex")
+    tr.add_argument("--writer-agent", default="codex")
+    tr.add_argument("--reviewer-agent", default="claude")
     tr.add_argument("--orchestrator-agent", default="claude")
     tr.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
                     help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
