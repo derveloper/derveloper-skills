@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.7.0
+version: 0.8.0
 ---
 
 # tmux-pair-orchestration
@@ -24,6 +24,28 @@ Default agent assignments (overridable):
 - orchestrator: `claude` (recon + briefing + filtering)
 
 These are defaults baked into the bundled script. Different agent CLIs work fine: point `--writer-agent`, `--reviewer-agent`, `--orchestrator-agent` at any name registered in `~/.config/tmux-pair/agents.json`.
+
+## Dual-Review (opt-in)
+
+Both modes accept `--dual-review` to spawn TWO reviewers (default: claude as reviewer-1, codex as reviewer-2) instead of one. The default is OFF; you only get the second reviewer when you ask for it.
+
+| Mode | Layout with `--dual-review` |
+|------|------------------------------|
+| **pair** | Writer left (main pane), Reviewer-1 top right, Reviewer-2 bottom right (right side vertically split) |
+| **triple** | Orchestrator on top full width, Writer bottom left, Reviewer-1 + Reviewer-2 stacked on the bottom right |
+
+Reviewer protocol per cycle:
+
+1. Writer pings `REVIEW-READY` to BOTH reviewers in parallel.
+2. Both reviewers review independently — no crosstalk before they have their own findings.
+3. Reviewers swap findings (`REVIEWER-FINDINGS:` to peer), give each other a `PEER-REVIEW:` (agree, disagree, missed-this).
+4. Each reviewer sends a final `REVIEW-FINAL (Reviewer):` to the Orchestrator (= human in pair, = orchestrator agent in triple).
+5. Orchestrator consolidates both reports into ONE merged review (keep all unique BLOCKERs, dedupe overlaps, surface contradictions with context).
+6. Orchestrator sends ONE `REVIEW-CONSOLIDATED:` to the writer. Reviewers never speak directly to the writer.
+
+Override the second reviewer with `--reviewer-2-agent <agent>`. Without `--dual-review` the default single-reviewer flow stays exactly as before — no change for existing users.
+
+When to opt in: risky refactors, security-sensitive code, blast-radius changes, anything where you want diversity of opinions on the diff. Cost: one extra agent token-burn and one extra review-merge step in the orchestrator.
 
 ## When to use which mode
 

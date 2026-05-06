@@ -22,11 +22,14 @@ Spawn a writer + reviewer pair in a fresh `git worktree`, each in its own tmux p
 - `/pair ~/code/myapp main webhook-backoff implement exponential backoff for outbound webhooks`
 - `/pair ~/code/myapp main hotfix-x --no-worktree` (work directly on the project's current branch)
 - `/pair ~/code/myapp main small-job --claude-model claude-opus-4-6` (200k context, cheaper for short tasks)
+- `/pair ~/code/myapp main risky-refactor --dual-review` (two reviewers cross-checking, codex + claude)
 
 ## Optional flags
 
 - `--no-worktree` — skip `git worktree add`. Engineers commit directly on the project's current branch in the project directory. Use sparingly: any uncommitted work in the project becomes pair-visible. With `--no-worktree`, the plugin skips writing AGENTS.md (codex receives standards via the briefing only).
 - `--claude-model <slug>` — claude model to switch into post-boot via `/model <slug>` (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically. Codex always uses `gpt-5.5 xhigh` per user setup.
+- `--dual-review` — opt-in second reviewer. Spawns reviewer-1 (claude by default) and reviewer-2 (codex by default) stacked vertically on the right side. Both review independently, swap findings, then send a final report each to the human (= orchestrator in pair-mode) for consolidation. Off by default.
+- `--reviewer-2-agent <agent>` — override the second reviewer agent (default codex). Only relevant with `--dual-review`.
 
 ## Action
 
@@ -38,14 +41,14 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py pair \
   --base <base> \
   --feature <feature> \
   --task "<task>" \
-  [--no-worktree] [--claude-model <slug>]
+  [--no-worktree] [--claude-model <slug>] [--dual-review] [--reviewer-2-agent <agent>]
 ```
 
 If the feature description is missing or ambiguous, ask the user before spawning. Spawning idle agents costs more than asking one short question.
 
 ## Output
 
-JSON with `worktree`, `branch`, `window`, `writer_pane`, `reviewer_pane`, `human_pane`. Relay these back to the user so they can address either agent directly via the `send` subcommand.
+JSON with `worktree`, `branch`, `window`, `writer_pane`, `reviewer_pane`, `human_pane`. With `--dual-review`: additional `reviewer_2_pane` + `reviewer_2_agent`. Relay these back to the user so they can address either agent directly via the `send` subcommand.
 
 ## Cleanup (manual)
 

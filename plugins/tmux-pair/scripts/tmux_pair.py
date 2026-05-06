@@ -1195,16 +1195,65 @@ def _briefing_gate_prompts(*, wt_path: Path, base: str) -> str:
 
 
 
+def _dual_review_block(role: str, partner_pane: str,
+                       peer_reviewer_pane: str | None,
+                       final_target_pane: str,
+                       final_target_label: str) -> str:
+    """Insert a DUAL-REVIEW directive into a briefing when peer_reviewer_pane
+    is set. For Writer: peer is the second reviewer (REVIEW-READY goes to
+    BOTH). For Reviewer: peer is the second reviewer counterpart (parallel
+    review, then findings-swap, then merged report to final_target)."""
+    if not peer_reviewer_pane:
+        return ""
+    if role.lower() == "writer":
+        send_peer = _send_command(peer_reviewer_pane)
+        send_main = _send_command(partner_pane)
+        return (
+            f"DUAL-REVIEW: zwei Reviewer aktiv. Primärer Reviewer (REVIEW-READY-\n"
+            f"  Empfänger Nr. 1): {partner_pane}. Zweiter Reviewer: {peer_reviewer_pane}.\n"
+            f"  REVIEW-READY-Pings IMMER an BEIDE senden:\n"
+            f"    {send_main} \"REVIEW-READY: <summary>\"\n"
+            f"    {send_peer} \"REVIEW-READY: <summary>\"\n"
+            f"  Final-APPROVE kommt konsolidiert vom {final_target_label}, NICHT direkt\n"
+            f"  von einzelnem Reviewer. Wenn nur ein Reviewer APPROVE pingt: warten\n"
+            f"  bis konsolidierte Entscheidung von {final_target_label} kommt.\n\n"
+        )
+    if role.lower() == "reviewer":
+        send_peer = _send_command(peer_reviewer_pane)
+        send_target = _send_command(final_target_pane)
+        return (
+            f"DUAL-REVIEW: du bist EINER von zwei Reviewern. Counterpart-Reviewer:\n"
+            f"  {peer_reviewer_pane}. Workflow je REVIEW-READY:\n"
+            f"  1. Independent Review: lies Diff selbst, sammle Findings (BLOCKER /\n"
+            f"     WARNING / NIT). KEIN Austausch vor Schritt 2.\n"
+            f"  2. Findings-Swap an Counterpart:\n"
+            f"     {send_peer} \"REVIEWER-FINDINGS:\\n<deine_liste>\"\n"
+            f"  3. Counterparts Findings reviewen: ergänzen, widersprechen, dedup.\n"
+            f"     Antwort an Counterpart:\n"
+            f"     {send_peer} \"PEER-REVIEW: <comments_on_counterpart_findings>\"\n"
+            f"  4. Finalen kombinierten Report an {final_target_label}:\n"
+            f"     {send_target} \"REVIEW-FINAL ({role}): <merged_findings + APPROVE/BLOCK>\"\n"
+            f"  {final_target_label} konsolidiert beide Reports zu EINEM APPROVE/BLOCK\n"
+            f"  und gibt das an den Writer. Du sprichst NICHT direkt mit Writer.\n\n"
+        )
+    return ""
+
+
 def _briefing_pair(
     *, role: str, partner_role: str, partner_pane: str, human_pane: str,
     wt_path: Path, branch: str, base: str, project: str,
     task: str,
+    peer_reviewer_pane: str | None = None,
 ) -> str:
     send_cmd = _send_command(partner_pane)
     send_human = _send_command(human_pane)
+    dual_block = _dual_review_block(role, partner_pane, peer_reviewer_pane,
+                                    final_target_pane=human_pane,
+                                    final_target_label="Human (Orchestrator)")
     return (
         f"[ROLE: {role} (gated workflow, human orchestriert)]\n\n"
         f"Partner: {partner_role} ({partner_pane}).\n"
+        f"{dual_block}"
         f"Human: {human_pane}. Human übernimmt Recon, Clarify, Plan-Check\n"
         f"und Final-Verify. Du wartest auf 'PLAN-LOCKED:'-Briefing vom Human, BEVOR\n"
         f"du Code schreibst. Bis dahin: still bleiben oder vom Human angefragte\n"
@@ -1262,14 +1311,19 @@ def _briefing_triple_engineer(
     *, role: str, partner_role: str, partner_pane: str,
     orchestrator_pane: str,
     wt_path: Path, branch: str, base: str, project: str,
+    peer_reviewer_pane: str | None = None,
 ) -> str:
     """Briefing for writer/reviewer in a triple. Engineers stay idle until the
     orchestrator delivers a 'PLAN-LOCKED:' briefing post GATE 2."""
     send_partner = _send_command(partner_pane)
     send_orch = _send_command(orchestrator_pane)
+    dual_block = _dual_review_block(role, partner_pane, peer_reviewer_pane,
+                                    final_target_pane=orchestrator_pane,
+                                    final_target_label="Orchestrator")
     return (
         f"[ROLE: {role} (gated workflow, orchestrator geführt)]\n\n"
         f"Partner: {partner_role} ({partner_pane}).\n"
+        f"{dual_block}"
         f"Orchestrator: {orchestrator_pane} (briefst dich nach Recon + GATE 1 + GATE 2).\n"
         f"Du wartest jetzt PASSIV auf 'PLAN-LOCKED:'-Briefing vom Orchestrator.\n"
         f"Vor PLAN-LOCKED: KEIN Code, KEIN eigener Recon. Nur antworten wenn der\n"
@@ -1340,6 +1394,8 @@ def _briefing_orchestrator(
     wt_path: Path, branch: str, base: str, project: str, window_name: str,
     task: str, mode_note: str = "",
     claude_model: str = DEFAULT_CLAUDE_MODEL,
+    reviewer_2_pane: str | None = None,
+    reviewer_2_agent: str | None = None,
 ) -> str:
     send_writer = _send_command(writer_pane)
     send_reviewer = _send_command(reviewer_pane)
@@ -1348,6 +1404,34 @@ def _briefing_orchestrator(
     mode_block = f"MODE:     {mode_note}\n" if mode_note else ""
     threshold_k = _threshold_for_model(claude_model)
     interval_sec = 180  # poll cadence stays at 3 min regardless of context size
+    dual_review = bool(reviewer_2_pane)
+    send_reviewer_2 = _send_command(reviewer_2_pane) if dual_review else ""
+    dual_review_panes_line = (
+        f"  {reviewer_2_pane}  Reviewer-2 ({reviewer_2_agent})  "
+        f"- unten rechts unten\n"
+        if dual_review else ""
+    )
+    dual_review_directive = (
+        f"DUAL-REVIEW MODE\n"
+        f"  Zwei Reviewer aktiv: {reviewer_pane} ({reviewer_agent}) und\n"
+        f"  {reviewer_2_pane} ({reviewer_2_agent}). Pro Implementation-Cycle:\n"
+        f"  1. Writer pingt REVIEW-READY an BEIDE Reviewer parallel\n"
+        f"  2. Beide reviewen INDEPENDENT (keine Crosstalks vor Schritt 3)\n"
+        f"  3. Reviewer tauschen ihre Findings untereinander aus, geben sich\n"
+        f"     gegenseitiges PEER-REVIEW (welche Findings stehen, welche\n"
+        f"     fehlen, welche sind doppelt)\n"
+        f"  4. Beide schicken einen REVIEW-FINAL-Report an DICH (Orchestrator)\n"
+        f"  5. DU konsolidierst beide Reports zu EINEM kombinierten Review:\n"
+        f"     - Alle einzigartigen BLOCKER aus beiden Listen behalten\n"
+        f"     - Bei widersprüchlichen Findings: jenes übernehmen das\n"
+        f"       falsifizierbar belegt ist, oder beide listen mit\n"
+        f"       Kontext-Hinweis\n"
+        f"     - Doppelte Findings dedupen\n"
+        f"  6. EIN konsolidiertes APPROVE/BLOCK an Writer schicken:\n"
+        f"     {send_writer} \"REVIEW-CONSOLIDATED: <merged_findings>\"\n"
+        f"  Reviewer sprechen NICHT direkt mit Writer. Writer kennt nur DICH.\n\n"
+        if dual_review else ""
+    )
     return (
         f"[ROLE: Orchestrator (gated workflow)]\n\n"
         f"Du führst Writer + Reviewer durch einen 5-Gate-Workflow:\n"
@@ -1389,9 +1473,12 @@ def _briefing_orchestrator(
         f"PANES\n"
         f"  {orchestrator_pane}  YOU (orchestrator)         - oben, full width\n"
         f"  {writer_pane}    Writer ({writer_agent})     - unten links\n"
-        f"  {reviewer_pane}  Reviewer ({reviewer_agent})  - unten rechts\n"
+        f"  {reviewer_pane}  Reviewer ({reviewer_agent})  - unten rechts"
+        f"{(' oben' if dual_review else '')}\n"
+        f"{dual_review_panes_line}"
         f"  {human_pane}    Human              - andere Pane\n\n"
         f"TASK (vom Human)\n{task or '(keine — frage Human)'}\n\n"
+        f"{dual_review_directive}"
         f"{STANDARDS_BLOCK}\n"
         f"{PLAN_QUALITY_BLOCK}\n"
         f"{RECALL_DISCIPLINE_BLOCK}\n"
@@ -1650,9 +1737,17 @@ def _briefing_orchestrator(
 
 
 def cmd_pair(args: argparse.Namespace) -> int:
-    """Writer + reviewer in a fresh worktree, side by side."""
+    """Writer + reviewer in a fresh worktree, side by side.
+
+    With --dual-review: writer (left) + reviewer-1 (top right) + reviewer-2
+    (bottom right). Reviewers review parallel, swap findings, send final
+    reports to the human (= orchestrator in pair-mode) for consolidation."""
     agents = load_agents()
-    for a in (args.writer_agent, args.reviewer_agent):
+    dual = bool(getattr(args, "dual_review", False))
+    agent_list = [args.writer_agent, args.reviewer_agent]
+    if dual:
+        agent_list.append(args.reviewer_2_agent)
+    for a in agent_list:
         if a not in agents:
             sys.exit(f"error: unknown agent '{a}'")
 
@@ -1660,7 +1755,8 @@ def cmd_pair(args: argparse.Namespace) -> int:
     session = current_session()
 
     writer_name = f"wr.{window_name}"
-    reviewer_name = f"rv.{window_name}"
+    reviewer_name = f"rv1.{window_name}" if dual else f"rv.{window_name}"
+    reviewer_2_name = f"rv2.{window_name}" if dual else None
 
     writer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
@@ -1682,41 +1778,72 @@ def cmd_pair(args: argparse.Namespace) -> int:
         ),
         split="h", display_name=reviewer_name,
     )
+    reviewer_2_pane = None
+    if dual:
+        # Split the reviewer-1 pane vertically -> reviewer-2 underneath.
+        tmux_safe("select-pane", "-t", reviewer_pane)
+        reviewer_2_pane = spawn_pane(
+            session=session, window_name=window_name, cwd=str(wt_path),
+            agent=args.reviewer_2_agent,
+            boot_command=_boot_command_with_standards(
+                agent=args.reviewer_2_agent, agents_dict=agents,
+                window_name=window_name, role="reviewer",
+                claude_effort=args.claude_effort,
+            ),
+            split="v", display_name=reviewer_2_name,
+        )
 
     target_window = f"{session}:{window_name}"
     tmux_safe("select-layout", "-t", target_window, "main-vertical")
 
-    # Wait for both TUIs to finish booting (handles codex trust-dialog).
-    ready = _wait_panes_ready(
-        [(writer_pane, args.writer_agent),
-         (reviewer_pane, args.reviewer_agent)],
-        timeout=70,
-    )
+    # Wait for all TUIs to finish booting (handles codex trust-dialog).
+    panes_to_wait = [
+        (writer_pane, args.writer_agent),
+        (reviewer_pane, args.reviewer_agent),
+    ]
+    if dual:
+        panes_to_wait.append((reviewer_2_pane, args.reviewer_2_agent))
+    ready = _wait_panes_ready(panes_to_wait, timeout=70)
 
     # Slash-commands now that the TUIs accept input cleanly.
     _post_boot_slashes(writer_pane, args.writer_agent, writer_name,
                        claude_model=args.claude_model)
     _post_boot_slashes(reviewer_pane, args.reviewer_agent, reviewer_name,
                        claude_model=args.claude_model)
+    if dual:
+        _post_boot_slashes(reviewer_2_pane, args.reviewer_2_agent,
+                           reviewer_2_name, claude_model=args.claude_model)
 
     writer_brief = _briefing_pair(
         role="Writer", partner_role="reviewer", partner_pane=reviewer_pane,
         human_pane=human_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         task=args.task or "",
+        peer_reviewer_pane=reviewer_2_pane,
     )
     reviewer_brief = _briefing_pair(
         role="Reviewer", partner_role="writer", partner_pane=writer_pane,
         human_pane=human_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         task=args.task or "",
+        peer_reviewer_pane=reviewer_2_pane,
     )
 
     _send_briefing_sync(writer_pane, writer_brief)
     _send_briefing_sync(reviewer_pane, reviewer_brief)
+    if dual:
+        reviewer_2_brief = _briefing_pair(
+            role="Reviewer", partner_role="writer", partner_pane=writer_pane,
+            human_pane=human_pane,
+            wt_path=wt_path, branch=branch, base=args.base,
+            project=str(project), task=args.task or "",
+            peer_reviewer_pane=reviewer_pane,
+        )
+        _send_briefing_sync(reviewer_2_pane, reviewer_2_brief)
 
-    print(json.dumps({
+    output = {
         "mode": "pair",
+        "dual_review": dual,
         "worktree": str(wt_path),
         "branch": branch,
         "base": args.base,
@@ -1731,14 +1858,32 @@ def cmd_pair(args: argparse.Namespace) -> int:
         "reviewer_ready": ready.get(reviewer_pane, False),
         "human_pane": human_pane,
         "briefing_dispatch": "sent (post-ready)",
-    }, indent=2))
+    }
+    if dual:
+        output.update({
+            "reviewer_2_pane": reviewer_2_pane,
+            "reviewer_2_agent": args.reviewer_2_agent,
+            "reviewer_2_name": reviewer_2_name,
+            "reviewer_2_ready": ready.get(reviewer_2_pane, False),
+        })
+    print(json.dumps(output, indent=2))
     return 0
 
 
 def cmd_triple(args: argparse.Namespace) -> int:
-    """Orchestrator + writer + reviewer in a fresh worktree."""
+    """Orchestrator + writer + reviewer in a fresh worktree.
+
+    With --dual-review: orchestrator (top full width), writer (bottom left),
+    reviewer-1 (bottom right top), reviewer-2 (bottom right bottom).
+    Reviewers review parallel, swap findings, send final reports to the
+    orchestrator who consolidates before forwarding to writer."""
     agents = load_agents()
-    for a in (args.writer_agent, args.reviewer_agent, args.orchestrator_agent):
+    dual = bool(getattr(args, "dual_review", False))
+    agent_list = [args.writer_agent, args.reviewer_agent,
+                  args.orchestrator_agent]
+    if dual:
+        agent_list.append(args.reviewer_2_agent)
+    for a in agent_list:
         if a not in agents:
             sys.exit(f"error: unknown agent '{a}'")
 
@@ -1747,7 +1892,8 @@ def cmd_triple(args: argparse.Namespace) -> int:
 
     orchestrator_name = f"or.{window_name}"
     writer_name = f"wr.{window_name}"
-    reviewer_name = f"rv.{window_name}"
+    reviewer_name = f"rv1.{window_name}" if dual else f"rv.{window_name}"
+    reviewer_2_name = f"rv2.{window_name}" if dual else None
 
     # Layout: orchestrator on top full width, writer bottom-left, reviewer bottom-right.
     orchestrator_pane = spawn_pane(
@@ -1781,17 +1927,36 @@ def cmd_triple(args: argparse.Namespace) -> int:
         ),
         split="h", display_name=reviewer_name,
     )
+    reviewer_2_pane = None
+    if dual:
+        # Split reviewer-1 pane vertically -> reviewer-2 stacked under it.
+        # Skip select-layout main-horizontal because that would put writer +
+        # reviewer-1 + reviewer-2 in three equal columns; we want stacked.
+        tmux_safe("select-pane", "-t", reviewer_pane)
+        reviewer_2_pane = spawn_pane(
+            session=session, window_name=window_name, cwd=str(wt_path),
+            agent=args.reviewer_2_agent,
+            boot_command=_boot_command_with_standards(
+                agent=args.reviewer_2_agent, agents_dict=agents,
+                window_name=window_name, role="reviewer",
+                claude_effort=args.claude_effort,
+            ),
+            split="v", display_name=reviewer_2_name,
+        )
 
     target_window = f"{session}:{window_name}"
-    tmux_safe("select-layout", "-t", target_window, "main-horizontal")
+    if not dual:
+        tmux_safe("select-layout", "-t", target_window, "main-horizontal")
 
-    # Wait for all three TUIs to boot (handles codex trust-dialogs).
-    ready = _wait_panes_ready(
-        [(orchestrator_pane, args.orchestrator_agent),
-         (writer_pane, args.writer_agent),
-         (reviewer_pane, args.reviewer_agent)],
-        timeout=70,
-    )
+    # Wait for all TUIs to boot (handles codex trust-dialogs).
+    panes_to_wait = [
+        (orchestrator_pane, args.orchestrator_agent),
+        (writer_pane, args.writer_agent),
+        (reviewer_pane, args.reviewer_agent),
+    ]
+    if dual:
+        panes_to_wait.append((reviewer_2_pane, args.reviewer_2_agent))
+    ready = _wait_panes_ready(panes_to_wait, timeout=70)
 
     # Slash-commands post-ready.
     _post_boot_slashes(orchestrator_pane, args.orchestrator_agent, orchestrator_name,
@@ -1800,6 +1965,9 @@ def cmd_triple(args: argparse.Namespace) -> int:
                        claude_model=args.claude_model)
     _post_boot_slashes(reviewer_pane, args.reviewer_agent, reviewer_name,
                        claude_model=args.claude_model)
+    if dual:
+        _post_boot_slashes(reviewer_2_pane, args.reviewer_2_agent,
+                           reviewer_2_name, claude_model=args.claude_model)
 
     no_worktree = bool(getattr(args, "no_worktree", False))
     mode_note = (
@@ -1818,16 +1986,20 @@ def cmd_triple(args: argparse.Namespace) -> int:
         window_name=window_name, task=args.task or "",
         mode_note=mode_note,
         claude_model=args.claude_model,
+        reviewer_2_pane=reviewer_2_pane,
+        reviewer_2_agent=args.reviewer_2_agent if dual else None,
     )
     writer_brief = _briefing_triple_engineer(
         role="Writer", partner_role="reviewer", partner_pane=reviewer_pane,
         orchestrator_pane=orchestrator_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
+        peer_reviewer_pane=reviewer_2_pane,
     )
     reviewer_brief = _briefing_triple_engineer(
         role="Reviewer", partner_role="writer", partner_pane=writer_pane,
         orchestrator_pane=orchestrator_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
+        peer_reviewer_pane=reviewer_2_pane,
     )
 
     # Orchestrator gets the full gated workflow briefing. Engineers get a wait-
@@ -1837,9 +2009,19 @@ def cmd_triple(args: argparse.Namespace) -> int:
     _send_briefing_sync(orchestrator_pane, orchestrator_brief)
     _send_briefing_sync(writer_pane, writer_brief)
     _send_briefing_sync(reviewer_pane, reviewer_brief)
+    if dual:
+        reviewer_2_brief = _briefing_triple_engineer(
+            role="Reviewer", partner_role="writer", partner_pane=writer_pane,
+            orchestrator_pane=orchestrator_pane,
+            wt_path=wt_path, branch=branch, base=args.base,
+            project=str(project),
+            peer_reviewer_pane=reviewer_pane,
+        )
+        _send_briefing_sync(reviewer_2_pane, reviewer_2_brief)
 
-    print(json.dumps({
+    output = {
         "mode": "triple",
+        "dual_review": dual,
         "worktree": str(wt_path),
         "no_worktree": no_worktree,
         "branch": branch,
@@ -1859,7 +2041,15 @@ def cmd_triple(args: argparse.Namespace) -> int:
         "reviewer_ready": ready.get(reviewer_pane, False),
         "human_pane": human_pane,
         "briefing_dispatch": "orchestrator + engineers briefed (post-ready); engineers wait for PLAN-LOCKED from orchestrator after GATE 2",
-    }, indent=2))
+    }
+    if dual:
+        output.update({
+            "reviewer_2_pane": reviewer_2_pane,
+            "reviewer_2_agent": args.reviewer_2_agent,
+            "reviewer_2_name": reviewer_2_name,
+            "reviewer_2_ready": ready.get(reviewer_2_pane, False),
+        })
+    print(json.dumps(output, indent=2))
     return 0
 
 
@@ -2206,6 +2396,14 @@ def build_parser() -> argparse.ArgumentParser:
                          "string skips the flag (claude default applies).")
     pa.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
+    pa.add_argument("--dual-review", action="store_true",
+                    help="spawn TWO reviewers (codex + claude by default) on the right side, "
+                         "vertically stacked. Reviewers review parallel, swap findings, then "
+                         "send a final report each to the orch (= human in pair). "
+                         "Off by default; opt-in.")
+    pa.add_argument("--reviewer-2-agent", default="codex",
+                    help="second reviewer agent when --dual-review is set (default: codex). "
+                         "Ignored without --dual-review.")
     pa.set_defaults(func=cmd_pair)
 
     tr = sub.add_parser("triple",
@@ -2233,6 +2431,14 @@ def build_parser() -> argparse.ArgumentParser:
                          "(claude default applies).")
     tr.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
+    tr.add_argument("--dual-review", action="store_true",
+                    help="spawn TWO reviewers (codex + claude by default) on the right side "
+                         "of the bottom row, vertically stacked. Reviewers review parallel, "
+                         "swap findings, send final reports to the orchestrator who "
+                         "consolidates before forwarding to the writer. Off by default; opt-in.")
+    tr.add_argument("--reviewer-2-agent", default="codex",
+                    help="second reviewer agent when --dual-review is set (default: codex). "
+                         "Ignored without --dual-review.")
     tr.set_defaults(func=cmd_triple)
 
     li = sub.add_parser("list", help="list panes in the current session")

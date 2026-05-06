@@ -24,11 +24,14 @@ The human gets to dispatch the spawn and step away. They are not the recon agent
 - `/triple ~/code/myapp main rate-limit-redesign rebuild the rate limiter so it survives the redis failover scenario from incident 2026-01`
 - `/triple ~/code/myapp main smallfeature --claude-model claude-opus-4-6` (200k context, cheaper for short tasks)
 - `/triple ~/code/myapp main resume-existing --no-worktree --project ~/code/myapp-wt-existing` (reuse an existing worktree directly)
+- `/triple ~/code/myapp main risky-refactor --dual-review` (orchestrator + writer + two cross-checking reviewers)
 
 ## Optional flags
 
 - `--no-worktree` — skip `git worktree add`. Use when resuming on an existing worktree (point `--project` at the worktree path) or running directly on the project branch. With `--no-worktree`, the plugin skips writing AGENTS.md to the project repo; codex picks up standards via the briefing only.
 - `--claude-model <slug>` — claude model to switch into post-boot for orchestrator + writer (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically (700k → 140k). Codex always uses `gpt-5.5 xhigh` per user setup.
+- `--dual-review` — opt-in second reviewer. Layout becomes: orchestrator on top full width, writer bottom-left, reviewer-1 + reviewer-2 stacked on the bottom-right side. Both reviewers review independently, swap findings, then send final reports to the orchestrator who consolidates before forwarding to the writer. Off by default.
+- `--reviewer-2-agent <agent>` — override the second reviewer agent (default codex). Only relevant with `--dual-review`.
 
 ## When to use triple instead of pair
 
@@ -50,14 +53,14 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py triple \
   --base <base> \
   --feature <feature> \
   --task "<task>" \
-  [--no-worktree] [--claude-model <slug>]
+  [--no-worktree] [--claude-model <slug>] [--dual-review] [--reviewer-2-agent <agent>]
 ```
 
 If feature or task is ambiguous, ask the user.
 
 ## Output
 
-JSON with `worktree`, `branch`, `window`, `orchestrator_pane`, `writer_pane`, `reviewer_pane`, `human_pane`. Relay back to the user.
+JSON with `worktree`, `branch`, `window`, `orchestrator_pane`, `writer_pane`, `reviewer_pane`, `human_pane`. With `--dual-review`: additional `reviewer_2_pane` + `reviewer_2_agent`. Relay back to the user.
 
 ## Cleanup (manual)
 
