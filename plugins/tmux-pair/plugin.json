@@ -9,5 +9,24 @@
   "license": "Apache-2.0",
   "homepage": "https://github.com/derveloper/derveloper-skills",
   "repository": "https://github.com/derveloper/derveloper-skills",
-  "keywords": ["tmux", "git-worktree", "pair-programming", "orchestration", "multi-agent"]
+  "keywords": ["tmux", "git-worktree", "pair-programming", "orchestration", "multi-agent"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "tmux-pair",
+    "shortDescription": "Spawn tmux writer/reviewer pairs and gated triples",
+    "longDescription": "Run writer/reviewer or writer/reviewer/orchestrator agent workflows in tmux with fresh git worktrees, review gates, bundled skills, and helper scripts.",
+    "developerName": "derveloper",
+    "category": "Coding",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "websiteURL": "https://github.com/derveloper/derveloper-skills",
+    "privacyPolicyURL": "https://github.com/derveloper/derveloper-skills",
+    "termsOfServiceURL": "https://github.com/derveloper/derveloper-skills",
+    "defaultPrompt": [
+      "Start a writer/reviewer pair for this change.",
+      "Run a gated triple workflow for this feature.",
+      "Use tmux-pair orchestration for this repo."
+    ],
+    "brandColor": "#111111",
+    "screenshots": []
+  }
 }
