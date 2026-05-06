@@ -67,6 +67,22 @@ GATE-1 events are exceptional. Default GATE-1 traffic stays inside the orchestra
 
 **Auto-retry forbidden.** A `GATE-2-BLOCKER` or `GATE-3-BLOCKER` always escalates to human. The orchestrator never re-runs the same subagent without a human decision: same plan failing twice means the planner's mental model is broken, not the plan.
 
+## Dual-Review events (opt-in via `--dual-review`)
+
+When `/pair` or `/triple` was spawned with `--dual-review`, two reviewers run in parallel and the loop adds three reviewer-to-reviewer events plus one orchestrator-to-writer event. Single-reviewer mode keeps the base vocabulary unchanged.
+
+| Event | From | To | When | Payload |
+|-------|------|-----|------|---------|
+| `REVIEW-READY` | writer | BOTH reviewers (parallel) | Same trigger as single-reviewer mode (one logical step + 3 mandatory fields) | The writer pings reviewer-1 AND reviewer-2 in two separate `send` calls. Both reviewers see the same payload. |
+| `REVIEWER-FINDINGS:` | reviewer | peer reviewer | After independent review (no crosstalk before this) | Numbered, falsifiable findings list (BLOCKER / WARNING / NIT). The peer uses this as input for `PEER-REVIEW`. |
+| `PEER-REVIEW:` | reviewer | peer reviewer | After receiving counterpart's `REVIEWER-FINDINGS:` | Comments on counterpart's list: agree, disagree, missed-this, dedupe. Falsifiable, file:line. |
+| `REVIEW-FINAL (Reviewer):` | reviewer | orchestrator (= human in pair, = orchestrator agent in triple) | After both `REVIEWER-FINDINGS:` + `PEER-REVIEW:` cycles complete | Merged final findings from this reviewer's perspective + APPROVE or BLOCK verdict. |
+| `REVIEW-CONSOLIDATED:` | orchestrator | writer | After both reviewers sent their `REVIEW-FINAL` | One merged review: all unique BLOCKERs preserved, overlaps deduped, contradictions surfaced with context. EXACTLY one ping per cycle, never two. |
+
+Reviewers in dual-review mode never speak directly to the writer. The writer only ever sees the consolidated review from the orchestrator. This is what makes the cross-check work: contradictions get surfaced and resolved at the orchestrator layer instead of confusing the writer.
+
+`REVIEW: APPROVE` and `REVIEW: BLOCK` (single-reviewer events from `## Reviewer events`) are NOT sent in dual-review mode. The closest equivalent is `REVIEW-CONSOLIDATED:` from the orchestrator carrying an APPROVE or BLOCK verdict in its payload.
+
 ## What "falsifiable" means in a review
 
 A finding is falsifiable if both writer and reviewer agree on a check that decides whether the finding is real.

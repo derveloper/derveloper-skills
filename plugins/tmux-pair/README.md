@@ -44,12 +44,17 @@ Both create a worktree at `<project-parent>/<project-basename>-wt-<feature>`, br
 
 ## Configuration
 
-Override the default agents via flags:
+Spawn-time flags (both modes unless noted):
 
 ```
---writer-agent codex      # default: codex
---reviewer-agent claude   # default: claude
---orchestrator-agent claude   # triple only, default: claude
+--writer-agent codex            # default: codex
+--reviewer-agent claude         # default: claude (reviewer-1 in dual-review)
+--orchestrator-agent claude     # triple only, default: claude
+--dual-review                   # opt-in second reviewer (off by default)
+--reviewer-2-agent codex        # second reviewer when --dual-review (default: codex)
+--no-worktree                   # skip git worktree, run on the project's current branch
+--claude-model claude-opus-4-7  # default model for any claude pane
+--claude-effort max             # default --effort level for any claude pane
 ```
 
 Add or replace agent commands in `~/.config/tmux-pair/agents.json`:
@@ -74,6 +79,21 @@ The default claude model is `claude-opus-4-7` (1M context). Override per spawn:
 ```
 
 The compact-watcher threshold scales with the context window automatically: 1M → 700k threshold (70%), 200k → 140k threshold. Override with `monitor --threshold-k <N>` if needed. Codex always uses `gpt-5.5 xhigh` per user setup; not parameterised.
+
+The default reasoning effort for any claude pane is `--effort max`, set directly in the boot-command (race-free vs. the `/effort` slash). Override per spawn with `--claude-effort <low|medium|high|xhigh|max>`; pass an empty string to skip the flag entirely so `claude` uses its own default or the `CLAUDE_CODE_EFFORT_LEVEL` env-var.
+
+## Dual-Review (opt-in)
+
+Both `/pair` and `/triple` accept `--dual-review` to spawn TWO reviewers (default: claude as reviewer-1, codex as reviewer-2) instead of one. The default is OFF; existing single-reviewer flow is unchanged.
+
+| Mode | Layout with `--dual-review` |
+|------|------------------------------|
+| **pair** | Writer left (main pane), Reviewer-1 top right, Reviewer-2 bottom right (right side vertically split) |
+| **triple** | Orchestrator on top full width, Writer bottom left, Reviewer-1 + Reviewer-2 stacked on the bottom right |
+
+Per cycle: writer pings `REVIEW-READY` to BOTH reviewers in parallel, both review independently (no crosstalk), then swap findings via `REVIEWER-FINDINGS:` + `PEER-REVIEW:`, finally each sends a `REVIEW-FINAL (Reviewer):` to the orchestrator (= human in pair, = orchestrator agent in triple) for consolidation. The orchestrator merges both reports (keep all unique BLOCKERs, dedupe overlaps, surface contradictions with context) and sends ONE `REVIEW-CONSOLIDATED:` to the writer. Reviewers never speak directly to the writer.
+
+Override the second reviewer with `--reviewer-2-agent <agent>`. When to opt in: risky refactors, security-sensitive code, blast-radius changes, anywhere you want diversity of opinions on the diff.
 
 ## Durable standards
 
@@ -110,8 +130,8 @@ Three helper subcommands let an orchestrator (or the human directly) refresh an 
 
 ```
 python3 <plugin>/scripts/tmux_pair.py status <pane-id>
-python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path> [--timeout 300]
-python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> <id2> [...] [--threshold-k <N>]
+python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path> [--focus "<one-liner>"] [--timeout 300]
+python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> <id2> [...] [--threshold-k <N>] [--cooldown-sec <N>]
 ```
 
 `status` returns JSON with the detected agent, current token count (parsed from claude's footer; codex usually shows up as `null` so callers fall back to a time/event heuristic), and the raw matched footer line.

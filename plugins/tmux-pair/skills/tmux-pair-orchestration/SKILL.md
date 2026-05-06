@@ -214,19 +214,21 @@ Multi-line messages are submitted via `load-buffer` + `paste-buffer` to avoid th
 
 The default claude model is `claude-opus-4-7` (1M context). For 200k-context runs (cheaper, faster turn-around), use `--claude-model claude-opus-4-6` on `/pair` or `/triple`. The compact-watcher threshold scales automatically: 1M → 700k threshold (70%), 200k → 140k threshold. Override per-call with `python3 <plugin>/scripts/tmux_pair.py monitor --threshold-k <N>`.
 
+The default claude reasoning effort is `max`, set as `--effort max` directly in the claude boot-command (race-free vs. the `/effort` slash, which can fail with "unknown or future model" right after a `/model` switch). Override per spawn with `--claude-effort <low|medium|high|xhigh|max>`; pass an empty string to skip the flag entirely so `claude` uses its own default or the `CLAUDE_CODE_EFFORT_LEVEL` env-var. Codex always uses `gpt-5.5 xhigh` per user setup; not parameterised.
+
 Long-running pairs/triples drift past the model-specific sweet spot where the agent still reasons cleanly. Three helper subcommands let any layer refresh the layer below:
 
 ```
 python3 <plugin>/scripts/tmux_pair.py status <pane-id>
-python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path>
-python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> <id2> [...]
+python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path> [--focus "<one-liner>"] [--timeout 300]
+python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> <id2> [...] [--threshold-k <N>] [--cooldown-sec <N>]
 ```
 
 The orchestrator briefing kicks off `monitor` automatically as DUTY 0 (background watcher polls every 180s, pings the orchestrator when an engineer crosses the threshold; cooldown 600s between repeat pings on the same pane). Pair-mode does not auto-start the watcher: the human is in the loop and notices manually.
 
 `status` returns JSON with the detected agent and the parsed token count. Claude prints `N tokens` in its footer, so the count is reliable. Codex usually does not, so its `tokens` field comes back `null`: fall back to a feel-based heuristic (elapsed wall-time, number of REVIEW cycles, whether the agent is repeating itself).
 
-`compact` sends `/compact` to the pane, polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop ≥50% as a fallback), and then sends the re-brief from `--briefing-file` through the regular submit-with-retry path.
+`compact` sends `/compact [focus]` to the pane (claude's official `/compact [instructions]` form), polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop ≥50% as a fallback), and then sends the re-brief from `--briefing-file` through the regular submit-with-retry path. The optional `--focus` hint shapes the summary so the agent retains plan + REVIEW-state + peer-protocol — without it the summary is generic and important context can drop.
 
 **Authoring the re-brief.** After `/compact` the agent has lost the conversational state and only remembers the summary. The re-brief MUST stand on its own. Include:
 

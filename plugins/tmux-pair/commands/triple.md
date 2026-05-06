@@ -1,6 +1,6 @@
 ---
 description: Spawn an orchestrator + writer + reviewer triple in a fresh git worktree (orchestrator on top, engineers below)
-argument-hint: <project-path> <base> <feature> [task...]
+argument-hint: <project-path> <base> <feature> [task...] [--no-worktree] [--dual-review] [--claude-model SLUG] [--claude-effort LEVEL] [--reviewer-2-agent NAME]
 ---
 
 # triple
@@ -30,6 +30,7 @@ The human gets to dispatch the spawn and step away. They are not the recon agent
 
 - `--no-worktree` — skip `git worktree add`. Use when resuming on an existing worktree (point `--project` at the worktree path) or running directly on the project branch. With `--no-worktree`, the plugin skips writing AGENTS.md to the project repo; codex picks up standards via the briefing only.
 - `--claude-model <slug>` — claude model to switch into post-boot for orchestrator + writer (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically (700k → 140k). Codex always uses `gpt-5.5 xhigh` per user setup.
+- `--claude-effort <level>` — claude reasoning effort, set as `--effort <level>` in the claude boot-command for any claude pane (Writer + Orchestrator) (default `max`). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies). The CLI flag is race-free vs. the `/effort` slash-command after a `/model` switch.
 - `--dual-review` — opt-in second reviewer. Layout becomes: orchestrator on top full width, writer bottom-left, reviewer-1 + reviewer-2 stacked on the bottom-right side. Both reviewers review independently, swap findings, then send final reports to the orchestrator who consolidates before forwarding to the writer. Off by default.
 - `--reviewer-2-agent <agent>` — override the second reviewer agent (default codex). Only relevant with `--dual-review`.
 
@@ -53,7 +54,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py triple \
   --base <base> \
   --feature <feature> \
   --task "<task>" \
-  [--no-worktree] [--claude-model <slug>] [--dual-review] [--reviewer-2-agent <agent>]
+  [--no-worktree] [--claude-model <slug>] [--claude-effort <level>] \
+  [--dual-review] [--reviewer-2-agent <agent>]
 ```
 
 If feature or task is ambiguous, ask the user.
