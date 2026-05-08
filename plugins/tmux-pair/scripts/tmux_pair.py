@@ -124,6 +124,31 @@ def _pane_tail(pane: str, lines: int) -> str:
     return "\n".join(rows[-lines:]) if rows else ""
 
 
+def _composer_empty(tail: str) -> bool:
+    """Return True if the pane tail shows an empty agent composer.
+
+    A submitted message scrolls upward and the input line at the bottom of
+    the TUI returns to its idle prompt: claude shows '❯' (sometimes inside
+    a bordered box, optionally followed by spaces), codex shows '›'. We
+    accept either prompt char alone on its own line, with optional leading
+    box-drawing or whitespace and no trailing content.
+
+    This positive check is more reliable than the previous negative
+    'paste-marker is gone' heuristic, because the [Pasted text #N] markers
+    can briefly remain visible in the bottom-rows window while the TUI is
+    still re-laying-out after a successful submit, which produced spurious
+    False-Negatives + manual-Enter recoveries.
+    """
+    for line in tail.splitlines():
+        stripped = line.strip()
+        # Drop leading/trailing box-drawing chars some TUIs render around
+        # the composer (e.g. '│ ❯ │' or '│ ❯').
+        compact = stripped.strip("│┃▌▐▏▕| ").rstrip()
+        if compact in ("❯", "›"):
+            return True
+    return False
+
+
 def cmd_send(args: argparse.Namespace) -> int:
     """Send `args.text` to pane `args.pane`, handling multi-line + Enter quirks.
 
@@ -182,19 +207,21 @@ def cmd_send(args: argparse.Namespace) -> int:
         time.sleep(0.4)
 
     # Send Enter, verify, retry. Total worst-case ~28s (8 retries with
-    # 2.0..5.5s waits). Multi-line path additionally checks for the
-    # 'Pasted text' placeholder because the literal probe-text never
-    # appears verbatim in claude's composer.
+    # 2.0..5.5s waits). Submit is confirmed by a *positive* idle-composer
+    # marker ('❯' for claude, '›' for codex on its own line) rather than
+    # the absence of paste/probe markers; that absence-check produced
+    # False-Negatives because [Pasted text] placeholders linger briefly
+    # in the bottom rows while the TUI relays out after a successful
+    # submit, which is exactly the window in which the previous code
+    # returned 0.
     for attempt in range(8):
         tmux_safe("send-keys", "-t", pane, "C-m")
         time.sleep(2.0 + 0.5 * attempt)
-        tail = _pane_tail(pane, 5)
-        text_visible = bool(probe) and probe in tail
-        paste_marker_visible = multiline and "Pasted text" in tail
-        if not text_visible and not paste_marker_visible:
+        tail = _pane_tail(pane, 12)
+        if _composer_empty(tail):
             return 0
     print(f"warning: pane {pane} may not have accepted the message "
-          f"(probe still visible after 8 Enter retries)", file=sys.stderr)
+          f"(composer still non-empty after 8 Enter retries)", file=sys.stderr)
     return 0
 
 
