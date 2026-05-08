@@ -317,19 +317,26 @@ def _post_boot_slashes(
     pane_id: str, agent: str, display_name: str,
     claude_model: str = DEFAULT_CLAUDE_MODEL,
 ) -> None:
-    """Inject /model (claude) and /rename <name> after the agent is ready.
-    Caller MUST call _wait_for_agent_ready or _wait_panes_ready first.
+    """Inject /rename <name> for codex post-boot.
 
-    /effort wird NICHT mehr als post-boot slash gesendet, sondern direkt im
-    Boot-Command via --effort <level> gesetzt (siehe
-    _boot_command_with_standards). /effort als slash existiert weiterhin
-    (https://code.claude.com/docs/en/commands), wird aber nach einem
-    /model-Switch gelegentlich mit 'unknown or future model' verweigert
-    (Race). Der CLI-Flag greift vor dem TUI-Start und hat keine Race-Bedingung
-    mit dem Model-Switch.
+    claude bekommt --model und --name als CLI-Flags im Boot-Command (siehe
+    _boot_command_with_standards). Hintergrund: claude-code aktiviert nach
+    Boot Bracketed-Paste; mehrere `tmux send-keys -l` in schneller Folge
+    werden zu einem einzigen Composer-Insert verschmolzen, sodass der erste
+    Slash-Command alle nachfolgenden Inputs als Argument schluckt
+    (z.B. `/model claude-opus-4-7/rename ...[Pasted text]` -> API 400
+    'model: String should have at most 256 characters'). CLI-Flags greifen
+    vor dem TUI-Start und sind race-frei.
+
+    /effort wird ebenfalls als CLI-Flag gesetzt (--effort <level> im Boot),
+    nicht als post-boot Slash.
+
+    Codex kennt --model nicht als CLI-Flag und ist auch nicht von dem
+    Bracketed-Paste-Race betroffen, also bleibt /rename hier als
+    post-boot Slash-Command.
     """
     if agent == "claude":
-        _send_slash_command_sync(pane_id, f"/model {claude_model}")
+        return
     if display_name:
         _send_slash_command_sync(pane_id, f"/rename {display_name}")
 
@@ -350,6 +357,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         agent=args.agent, agents_dict=agents,
         window_name=window_name, role=args.name or "agent",
         claude_effort=args.claude_effort,
+        claude_model=args.claude_model,
+        display_name=args.name or "",
     )
     if args.task:
         boot = f"{boot} {shlex.quote(args.task)}"
@@ -982,11 +991,14 @@ def _write_durable_standards_file(window_name: str, role: str) -> Path:
 def _boot_command_with_standards(
     *, agent: str, agents_dict: dict[str, str], window_name: str, role: str,
     claude_effort: str = DEFAULT_CLAUDE_EFFORT,
+    claude_model: str = DEFAULT_CLAUDE_MODEL,
+    display_name: str = "",
 ) -> str:
     """Build the boot command for an agent. For claude, append the durable
     standards file via --append-system-prompt-file so the standards survive
-    /compact, plus --effort <level> to set reasoning budget directly at boot
-    (the /effort slash-command is deprecated in current claude-code).
+    /compact, plus --effort <level>, --model <slug> und --name <display_name>
+    (alle race-frei als CLI-Flags vor TUI-Start, statt /effort, /model,
+    /rename als Slash-Commands post-boot).
 
     For codex, the standards are loaded via AGENTS.md placed in the worktree
     root by _write_codex_standards_to_worktree (only when a real worktree
@@ -1012,6 +1024,10 @@ def _boot_command_with_standards(
     parts = [boot]
     if claude_effort:
         parts.append(f"--effort {shlex.quote(claude_effort)}")
+    if claude_model:
+        parts.append(f"--model {shlex.quote(claude_model)}")
+    if display_name:
+        parts.append(f"--name {shlex.quote(display_name)}")
     parts.append(
         f"--append-system-prompt-file {shlex.quote(str(standards_path))}"
     )
@@ -1765,6 +1781,8 @@ def cmd_pair(args: argparse.Namespace) -> int:
             agent=args.writer_agent, agents_dict=agents,
             window_name=window_name, role="writer",
             claude_effort=args.claude_effort,
+            claude_model=args.claude_model,
+            display_name=writer_name,
         ),
         split="none", display_name=writer_name,
     )
@@ -1775,6 +1793,8 @@ def cmd_pair(args: argparse.Namespace) -> int:
             agent=args.reviewer_agent, agents_dict=agents,
             window_name=window_name, role="reviewer",
             claude_effort=args.claude_effort,
+            claude_model=args.claude_model,
+            display_name=reviewer_name,
         ),
         split="h", display_name=reviewer_name,
     )
@@ -1789,6 +1809,8 @@ def cmd_pair(args: argparse.Namespace) -> int:
                 agent=args.reviewer_2_agent, agents_dict=agents,
                 window_name=window_name, role="reviewer",
                 claude_effort=args.claude_effort,
+                claude_model=args.claude_model,
+                display_name=reviewer_2_name,
             ),
             split="v", display_name=reviewer_2_name,
         )
@@ -1903,6 +1925,8 @@ def cmd_triple(args: argparse.Namespace) -> int:
             agent=args.orchestrator_agent, agents_dict=agents,
             window_name=window_name, role="orchestrator",
             claude_effort=args.claude_effort,
+            claude_model=args.claude_model,
+            display_name=orchestrator_name,
         ),
         split="none",
         display_name=orchestrator_name,
@@ -1914,6 +1938,8 @@ def cmd_triple(args: argparse.Namespace) -> int:
             agent=args.writer_agent, agents_dict=agents,
             window_name=window_name, role="writer",
             claude_effort=args.claude_effort,
+            claude_model=args.claude_model,
+            display_name=writer_name,
         ),
         split="v", display_name=writer_name,
     )
@@ -1924,6 +1950,8 @@ def cmd_triple(args: argparse.Namespace) -> int:
             agent=args.reviewer_agent, agents_dict=agents,
             window_name=window_name, role="reviewer",
             claude_effort=args.claude_effort,
+            claude_model=args.claude_model,
+            display_name=reviewer_name,
         ),
         split="h", display_name=reviewer_name,
     )
@@ -1940,6 +1968,8 @@ def cmd_triple(args: argparse.Namespace) -> int:
                 agent=args.reviewer_2_agent, agents_dict=agents,
                 window_name=window_name, role="reviewer",
                 claude_effort=args.claude_effort,
+                claude_model=args.claude_model,
+                display_name=reviewer_2_name,
             ),
             split="v", display_name=reviewer_2_name,
         )
