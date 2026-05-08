@@ -201,27 +201,37 @@ def cmd_send(args: argparse.Namespace) -> int:
                 break
             time.sleep(0.2)
         # Extra settle so the TUI finishes its post-paste re-layout before
-        # we press Enter; observed empirically that ~1s avoids the swallow.
-        time.sleep(1.0)
+        # we press Enter. Observed empirically with claude-code TUI: a 1s
+        # wait plus a single C-m was not enough — claude swallowed the Enter
+        # while still wiring up the [Pasted text] placeholder. Bumping the
+        # initial settle to 3s and bursting 3 Enter keys per retry iteration
+        # closes that race in practice.
+        time.sleep(3.0)
     else:
         time.sleep(0.4)
 
-    # Send Enter, verify, retry. Total worst-case ~28s (8 retries with
-    # 2.0..5.5s waits). Submit is confirmed by a *positive* idle-composer
-    # marker ('❯' for claude, '›' for codex on its own line) rather than
-    # the absence of paste/probe markers; that absence-check produced
+    # Send Enter, verify, retry. Each iteration sends a *burst* of 3 C-m
+    # keys spaced 0.5s apart; observed empirically that a single C-m after
+    # bracketed paste is fragile, while 2-3 in quick succession reliably
+    # land. After the burst we check the positive idle-composer marker
+    # ('❯' for claude, '›' for codex on its own line). Total worst-case
+    # budget: 8 iterations * (3*0.5s burst + 2.0..5.5s wait) ≈ 40s.
+    # Submit is confirmed by the positive idle marker rather than the
+    # absence of paste/probe markers; that absence-check produced
     # False-Negatives because [Pasted text] placeholders linger briefly
     # in the bottom rows while the TUI relays out after a successful
-    # submit, which is exactly the window in which the previous code
-    # returned 0.
+    # submit.
     for attempt in range(8):
-        tmux_safe("send-keys", "-t", pane, "C-m")
+        for burst in range(3):
+            tmux_safe("send-keys", "-t", pane, "C-m")
+            time.sleep(0.5)
         time.sleep(2.0 + 0.5 * attempt)
         tail = _pane_tail(pane, 12)
         if _composer_empty(tail):
             return 0
     print(f"warning: pane {pane} may not have accepted the message "
-          f"(composer still non-empty after 8 Enter retries)", file=sys.stderr)
+          f"(composer still non-empty after 8 Enter-burst retries)",
+          file=sys.stderr)
     return 0
 
 
