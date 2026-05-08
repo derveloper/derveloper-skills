@@ -161,12 +161,25 @@ def cmd_send(args: argparse.Namespace) -> int:
         return 0
 
     probe = _probe_for(text)
-    time.sleep(0.4)
+    multiline = "\n" in text
+    # paste-buffer needs a moment to render in claude/codex TUIs before Enter
+    # is accepted; otherwise the first C-m fires while the composer is still
+    # ingesting the bracketed paste, gets swallowed, and the briefing sits
+    # idle even though the probe-text is technically not visible.
+    time.sleep(0.8 if multiline else 0.4)
     # Send Enter, verify, retry. Total worst-case ~14s (6 retries with 1.2..3.2s waits).
+    # Multi-line path additionally checks the TUI's "[Pasted text" placeholder
+    # because pasted text is rendered as a collapsed marker in the composer
+    # (claude shows '[Pasted text #N +M lines]'); the probe-text never appears
+    # there literally, so the original probe-only check returned True after a
+    # single Enter even when Enter was swallowed.
     for attempt in range(6):
         tmux_safe("send-keys", "-t", pane, "C-m")
         time.sleep(1.2 + 0.4 * attempt)
-        if not probe or probe not in _pane_tail(pane, 5):
+        tail = _pane_tail(pane, 5)
+        text_visible = bool(probe) and probe in tail
+        paste_marker_visible = multiline and "Pasted text" in tail
+        if not text_visible and not paste_marker_visible:
             return 0
     print(f"warning: pane {pane} may not have accepted the message "
           f"(probe still visible after 6 Enter retries)", file=sys.stderr)
