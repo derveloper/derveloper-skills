@@ -162,27 +162,39 @@ def cmd_send(args: argparse.Namespace) -> int:
 
     probe = _probe_for(text)
     multiline = "\n" in text
-    # paste-buffer needs a moment to render in claude/codex TUIs before Enter
-    # is accepted; otherwise the first C-m fires while the composer is still
-    # ingesting the bracketed paste, gets swallowed, and the briefing sits
-    # idle even though the probe-text is technically not visible.
-    time.sleep(0.8 if multiline else 0.4)
-    # Send Enter, verify, retry. Total worst-case ~14s (6 retries with 1.2..3.2s waits).
-    # Multi-line path additionally checks the TUI's "[Pasted text" placeholder
-    # because pasted text is rendered as a collapsed marker in the composer
-    # (claude shows '[Pasted text #N +M lines]'); the probe-text never appears
-    # there literally, so the original probe-only check returned True after a
-    # single Enter even when Enter was swallowed.
-    for attempt in range(6):
+
+    # Multi-line path: wait until the paste is actually rendered in the
+    # composer before sending Enter. Without this, Enter fires while the TUI
+    # is still ingesting the bracketed-paste sequence and gets swallowed.
+    # claude renders pasted text as '[Pasted text #N +M lines]'; codex shows
+    # the text inline. Either marker confirms the paste landed.
+    if multiline:
+        render_deadline = time.time() + 5.0
+        while time.time() < render_deadline:
+            tail = _pane_tail(pane, 10)
+            if "Pasted text" in tail or (bool(probe) and probe in tail):
+                break
+            time.sleep(0.2)
+        # Extra settle so the TUI finishes its post-paste re-layout before
+        # we press Enter; observed empirically that ~1s avoids the swallow.
+        time.sleep(1.0)
+    else:
+        time.sleep(0.4)
+
+    # Send Enter, verify, retry. Total worst-case ~28s (8 retries with
+    # 2.0..5.5s waits). Multi-line path additionally checks for the
+    # 'Pasted text' placeholder because the literal probe-text never
+    # appears verbatim in claude's composer.
+    for attempt in range(8):
         tmux_safe("send-keys", "-t", pane, "C-m")
-        time.sleep(1.2 + 0.4 * attempt)
+        time.sleep(2.0 + 0.5 * attempt)
         tail = _pane_tail(pane, 5)
         text_visible = bool(probe) and probe in tail
         paste_marker_visible = multiline and "Pasted text" in tail
         if not text_visible and not paste_marker_visible:
             return 0
     print(f"warning: pane {pane} may not have accepted the message "
-          f"(probe still visible after 6 Enter retries)", file=sys.stderr)
+          f"(probe still visible after 8 Enter retries)", file=sys.stderr)
     return 0
 
 
