@@ -201,21 +201,27 @@ def cmd_send(args: argparse.Namespace) -> int:
                 break
             time.sleep(0.2)
         # Extra settle so the TUI finishes its post-paste re-layout before
-        # we press Enter. Observed empirically with claude-code TUI: a 1s
-        # wait plus a single C-m was not enough — claude swallowed the Enter
-        # while still wiring up the [Pasted text] placeholder. Bumping the
-        # initial settle to 3s and bursting 3 Enter keys per retry iteration
-        # closes that race in practice.
+        # we press submit. Observed empirically with claude-code TUI: a 1s
+        # wait plus a single submit-key was not enough — claude swallowed
+        # the submit while still wiring up the [Pasted text] placeholder.
+        # Bumping the initial settle to 3s and bursting 3 submit keys per
+        # retry iteration plus switching the submit-key from `C-m` to
+        # `Enter` (Patch F, 2026-05-09) closes the race in practice.
         time.sleep(3.0)
     else:
         time.sleep(0.4)
 
-    # Send Enter, verify, retry. Each iteration sends a *burst* of 3 C-m
-    # keys spaced 0.5s apart; observed empirically that a single C-m after
-    # bracketed paste is fragile, while 2-3 in quick succession reliably
-    # land. After the burst we check the positive idle-composer marker
-    # ('❯' for claude, '›' for codex on its own line). Total worst-case
-    # budget: 8 iterations * (3*0.5s burst + 2.0..5.5s wait) ≈ 40s.
+    # Send submit, verify, retry. Each iteration sends a *burst* of 3
+    # submit keys spaced 0.5s apart. Submit-Token is the literal `Enter`
+    # keysym, NOT `C-m`. Empirically observed 2026-05-09: after a series
+    # of multi-line bracketed pastes, claude-code TUI silently ignored
+    # `C-m` (verified via 0-token-counter despite multiple bursts) but
+    # accepted `Enter` and submitted the composed message immediately.
+    # The two are normally synonyms in tmux but the claude TUI key-handler
+    # apparently distinguishes them; codex TUI accepts both. After the
+    # burst we check the positive idle-composer marker ('❯' for claude,
+    # '›' for codex on its own line). Total worst-case budget:
+    # 8 iterations * (3*0.5s burst + 2.0..5.5s wait) ≈ 40s.
     # Submit is confirmed by the positive idle marker rather than the
     # absence of paste/probe markers; that absence-check produced
     # False-Negatives because [Pasted text] placeholders linger briefly
@@ -223,7 +229,7 @@ def cmd_send(args: argparse.Namespace) -> int:
     # submit.
     for attempt in range(8):
         for burst in range(3):
-            tmux_safe("send-keys", "-t", pane, "C-m")
+            tmux_safe("send-keys", "-t", pane, "Enter")
             time.sleep(0.5)
         time.sleep(2.0 + 0.5 * attempt)
         tail = _pane_tail(pane, 12)
