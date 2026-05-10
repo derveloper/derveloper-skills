@@ -46,6 +46,9 @@ Do NOT run `git push` until human replies `PUSH-OK`. Commits are fine; pushes
 are not.
 
 STANDARDS
+Default briefings are slim and task-focused. Include this section only when
+`--with-standards` or `--greenfield` was passed:
+
 - Conventional Commits.
 - No --no-verify, no skipping pre-commit hooks.
 - No AI co-author trailer in commit messages.

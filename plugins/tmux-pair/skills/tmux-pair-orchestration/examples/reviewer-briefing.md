@@ -14,6 +14,10 @@ TASK CONTEXT
 from the writer's briefing or summarised. The reviewer needs the same task
 context as the writer.>
 
+This template is task-focused and compact by default. Optional standards
+blocks (including explicit checklist constraints) appear when spawned with
+`--with-standards` or `--greenfield`.
+
 REVIEW CHECKLIST (falsifiable)
 1. <Specific check: e.g. "The new `foo` field is read on every code path in
    src/api.rs, not just the happy path.">

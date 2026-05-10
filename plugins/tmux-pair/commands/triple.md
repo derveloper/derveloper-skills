@@ -1,6 +1,6 @@
 ---
 description: Spawn an orchestrator + writer + reviewer triple in a fresh git worktree (orchestrator on top, engineers below)
-argument-hint: <project-path> <base> <feature> [task...] [--no-worktree] [--dual-review] [--claude-model SLUG] [--claude-effort LEVEL] [--reviewer-2-agent NAME]
+argument-hint: <project-path> <base> <feature> [task...] [--with-standards] [--greenfield] [--no-worktree] [--dual-review] [--claude-model SLUG] [--claude-effort LEVEL] [--reviewer-2-agent NAME]
 ---
 
 # triple
@@ -23,11 +23,15 @@ The human gets to dispatch the spawn and step away. They are not the recon agent
 - `/triple ~/code/myapp origin/main session-tokens`
 - `/triple ~/code/myapp main rate-limit-redesign rebuild the rate limiter so it survives the redis failover scenario from incident 2026-01`
 - `/triple ~/code/myapp main smallfeature --claude-model claude-opus-4-6` (200k context, cheaper for short tasks)
+- `/triple ~/code/myapp main full-review --with-standards`
+- `/triple ~/code/myapp main first-session --greenfield` (adds standards and greenfield pre-flight)
 - `/triple ~/code/myapp main resume-existing --no-worktree --project ~/code/myapp-wt-existing` (reuse an existing worktree directly)
 - `/triple ~/code/myapp main risky-refactor --dual-review` (orchestrator + writer + two cross-checking reviewers)
 
 ## Optional flags
 
+- `--with-standards` — append the durable standards bundle (STANDARDS, recall discipline, bullet-start ritual, pair protocol) to engineer briefings in the Orchestrator handoff. Default is slim.
+- `--greenfield` — enable `--with-standards` plus the greenfield pre-flight block.
 - `--no-worktree` — skip `git worktree add`. Use when resuming on an existing worktree (point `--project` at the worktree path) or running directly on the project branch. With `--no-worktree`, the plugin skips writing AGENTS.md to the project repo; codex picks up standards via the briefing only.
 - `--claude-model <slug>` — claude model to switch into post-boot for orchestrator + writer (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically (700k → 140k). Codex always uses `gpt-5.5 xhigh` per user setup.
 - `--claude-effort <level>` — claude reasoning effort, set as `--effort <level>` in the claude boot-command for any claude pane (Writer + Orchestrator) (default `max`). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies). The CLI flag is race-free vs. the `/effort` slash-command after a `/model` switch.
@@ -54,7 +58,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py triple \
   --base <base> \
   --feature <feature> \
   --task "<task>" \
-  [--no-worktree] [--claude-model <slug>] [--claude-effort <level>] \
+  [--with-standards] [--greenfield] [--no-worktree] [--claude-model <slug>] [--claude-effort <level>] \
   [--dual-review] [--reviewer-2-agent <agent>]
 ```
 

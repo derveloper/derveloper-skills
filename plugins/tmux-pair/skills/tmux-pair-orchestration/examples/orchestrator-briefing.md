@@ -2,6 +2,9 @@
 
 This is the briefing the human sends to the orchestrator at spawn time. The bundled `triple` command generates a baseline version automatically; this template is the longer reference when overriding it.
 
+By default this template describes a slim, task-specific run. Add `--with-standards` or
+`--greenfield` to include optional generic standards and context-procedure blocks.
+
 ```
 [ROLE: Orchestrator]
 
@@ -41,11 +44,12 @@ DUTIES IN ORDER
    Each briefing must include:
      - pointers from your recon
      - concrete deliverables (writer) or checks (reviewer)
-     - the gates the writer runs before REVIEW-READY (build, lint, tests)
-     - the pair protocol with the partner pane id
-     - your pane id (<ORCH-PANE>) for escalation
-     - the push gate ("no push until human OK")
-     - "no sub-agent recon as a basis for pair events"
+   - the gates the writer runs before REVIEW-READY (build, lint, tests)
+   - the pair protocol with the partner pane id
+   - your pane id (<ORCH-PANE>) for escalation
+   - if `--with-standards` / `--greenfield` was requested, append the corresponding standards blocks
+   - the push gate ("no push until human OK")
+   - "no sub-agent recon as a basis for pair events"
 
 3. WATCH THE LOOP
    Engineers ping you on:

@@ -1,6 +1,6 @@
 # Pair protocol — full event vocabulary
 
-This is the long version of the loop summarised in `SKILL.md`. Use this when drafting a briefing, debugging a stalled pair, or deciding how to phrase a ping.
+This is the long version of the loop summarised in `SKILL.md`. Use this when drafting a briefing, debugging a stalled pair, or deciding how to phrase a ping. Briefings use a slim default and include optional standards/procedure blocks only when `--with-standards` or `--greenfield` is enabled.
 
 ## Identifiers
 

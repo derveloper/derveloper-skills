@@ -317,7 +317,9 @@ Output for both: `VERDICT: PASS | WARNING | BLOCKER` plus `BLOCKERS:`, `WARNINGS
 
 ## Standards block
 
-Every briefing — orchestrator, writer, reviewer — embeds the same standards block. The list is not negotiable; it's part of the contract:
+Briefings are minimal by default and include the same standards block only when `--with-standards` or `--greenfield` is passed.
+
+The standards list (when included) is not negotiable; it is part of the contract:
 
 - Conventional Commits, no `--no-verify`, no `--no-gpg-sign`
 - No AI co-author trailer in commit messages

@@ -50,6 +50,8 @@ Spawn-time flags (both modes unless noted):
 --writer-agent codex            # default: codex
 --reviewer-agent claude         # default: claude (reviewer-1 in dual-review)
 --orchestrator-agent claude     # triple only, default: claude
+--with-standards               # include durable standards bundle in briefings
+--greenfield                    # include standards plus greenfield pre-flight
 --dual-review                   # opt-in second reviewer (off by default)
 --reviewer-2-agent codex        # second reviewer when --dual-review (default: codex)
 --no-worktree                   # skip git worktree, run on the project's current branch
@@ -68,6 +70,8 @@ Add or replace agent commands in `~/.config/tmux-pair/agents.json`:
 ```
 
 The defaults baked into the script are deliberately minimal: a single command per agent, nothing project-specific.
+Briefings are task-focused and compact by default.
+In triple, this lean default is useful for resume flows. For full orchestrator boot-time procedure coverage on first runs, use `--greenfield`.
 
 ## Model selection and Compact-Watcher
 
@@ -76,6 +80,8 @@ The default claude model is `claude-opus-4-7` (1M context). Override per spawn:
 ```
 /pair  ~/code/myapp main session-tokens --claude-model claude-opus-4-6
 /triple ~/code/myapp main session-tokens --claude-model claude-opus-4-6
+/pair  ~/code/myapp main full-review --with-standards
+/triple ~/code/myapp main greenfield-session --greenfield
 ```
 
 The compact-watcher threshold scales with the context window automatically: 1M → 700k threshold (70%), 200k → 140k threshold. Override with `monitor --threshold-k <N>` if needed. Codex always uses `gpt-5.5 xhigh` per user setup; not parameterised.
@@ -97,10 +103,13 @@ Override the second reviewer with `--reviewer-2-agent <agent>`. When to opt in: 
 
 ## Durable standards
 
-Standards survive `/compact` and context resets because they sit in the system prompt:
+Standards survive `/compact` and context resets because they sit in the system prompt. Engineer briefings are slim by default.
 
 - **claude panes** boot with `--append-system-prompt-file <path>` (the plugin writes a per-spawn standards file under `/tmp/tmux-pair-durable-<window>-<role>.md`).
-- **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created. With `--no-worktree` the plugin skips the AGENTS.md write to avoid polluting the project repo; codex receives standards via the briefing only in that mode.
+- **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created.
+- For task-specific runs, briefings are minimal by default and omit durable standards block repetition.
+- Add `--with-standards` to include the standards bundle in briefings, or `--greenfield` for standards plus pre-flight.
+- For `--no-worktree` with codex, the plugin automatically sets standards-on when needed so codex still receives the rule set via briefing.
 - `agents.json` overrides are respected: if the user has remapped `claude` to a wrapper, the plugin does not inject `--append-system-prompt-file` blindly.
 
 ## Scoped subagents (Haiku/Sonnet routing)

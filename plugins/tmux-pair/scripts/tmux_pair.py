@@ -1323,11 +1323,40 @@ def _dual_review_block(role: str, partner_pane: str,
     return ""
 
 
+def _briefing_standards_block(
+    *, with_standards: bool, with_pre_flight: bool = False
+) -> str:
+    if not with_standards:
+        return ""
+    blocks = (
+        STANDARDS_BLOCK,
+        RECALL_DISCIPLINE_BLOCK,
+        BULLET_START_RITUAL_BLOCK,
+        PAIR_PROTOCOL_BLOCK,
+    )
+    if with_pre_flight:
+        return (
+            "".join(f"{block}\n" for block in blocks) + f"{PRE_FLIGHT_BLOCK}\n"
+        )
+    return "".join(f"{block}\n" for block in blocks)
+
+
+def _briefing_procedure_block(*, with_standards: bool) -> str:
+    if not with_standards:
+        return ""
+    return (
+        f"{TEST_STRATEGY_BLOCK}\n"
+        f"{CONTEXT_ECONOMY_BLOCK}\n"
+        f"{FRONTEND_SMOKE_BLOCK}\n"
+    )
+
+
 def _briefing_pair(
     *, role: str, partner_role: str, partner_pane: str, human_pane: str,
     wt_path: Path, branch: str, base: str, project: str,
     task: str,
     peer_reviewer_pane: str | None = None,
+    with_standards: bool = False,
 ) -> str:
     send_cmd = _send_command(partner_pane)
     send_human = _send_command(human_pane)
@@ -1375,13 +1404,8 @@ def _briefing_pair(
         f"    AskUserQuestion an User durch.\n"
         f"  Peer-Messaging:\n"
         f"    {send_cmd} \"<message>\"\n\n"
-        f"{STANDARDS_BLOCK}\n"
-        f"{RECALL_DISCIPLINE_BLOCK}\n"
-        f"{BULLET_START_RITUAL_BLOCK}\n"
-        f"{PAIR_PROTOCOL_BLOCK}\n"
-        f"{TEST_STRATEGY_BLOCK}\n"
-        f"{CONTEXT_ECONOMY_BLOCK}\n"
-        f"{FRONTEND_SMOKE_BLOCK}\n"
+        f"{_briefing_standards_block(with_standards=with_standards)}"
+        f"{_briefing_procedure_block(with_standards=with_standards)}"
         f"ANTI-PATTERNS\n"
         f"- Vor PLAN-LOCKED Code schreiben.\n"
         f"- Human mit Trivia fluten.\n"
@@ -1396,6 +1420,7 @@ def _briefing_triple_engineer(
     orchestrator_pane: str,
     wt_path: Path, branch: str, base: str, project: str,
     peer_reviewer_pane: str | None = None,
+    with_standards: bool = False,
 ) -> str:
     """Briefing for writer/reviewer in a triple. Engineers stay idle until the
     orchestrator delivers a 'PLAN-LOCKED:' briefing post GATE 2."""
@@ -1446,13 +1471,8 @@ def _briefing_triple_engineer(
         f"    eigenes AskUserQuestion in seinem Pane (Triple-Mode).\n"
         f"  Peer-Messaging:\n"
         f"    {send_partner} \"<message>\"\n\n"
-        f"{STANDARDS_BLOCK}\n"
-        f"{RECALL_DISCIPLINE_BLOCK}\n"
-        f"{BULLET_START_RITUAL_BLOCK}\n"
-        f"{PAIR_PROTOCOL_BLOCK}\n"
-        f"{TEST_STRATEGY_BLOCK}\n"
-        f"{CONTEXT_ECONOMY_BLOCK}\n"
-        f"{FRONTEND_SMOKE_BLOCK}\n"
+        f"{_briefing_standards_block(with_standards=with_standards)}"
+        f"{_briefing_procedure_block(with_standards=with_standards)}"
         f"ANTI-PATTERNS\n"
         f"- Vor PLAN-LOCKED Code schreiben oder eigene Recon initiieren.\n"
         f"- Orchestrator/Human mit Trivia fluten.\n"
@@ -1480,16 +1500,21 @@ def _briefing_orchestrator(
     claude_model: str = DEFAULT_CLAUDE_MODEL,
     reviewer_2_pane: str | None = None,
     reviewer_2_agent: str | None = None,
+    with_standards: bool = False,
+    with_greenfield: bool = False,
 ) -> str:
     send_writer = _send_command(writer_pane)
     send_reviewer = _send_command(reviewer_pane)
     send_human = _send_command(human_pane)
-    gate_prompts = _briefing_gate_prompts(wt_path=wt_path, base=base)
+    gate_prompts = (
+        _briefing_gate_prompts(wt_path=wt_path, base=base)
+        if with_standards
+        else ""
+    )
     mode_block = f"MODE:     {mode_note}\n" if mode_note else ""
     threshold_k = _threshold_for_model(claude_model)
     interval_sec = 180  # poll cadence stays at 3 min regardless of context size
     dual_review = bool(reviewer_2_pane)
-    send_reviewer_2 = _send_command(reviewer_2_pane) if dual_review else ""
     dual_review_panes_line = (
         f"  {reviewer_2_pane}  Reviewer-2 ({reviewer_2_agent})  "
         f"- unten rechts unten\n"
@@ -1563,16 +1588,10 @@ def _briefing_orchestrator(
         f"  {human_pane}    Human              - andere Pane\n\n"
         f"TASK (vom Human)\n{task or '(keine — frage Human)'}\n\n"
         f"{dual_review_directive}"
-        f"{STANDARDS_BLOCK}\n"
+        f"{_briefing_standards_block(with_standards=with_standards, with_pre_flight=with_greenfield)}"
         f"{PLAN_QUALITY_BLOCK}\n"
-        f"{RECALL_DISCIPLINE_BLOCK}\n"
-        f"{BULLET_START_RITUAL_BLOCK}\n"
-        f"{PAIR_PROTOCOL_BLOCK}\n"
-        f"{TEST_STRATEGY_BLOCK}\n"
         f"{MID_RUN_PERSISTENCE_BLOCK}\n"
-        f"{CONTEXT_ECONOMY_BLOCK}\n"
-        f"{FRONTEND_SMOKE_BLOCK}\n"
-        f"{PRE_FLIGHT_BLOCK}\n"
+        f"{_briefing_procedure_block(with_standards=with_standards)}"
         f"DUTIES IN ORDER\n\n"
         f"0. COMPACT-WATCHER STARTEN (allererster Schritt, einmalig)\n"
         f"   Du startest sofort einen Background-Watcher der alle {interval_sec}s die\n"
@@ -1723,8 +1742,9 @@ def _briefing_orchestrator(
         f"     - User-Antworten aus GATE 1 (relevant für Entscheidungen während Code).\n"
         f"     - Pointer aus Recon (file + function + line).\n"
         f"     - PAIR-PROTOKOLL: REVIEW-READY -> REVIEW (APPROVE oder Findings) -> Fix.\n"
-        f"     - STANDARDS_BLOCK + TEST_STRATEGY_BLOCK + CONTEXT_ECONOMY_BLOCK voll,\n"
-        f"       nicht nur Verweis. Engineers haben dann alles im Pane ohne Rückfrage.\n"
+        f"     - STANDARDS + Test-/Context-/Frontend-Smoke-Prozeduren kommen\n"
+        f"       nur bei --with-standards oder --greenfield vollständig in den\n"
+        f"       Engineer-Briefings an. Default bleibt schlank.\n"
         f"     - Verweis auf .claude/rules/*.md (existieren jetzt garantiert\n"
         f"       nach GATE 1.5). Reviewer zitiert Rules in REVIEW-Outputs.\n"
         f"     - Test-Strategie pro REVIEW-READY: nur betroffene Tests grün, nicht\n"
@@ -1820,6 +1840,17 @@ def _briefing_orchestrator(
     )
 
 
+def _briefing_flags(args: argparse.Namespace, *, no_worktree: bool,
+                   role_agents: list[str]) -> tuple[bool, bool]:
+    with_standards = bool(getattr(args, "with_standards", False))
+    with_greenfield = bool(getattr(args, "greenfield", False))
+    if with_greenfield:
+        with_standards = True
+    if no_worktree and "codex" in role_agents:
+        with_standards = True
+    return with_standards, with_greenfield
+
+
 def cmd_pair(args: argparse.Namespace) -> int:
     """Writer + reviewer in a fresh worktree, side by side.
 
@@ -1904,12 +1935,20 @@ def cmd_pair(args: argparse.Namespace) -> int:
         _post_boot_slashes(reviewer_2_pane, args.reviewer_2_agent,
                            reviewer_2_name, claude_model=args.claude_model)
 
+    with_standards, _ = _briefing_flags(
+        args,
+        no_worktree=bool(getattr(args, "no_worktree", False)),
+        role_agents=[args.writer_agent, args.reviewer_agent,
+                     args.reviewer_2_agent if dual else ""],
+    )
+
     writer_brief = _briefing_pair(
         role="Writer", partner_role="reviewer", partner_pane=reviewer_pane,
         human_pane=human_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         task=args.task or "",
         peer_reviewer_pane=reviewer_2_pane,
+        with_standards=with_standards,
     )
     reviewer_brief = _briefing_pair(
         role="Reviewer", partner_role="writer", partner_pane=writer_pane,
@@ -1917,6 +1956,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         task=args.task or "",
         peer_reviewer_pane=reviewer_2_pane,
+        with_standards=with_standards,
     )
 
     _send_briefing_sync(writer_pane, writer_brief)
@@ -1928,6 +1968,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
             wt_path=wt_path, branch=branch, base=args.base,
             project=str(project), task=args.task or "",
             peer_reviewer_pane=reviewer_pane,
+            with_standards=with_standards,
         )
         _send_briefing_sync(reviewer_2_pane, reviewer_2_brief)
 
@@ -2068,6 +2109,11 @@ def cmd_triple(args: argparse.Namespace) -> int:
                            reviewer_2_name, claude_model=args.claude_model)
 
     no_worktree = bool(getattr(args, "no_worktree", False))
+    with_standards, with_greenfield = _briefing_flags(
+        args,
+        no_worktree=no_worktree,
+        role_agents=[args.writer_agent, args.reviewer_agent, args.orchestrator_agent],
+    )
     mode_note = (
         f"in-place run (kein separater Worktree). Engineers committen direkt "
         f"im Project-Pfad auf branch '{branch}'. Kein FF-Merge danach nötig. "
@@ -2086,18 +2132,22 @@ def cmd_triple(args: argparse.Namespace) -> int:
         claude_model=args.claude_model,
         reviewer_2_pane=reviewer_2_pane,
         reviewer_2_agent=args.reviewer_2_agent if dual else None,
+        with_standards=with_standards,
+        with_greenfield=with_greenfield,
     )
     writer_brief = _briefing_triple_engineer(
         role="Writer", partner_role="reviewer", partner_pane=reviewer_pane,
         orchestrator_pane=orchestrator_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         peer_reviewer_pane=reviewer_2_pane,
+        with_standards=with_standards,
     )
     reviewer_brief = _briefing_triple_engineer(
         role="Reviewer", partner_role="writer", partner_pane=writer_pane,
         orchestrator_pane=orchestrator_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         peer_reviewer_pane=reviewer_2_pane,
+        with_standards=with_standards,
     )
 
     # Orchestrator gets the full gated workflow briefing. Engineers get a wait-
@@ -2114,6 +2164,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
             wt_path=wt_path, branch=branch, base=args.base,
             project=str(project),
             peer_reviewer_pane=reviewer_pane,
+            with_standards=with_standards,
         )
         _send_briefing_sync(reviewer_2_pane, reviewer_2_brief)
 
@@ -2494,6 +2545,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "string skips the flag (claude default applies).")
     pa.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
+    pa.add_argument("--with-standards", action="store_true",
+                    help="append durable standards bundle in engineer briefings "
+                         "(default: off).")
+    pa.add_argument("--greenfield", action="store_true",
+                    help="alias für --with-standards plus greenfield pre-flight block "
+                         "(default: off).")
     pa.add_argument("--dual-review", action="store_true",
                     help="spawn TWO reviewers (codex + claude by default) on the right side, "
                          "vertically stacked. Reviewers review parallel, swap findings, then "
@@ -2537,6 +2594,12 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--reviewer-2-agent", default="codex",
                     help="second reviewer agent when --dual-review is set (default: codex). "
                          "Ignored without --dual-review.")
+    tr.add_argument("--with-standards", action="store_true",
+                    help="append durable standards bundle in engineer/orchestrator briefings "
+                         "(default: off).")
+    tr.add_argument("--greenfield", action="store_true",
+                    help="alias for --with-standards plus greenfield pre-flight block "
+                         "(default: off).")
     tr.set_defaults(func=cmd_triple)
 
     li = sub.add_parser("list", help="list panes in the current session")

@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "tmux-pair",
     "shortDescription": "Spawn tmux writer/reviewer pairs and gated triples",
-    "longDescription": "Run writer/reviewer or writer/reviewer/orchestrator agent workflows in tmux with fresh git worktrees, review gates, bundled skills, and helper scripts.",
+    "longDescription": "Run writer/reviewer or writer/reviewer/orchestrator agent workflows in tmux with fresh git worktrees, review gates, bundled skills, and helper scripts. Defaults stay slim, with standard/greenfield briefing extras available via --with-standards and --greenfield.",
     "developerName": "derveloper",
     "category": "Coding",
     "capabilities": ["Interactive", "Read", "Write"],

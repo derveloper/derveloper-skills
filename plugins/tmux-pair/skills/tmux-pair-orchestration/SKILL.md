@@ -67,17 +67,20 @@ A triple is overhead for trivial tasks. A pair leaks too much into the human's a
 ## Durable standards
 
 Standards survive `/compact` and context resets because they sit in the system prompt, not in the briefing user-message that gets summarised on compaction.
+Briefings are slim by default: task-focused and compact.
 
 - **claude panes** boot with `--append-system-prompt-file <path>` pointing at `/tmp/tmux-pair-durable-<window>-<role>.md`. The file is generated per-spawn from a single in-script constant (`DURABLE_STANDARDS_PROMPT`) so updates to standards land in the next spawn automatically.
 - **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created (i.e. not when `--no-worktree` is passed). If the repo already owns an `AGENTS.md`, the plugin leaves it alone: repo standards win.
-- **`--no-worktree` runs** (direct on the project branch) skip the AGENTS.md write to avoid polluting the repo. Codex in that mode receives standards via the briefing only: same behaviour as before durable standards existed.
+- **`--with-standards`** appends the durable standards bundle to briefings (reviewer standards, recall discipline, bullet-start ritual, pair protocol).
+- **`--greenfield`** enables `--with-standards` plus greenfield pre-flight.
+- **`--no-worktree`**: if codex is one of the spawned roles, standards are auto-enabled in the briefing so codex still receives durable standards context even without a workspace `AGENTS.md` write.
 - **`agents.json` overrides** are respected: if the user has remapped `claude` to a wrapper or alternative binary, the plugin does NOT inject `--append-system-prompt-file` blindly. The wrapper can read the standards file itself.
 
 The standards block covers: real Umlaute (no ASCII substitutes), Conventional Commits with no `--no-verify` and no AI-co-author trailer, the REVIEW-READY 3-field format, the honesty protocol (past-tense claims need same-turn tool evidence), drift signals (em-dashes, progress markers, ALL-CAPS headers, "should I"-after-clear-directive, etc.), the `incidental:` format for PostToolUse-hook fmt drift, the worktree-as-sandbox rule, the no-pre-existing-issues rule, recall-discipline (cite the relevant rule + memory before sensitive actions), and the bullet-start ritual (class + relevant rules + common BLOCKER-classes before the first edit on a bullet).
 
 ## Gated workflow (default)
 
-Both `/pair` and `/triple` enforce five quality gates before code lands on the branch. The bundled briefings already encode them; this is the high-level shape:
+Both `/pair` and `/triple` enforce five quality gates before code lands on the branch. The bundled briefings encode the gates plus the task-specific flow; optional standards/gate procedure blocks are included with `--with-standards` or `--greenfield`; this is the high-level shape:
 
 ```
 Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges

@@ -1,6 +1,6 @@
 ---
 description: Spawn a writer + reviewer agent pair in a fresh git worktree, side by side in tmux
-argument-hint: <project-path> <base> <feature> [task...] [--no-worktree] [--dual-review] [--claude-model SLUG] [--claude-effort LEVEL] [--reviewer-2-agent NAME]
+argument-hint: <project-path> <base> <feature> [task...] [--with-standards] [--greenfield] [--no-worktree] [--dual-review] [--claude-model SLUG] [--claude-effort LEVEL] [--reviewer-2-agent NAME]
 ---
 
 # pair
@@ -26,6 +26,8 @@ Spawn a writer + reviewer pair in a fresh `git worktree`, each in its own tmux p
 
 ## Optional flags
 
+- `--with-standards` — append the durable standards bundle (STANDARDS, recall discipline, bullet-start ritual, pair protocol) to engineer briefings. Default is slim.
+- `--greenfield` — enable `--with-standards` plus the greenfield pre-flight block.
 - `--no-worktree` — skip `git worktree add`. Engineers commit directly on the project's current branch in the project directory. Use sparingly: any uncommitted work in the project becomes pair-visible. With `--no-worktree`, the plugin skips writing AGENTS.md (codex receives standards via the briefing only).
 - `--claude-model <slug>` — claude model to switch into post-boot via `/model <slug>` (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically. Codex always uses `gpt-5.5 xhigh` per user setup.
 - `--claude-effort <level>` — claude reasoning effort, set as `--effort <level>` in the claude boot-command (default `max`). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies). The CLI flag is race-free vs. the `/effort` slash-command after a `/model` switch.
@@ -42,7 +44,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py pair \
   --base <base> \
   --feature <feature> \
   --task "<task>" \
-  [--no-worktree] [--claude-model <slug>] [--claude-effort <level>] \
+  [--with-standards] [--greenfield] [--no-worktree] [--claude-model <slug>] \
+  [--claude-effort <level>] \
   [--dual-review] [--reviewer-2-agent <agent>]
 ```
 
