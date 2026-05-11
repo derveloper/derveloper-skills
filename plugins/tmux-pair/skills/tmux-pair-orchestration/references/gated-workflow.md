@@ -166,6 +166,38 @@ Standard pair protocol (`references/pair-protocol.md`). Engineers wait for `PLAN
 
 The standards block in every briefing forbids `--no-verify`, AI co-author trailers, `ae/oe/ue/ss` substitutes, anti-AI-slop vocabulary, and a pile of other slop sources. Reviewers check standards as part of their review.
 
+### PROJECT.md-Pflege
+
+Every established project should keep a project-local `PROJECT.md` as the
+canonical human and agent map of the codebase. The file is maintained manually,
+not generated. A good reference shape is `~/git/example-project/PROJECT.md`: project
+overview, architecture, crate or package map, feature surface, design decisions,
+implementation history, and current operating notes.
+
+For every feature or refactor bullet, the writer owns the `PROJECT.md` update
+when the change affects one of these surfaces:
+
+- **Crate or package map:** new package, crate, command, plugin, adapter, major
+  directory, or ownership boundary.
+- **Feature surface:** new capability, workflow, command, flag, user-visible
+  behavior, or removed capability.
+- **Architecture or design decisions:** changed boundary, lifecycle, policy,
+  dependency direction, persistence model, runtime contract, or accepted trade-off.
+- **Implementation history:** completed round, plan amendment, migration, or
+  notable follow-up that future agents need before editing.
+
+Docs-only, test-only, or pure cleanup bullets can skip `PROJECT.md` when they do
+not change project structure or feature surface. The reviewer makes that call
+explicitly in the review. If the project has no `PROJECT.md`, the orchestrator
+checks that during recon and asks the user whether to bootstrap one with the
+standard skeleton sections. Bootstrap is recommended for repositories above a
+small script or throwaway size, but the file stays human-maintained.
+
+Reviewer sign-off includes a concrete PROJECT.md check: either the diff updates
+the relevant section (`Crate Map`, `Feature Surface`, `Design Decisions`, or
+`Implementation History`) or the reviewer states why no update is needed for
+that bullet.
+
 ### Recall-Discipline + Bullet-Start-Ritual
 
 Two patterns the briefings enforce so memory and rules don't get ignored mid-run:

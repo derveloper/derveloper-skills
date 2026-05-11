@@ -1,11 +1,17 @@
 ---
-description: Spawn a writer + reviewer agent pair in a fresh git worktree, side by side in tmux
+description: Spawn a writer + reviewer agent pair in a fresh git worktree, side by side in tmux, with PROJECT.md care in the gated workflow
 argument-hint: <project-path> <base> <feature> [task...] [--with-standards] [--greenfield] [--no-worktree] [--dual-review] [--claude-model SLUG] [--claude-effort LEVEL] [--reviewer-2-agent NAME]
 ---
 
 # pair
 
 Spawn a writer + reviewer pair in a fresh `git worktree`, each in its own tmux pane, with a small JSON receipt printed back so you can address them later.
+
+The gated workflow includes mandatory project-local `PROJECT.md` care: feature
+and refactor bullets update package map, feature surface, design decisions, or
+implementation history when those surfaces change. Reviewers sign off on the
+update or on a justified skip. `~/git/example-project/PROJECT.md` is the reference
+example.
 
 ## Invocation
 

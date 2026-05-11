@@ -33,7 +33,8 @@ Findings must be falsifiable: "Bullet 4 says `inject_project_documents` is wired
 6. Run the project's test command for each touched crate/module. Failures -> BLOCKER (do not assume "pre-existing").
 7. Standards: umlauts (ä/ö/ü/ß, no ae/oe/ue/ss), conventional commits, no AI-co-author trailer, no `--no-verify` traces in hooks output.
 8. Frontend-smoke + design-skill on UI bullets: writer must have cited all 6 done-positions in the DONE-ping (a-f from gate-2 spec). A single missing position -> BLOCKER. Backend verify alone does not catch UI bugs.
-9. `git status --short` MUST be clean in the diff range. Drift -> BLOCKER (worktree is the agent sandbox; uncommitted edits would be lost on squash).
+9. PROJECT.md care: if any plan bullet implements a feature, user-visible workflow, command, flag, crate/package map change, architecture diff, or implementation-history-worthy change, `git diff base..HEAD -- PROJECT.md '**/PROJECT.md'` must show the project-local `PROJECT.md` was touched. If the bullet is only refactor/test/docs and does not change feature surface, the update is optional, but the reviewer must have recorded the skip decision.
+10. `git status --short` MUST be clean in the diff range. Drift -> BLOCKER (worktree is the agent sandbox; uncommitted edits would be lost on squash).
 
 ## Build/test commands by language
 

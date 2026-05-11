@@ -896,6 +896,20 @@ FRONTEND_SMOKE_BLOCK = (
 )
 
 
+PROJECT_MD_CARE_BLOCK = (
+    "PROJECT.md-PFLEGE\n"
+    "  Bei jedem feature-/refactor-Bullet prüft der Writer die projektlokale\n"
+    "  PROJECT.md und hält relevante Sections aktuell: Crate-/Package-Map,\n"
+    "  Feature-Surface, Design-Decisions, Implementation-History. Die Pflege\n"
+    "  ist manuell, kein Auto-Generator. Fehlt PROJECT.md, fragt der\n"
+    "  Orchestrator im Recon/Clarify-Schritt ob ein Skeleton mit Project\n"
+    "  Overview, Architecture, Crate/Package Map, Feature Surface, Design\n"
+    "  Decisions und Implementation History angelegt werden soll.\n"
+    "  Reviewer-Sign-off: PROJECT.md aktualisiert ODER begründet warum dieser\n"
+    "  Bullet keine Feature-Surface, Architektur oder History ändert.\n"
+)
+
+
 # Pre-flight rules block: thin reminder, the actual rules-handling lives in
 # GATE 1.5 (reviewer-readiness-check + rules-bootstrap subagents). Kept here
 # so the orchestrator briefing has a single sticky pointer back to the gate.
@@ -1391,6 +1405,10 @@ def _briefing_pair(
         f"      Worktree-Inhalt kommt zu 100% von Engineers, kein 'Drift'.\n"
         f"    - Alle Tests im Bullet-Scope grün (oder smart-test-subset wenn\n"
         f"      so geplant, dann smoke-coverage auf alle Bullets verifiziert).\n"
+        f"    - PROJECT.md aktualisiert, wenn neue Feature-Surface,\n"
+        f"      Crate-/Package-Map, History-Entry oder Architecture-Diff betroffen\n"
+        f"      ist. Rein refactor/test/docs ohne Feature-Surface-Change: optional,\n"
+        f"      Reviewer entscheidet und begründet den Skip.\n"
         f"    - Bei UI-Bullet: 6 Done-Positionen (Smoke + Skill + Visual-Diff +\n"
         f"      Limits + A11y + Tokens) zitiert. Fehlt eine -> BLOCK.\n"
         f"    - Keine 'pre-existing'-Excuse für rote Tests / Lint / Build.\n"
@@ -1404,6 +1422,7 @@ def _briefing_pair(
         f"    AskUserQuestion an User durch.\n"
         f"  Peer-Messaging:\n"
         f"    {send_cmd} \"<message>\"\n\n"
+        f"{PROJECT_MD_CARE_BLOCK}\n"
         f"{_briefing_standards_block(with_standards=with_standards)}"
         f"{_briefing_procedure_block(with_standards=with_standards)}"
         f"ANTI-PATTERNS\n"
@@ -1458,6 +1477,10 @@ def _briefing_triple_engineer(
         f"      Worktree-Inhalt kommt zu 100% von Engineers, kein 'Drift'.\n"
         f"    - Alle Tests im Bullet-Scope grün (oder smart-test-subset wenn\n"
         f"      so geplant, dann smoke-coverage auf alle Bullets verifiziert).\n"
+        f"    - PROJECT.md aktualisiert, wenn neue Feature-Surface,\n"
+        f"      Crate-/Package-Map, History-Entry oder Architecture-Diff betroffen\n"
+        f"      ist. Rein refactor/test/docs ohne Feature-Surface-Change: optional,\n"
+        f"      Reviewer entscheidet und begründet den Skip.\n"
         f"    - Bei UI-Bullet: 6 Done-Positionen (Smoke + Skill + Visual-Diff +\n"
         f"      Limits + A11y + Tokens) zitiert. Fehlt eine -> BLOCK.\n"
         f"    - Keine 'pre-existing'-Excuse für rote Tests / Lint / Build.\n"
@@ -1471,6 +1494,7 @@ def _briefing_triple_engineer(
         f"    eigenes AskUserQuestion in seinem Pane (Triple-Mode).\n"
         f"  Peer-Messaging:\n"
         f"    {send_partner} \"<message>\"\n\n"
+        f"{PROJECT_MD_CARE_BLOCK}\n"
         f"{_briefing_standards_block(with_standards=with_standards)}"
         f"{_briefing_procedure_block(with_standards=with_standards)}"
         f"ANTI-PATTERNS\n"
@@ -1589,6 +1613,7 @@ def _briefing_orchestrator(
         f"TASK (vom Human)\n{task or '(keine — frage Human)'}\n\n"
         f"{dual_review_directive}"
         f"{_briefing_standards_block(with_standards=with_standards, with_pre_flight=with_greenfield)}"
+        f"{PROJECT_MD_CARE_BLOCK}\n"
         f"{PLAN_QUALITY_BLOCK}\n"
         f"{MID_RUN_PERSISTENCE_BLOCK}\n"
         f"{_briefing_procedure_block(with_standards=with_standards)}"
@@ -1640,6 +1665,10 @@ def _briefing_orchestrator(
         f"\n"
         f"1. RECON (Subagent wenn tief, siehe KONTEXT-ÖKONOMIE)\n"
         f"   - Pre-Flight: notiere ob ./CLAUDE.md und .claude/rules/ existieren.\n"
+        f"   - PROJECT.md-Check: notiere ob ./PROJECT.md existiert. Wenn nicht,\n"
+        f"     frage in GATE 1 via AskUserQuestion ob jetzt ein Skeleton angelegt\n"
+        f"     werden soll. Empfehlung: ja, wenn das Repo mehr als ein kleines\n"
+        f"     Skript oder Throwaway-Projekt ist. Kein Auto-Generator.\n"
         f"     Verbindlicher Rules-Check passiert in GATE 1.5 (eigenes Subagent),\n"
         f"     hier nur Bestandsaufnahme für die Annahmen-Liste.\n"
         f"   - Bei tiefer Codebase-Recherche (>3 sequenzielle File-Reads) -> spawn\n"
@@ -1741,6 +1770,10 @@ def _briefing_orchestrator(
         f"       inkl. Edit-Strategie + Test-Coverage + Done-Definition pro Bullet.\n"
         f"     - User-Antworten aus GATE 1 (relevant für Entscheidungen während Code).\n"
         f"     - Pointer aus Recon (file + function + line).\n"
+        f"     - PROJECT.md-Pflicht: Writer pflegt Crate-/Package-Map,\n"
+        f"       Feature-Surface, Design-Decisions oder Implementation-History bei\n"
+        f"       feature-/refactor-Bullets; Reviewer signiert Update oder begründeten\n"
+        f"       Skip.\n"
         f"     - PAIR-PROTOKOLL: REVIEW-READY -> REVIEW (APPROVE oder Findings) -> Fix.\n"
         f"     - STANDARDS + Test-/Context-/Frontend-Smoke-Prozeduren kommen\n"
         f"       nur bei --with-standards oder --greenfield vollständig in den\n"

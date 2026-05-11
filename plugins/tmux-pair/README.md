@@ -127,6 +127,21 @@ The orchestrator's gate-checks and recon are routed to plugin-namespaced subagen
 
 Net effect: ~60-70 percent token savings vs all-Opus subagents, no quality loss on gate-tasks. The agent files live in `agents/` and ship with the plugin; per-spawn customisation goes in those files, not in the orchestrator briefing.
 
+### PROJECT.md care
+
+The gated workflow treats project-local `PROJECT.md` care as mandatory for
+feature and refactor bullets that change the package map, feature surface,
+design decisions, or implementation history. The writer owns the update and
+the reviewer signs off on either the concrete `PROJECT.md` diff or a justified
+skip for refactor, test, or docs-only bullets with no feature-surface change.
+
+The GATE 3 verifier checks whether `PROJECT.md` was touched when the plan
+includes a feature, workflow, command, flag, package-map, architecture, or
+history-worthy change. If a repository has no `PROJECT.md`, the orchestrator
+checks that during recon and asks whether to bootstrap a human-maintained
+skeleton. `~/git/example-project/PROJECT.md` is the reference example for format and
+detail depth.
+
 ### Reviewer-Readiness + rules-bootstrap (GATE 1.5)
 
 A reviewer without rules says "looks fine" — that is the failure mode GATE 1.5 prevents. The orchestrator runs the readiness-check before planning. On `NEEDS-RULES`, it loops: per gap one `AskUserQuestion`, then the bootstrap subagent generates `.claude/rules/<topic>.md` from one of seven shipped language templates (Rust, TypeScript, Python, Go, JavaScript, Java, generic skeleton) plus repo recon plus user answers. Templates ship in `templates/rules/` and are sanitized — no company-specific naming, ADRs, or domain references. Project-specific content comes from the user's own answers, baked into the user's own repo.

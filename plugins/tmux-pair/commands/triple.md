@@ -1,5 +1,5 @@
 ---
-description: Spawn an orchestrator + writer + reviewer triple in a fresh git worktree (orchestrator on top, engineers below)
+description: Spawn an orchestrator + writer + reviewer triple in a fresh git worktree, with PROJECT.md care in the gated workflow
 argument-hint: <project-path> <base> <feature> [task...] [--with-standards] [--greenfield] [--no-worktree] [--dual-review] [--claude-model SLUG] [--claude-effort LEVEL] [--reviewer-2-agent NAME]
 ---
 
@@ -8,6 +8,12 @@ argument-hint: <project-path> <base> <feature> [task...] [--with-standards] [--g
 Spawn a writer + reviewer pair plus a dedicated orchestrator in a fresh `git worktree`. The orchestrator runs in a pane on top across the full width, the two engineers sit side by side beneath. The orchestrator does recon, writes the engineer briefings, watches the pair loop, and reports up to the human pane on major events only.
 
 The human gets to dispatch the spawn and step away. They are not the recon agent and not the relay between writer and reviewer.
+
+The orchestrator also checks whether the repository has a project-local
+`PROJECT.md`. Feature and refactor bullets must keep it current when package
+map, feature surface, design decisions, or implementation history change.
+Reviewers sign off on the update or on a justified skip, and
+`~/git/example-project/PROJECT.md` is the reference example.
 
 ## Invocation
 
