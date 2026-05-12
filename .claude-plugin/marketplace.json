@@ -13,7 +13,7 @@
       "name": "tmux-pair",
       "source": "./plugins/tmux-pair",
       "description": "Spawn writer/reviewer agent pairs (or writer/reviewer/orchestrator triples) in fresh git worktrees, wired up via tmux. Includes the orchestration script, slash commands, the tmux-pair-orchestration skill, PROJECT.md care, scoped subagents for the gates, sender identity prefixes, explicit parallel-plan markers, shipped rules templates for 7 stacks, bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), and pi as third coding agent alongside claude + codex.",
-      "version": "0.11.0",
+      "version": "0.12.0",
       "category": "workflow",
       "tags": ["tmux", "git-worktree", "pair-programming", "orchestration"]
     }

@@ -51,6 +51,7 @@ suites, or independent fix branches when that keeps their main pane lean.
 - `--writer-agent <name>` / `--reviewer-agent <name>` — Agent-Wahl pro Rolle. Erlaubt: `claude` (Default Reviewer), `codex` (Default Writer), `pi` (Custom CLI mit Cortecs-Backend, alle drei Rollen unterstützt).
 - `--pi-model <slug>` — pi-Model-Slug für jedes pi-Pane (default `glm-5.1`). Wird als `--model <slug>` im pi-Boot gesetzt. Cortecs-Modelle via `~/.pi/agent/models.json` verfügbar (z.B. `claude-opus4-7`, `deepseek-v4-pro`, `gpt-5.5`).
 - `--pi-thinking <level>` — pi-Reasoning-Level (default `high`). Choices: `off|minimal|low|medium|high|xhigh`. Wird als `--thinking <level>` im pi-Boot gesetzt. Äquivalent zu `--claude-effort`, aber andere Skala.
+- `--pi-<role>-model <slug>` / `--pi-<role>-thinking <level>` — pro-Rolle Override für pi-Panes. Rollen: `writer`, `reviewer`, `reviewer-2` (mit `--dual-review`). Wenn gesetzt, gewinnt die Rolle-Variante gegenüber `--pi-model` / `--pi-thinking`. Beispiel: `--writer-agent pi --pi-writer-model deepseek-v4-pro --reviewer-2-agent pi --pi-reviewer-2-model kimi-k2.6` startet Writer mit deepseek und Reviewer-2 mit kimi.
 - `--dual-review` — opt-in second reviewer. Spawns reviewer-1 (claude by default) and reviewer-2 (codex by default) stacked vertically on the right side. Both review independently, swap findings, then send a final report each to the human (= orchestrator in pair-mode) for consolidation. Off by default.
 - `--reviewer-2-agent <agent>` — override the second reviewer agent (default codex). Only relevant with `--dual-review`.
 
