@@ -23,7 +23,7 @@ Default agent assignments (overridable):
 - reviewer: `claude` (strong at adversarial review, follows checklists, gives falsifiable findings)
 - orchestrator: `claude` (recon + briefing + filtering)
 
-These are defaults baked into the bundled script. Different agent CLIs work fine: point `--writer-agent`, `--reviewer-agent`, `--orchestrator-agent` at any name registered in `~/.config/tmux-pair/agents.json`.
+These are defaults baked into the bundled script. Different agent CLIs work fine: point `--writer-agent`, `--reviewer-agent`, `--orchestrator-agent` at any name registered in `~/.config/tmux-pair/agents.json`. Built-in: `claude`, `codex`, `pi` (the users Custom-CLI). pi unterstützt alle drei Rollen, bringt aber zwei Einschränkungen: kein mid-session Model-Switch (kein `/model` Slash-Command, nur Pane-Restart) und kein `/compact`-Equivalent (Compact-Watcher pingt pi-Panes nicht; bei langen Runs Pane-Restart einplanen).
 
 ## Dual-Review (opt-in)
 
@@ -71,6 +71,7 @@ Briefings are slim by default: task-focused and compact.
 
 - **claude panes** boot with `--append-system-prompt-file <path>` pointing at `/tmp/tmux-pair-durable-<window>-<role>.md`. The file is generated per-spawn from a single in-script constant (`DURABLE_STANDARDS_PROMPT`) so updates to standards land in the next spawn automatically.
 - **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created (i.e. not when `--no-worktree` is passed). If the repo already owns an `AGENTS.md`, the plugin leaves it alone: repo standards win.
+- **pi panes** boot with `--append-system-prompt <path>` (the users Custom-CLI, `~/.pi/agent/`). pi liest zusätzlich `AGENTS.md` und `CLAUDE.md` via Default-Discovery, also wirkt der codex-Pfad transitiv mit. Default-Model `glm-5.1` (Cortecs-Backend), default `--thinking high` (Mapping aus claude `--effort max`). Override per Spawn via `--pi-model` und `--pi-thinking`. Bekannte Beschränkungen: kein mid-session `/model`-Wechsel (Pane-Restart nötig) und kein `/compact`-Equivalent (Compact-Watcher pingt pi-Panes nicht).
 - **`--with-standards`** appends the durable standards bundle to briefings (reviewer standards, recall discipline, bullet-start ritual, pair protocol).
 - **`--greenfield`** enables `--with-standards` plus greenfield pre-flight.
 - **`--no-worktree`**: if codex is one of the spawned roles, standards are auto-enabled in the briefing so codex still receives durable standards context even without a workspace `AGENTS.md` write.

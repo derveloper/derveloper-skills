@@ -1,6 +1,6 @@
 ---
 description: Spawn a writer + reviewer agent pair in a fresh git worktree, side by side in tmux, with PROJECT.md care in the gated workflow
-argument-hint: <project-path> <base> <feature> [task...] [--with-standards] [--greenfield] [--no-worktree] [--dual-review] [--claude-model SLUG] [--claude-effort LEVEL] [--reviewer-2-agent NAME]
+argument-hint: <project-path> <base> <feature> [task...] [--with-standards] [--greenfield] [--no-worktree] [--dual-review] [--writer-agent claude|codex|pi] [--reviewer-agent claude|codex|pi] [--claude-model SLUG] [--claude-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL] [--reviewer-2-agent NAME]
 ---
 
 # pair
@@ -38,6 +38,8 @@ suites, or independent fix branches when that keeps their main pane lean.
 - `/pair ~/code/myapp main hotfix-x --no-worktree` (work directly on the project's current branch)
 - `/pair ~/code/myapp main small-job --claude-model claude-opus-4-6` (200k context, cheaper for short tasks)
 - `/pair ~/code/myapp main risky-refactor --dual-review` (two reviewers cross-checking, codex + claude)
+- `/pair ~/code/myapp main pi-experiment --writer-agent pi` (pi als Writer, Standard glm-5.1 via Cortecs)
+- `/pair ~/code/myapp main heavy-reasoning --writer-agent pi --pi-model claude-opus4-7 --pi-thinking xhigh` (pi mit Top-Tier-Model und max Reasoning)
 
 ## Optional flags
 
@@ -46,6 +48,9 @@ suites, or independent fix branches when that keeps their main pane lean.
 - `--no-worktree` — skip `git worktree add`. Engineers commit directly on the project's current branch in the project directory. Use sparingly: any uncommitted work in the project becomes pair-visible. With `--no-worktree`, the plugin skips writing AGENTS.md (codex receives standards via the briefing only).
 - `--claude-model <slug>`: claude model to switch into post-boot via `/model <slug>` (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically. Codex pane boot follows the user's configured CLI default; engineer subagent defaults are documented in the workflow briefing.
 - `--claude-effort <level>` — claude reasoning effort, set as `--effort <level>` in the claude boot-command (default `max`). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies). The CLI flag is race-free vs. the `/effort` slash-command after a `/model` switch.
+- `--writer-agent <name>` / `--reviewer-agent <name>` — Agent-Wahl pro Rolle. Erlaubt: `claude` (Default Reviewer), `codex` (Default Writer), `pi` (Custom CLI mit Cortecs-Backend, alle drei Rollen unterstützt).
+- `--pi-model <slug>` — pi-Model-Slug für jedes pi-Pane (default `glm-5.1`). Wird als `--model <slug>` im pi-Boot gesetzt. Cortecs-Modelle via `~/.pi/agent/models.json` verfügbar (z.B. `claude-opus4-7`, `deepseek-v4-pro`, `gpt-5.5`).
+- `--pi-thinking <level>` — pi-Reasoning-Level (default `high`). Choices: `off|minimal|low|medium|high|xhigh`. Wird als `--thinking <level>` im pi-Boot gesetzt. Äquivalent zu `--claude-effort`, aber andere Skala.
 - `--dual-review` — opt-in second reviewer. Spawns reviewer-1 (claude by default) and reviewer-2 (codex by default) stacked vertically on the right side. Both review independently, swap findings, then send a final report each to the human (= orchestrator in pair-mode) for consolidation. Off by default.
 - `--reviewer-2-agent <agent>` — override the second reviewer agent (default codex). Only relevant with `--dual-review`.
 
@@ -59,8 +64,10 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py pair \
   --base <base> \
   --feature <feature> \
   --task "<task>" \
-  [--with-standards] [--greenfield] [--no-worktree] [--claude-model <slug>] \
-  [--claude-effort <level>] \
+  [--with-standards] [--greenfield] [--no-worktree] \
+  [--writer-agent <claude|codex|pi>] [--reviewer-agent <claude|codex|pi>] \
+  [--claude-model <slug>] [--claude-effort <level>] \
+  [--pi-model <slug>] [--pi-thinking <level>] \
   [--dual-review] [--reviewer-2-agent <agent>]
 ```
 

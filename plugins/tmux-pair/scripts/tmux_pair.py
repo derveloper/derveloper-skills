@@ -34,6 +34,12 @@ from pathlib import Path
 DEFAULT_AGENTS: dict[str, str] = {
     "claude": "claude --dangerously-skip-permissions",
     "codex": "codex --dangerously-bypass-approvals-and-sandbox",
+    # pi: the users Custom-CLI (~/.pi/agent). TUI lädt AGENTS.md + CLAUDE.md
+    # automatisch, --append-system-prompt akzeptiert File-Pfade direkt
+    # (Help: "Append text or file contents"). --no-context-files würde die
+    # Auto-Discovery deaktivieren; wir lassen es an, damit Project-AGENTS.md
+    # wirkt.
+    "pi": "pi",
 }
 
 # Default Claude model. Opus 4.7 hat 1M Context-Window (vs Opus 4.6 mit 200k).
@@ -50,6 +56,14 @@ DEFAULT_CLAUDE_MODEL = "claude-opus-4-7"
 # = flag NICHT setzen, claude default oder CLAUDE_CODE_EFFORT_LEVEL env-var
 # greift.
 DEFAULT_CLAUDE_EFFORT = "max"
+
+# pi (custom CLI) Model + Thinking-Level. glm-5.1 ist the users aktueller pi
+# Default (~/.pi/agent/settings.json, Cortecs-Provider). Thinking-Level Skala
+# unterscheidet sich von claude --effort: pi hat off|minimal|low|medium|high|
+# xhigh. Wir mappen claude-effort max -> pi thinking high (kein xhigh weil
+# stabiler). Override per Spawn via --pi-model / --pi-thinking.
+DEFAULT_PI_MODEL = "glm-5.1"
+DEFAULT_PI_THINKING = "high"
 
 # Compact-Watcher Default: bei diesem Token-Wert pingt der Watcher den
 # Orchestrator. Conservative für 200k-Context-Modelle (Opus 4.6 = 200k):
@@ -328,6 +342,11 @@ def _wait_for_agent_ready(pane: str, agent: str, timeout: int = 60) -> bool:
             "gpt-" in tail.lower() or "openai codex" in tail.lower()
         ):
             return True
+        # pi TUI Footer-Marker: Token-Counter Format "X.X%/<N>k (auto)".
+        # Sichtbar sobald TUI fertig geladen (incl. Extensions, MCP-Bridges).
+        # Pi-Boot dauert ~10-15s wegen Skill/Extension-Discovery.
+        if agent == "pi" and re.search(r"/\d+(?:\.\d+)?k\s*\(auto\)", tail):
+            return True
     return False
 
 
@@ -472,6 +491,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         window_name=window_name, role=args.name or "agent",
         claude_effort=args.claude_effort,
         claude_model=args.claude_model,
+        pi_model=getattr(args, "pi_model", DEFAULT_PI_MODEL),
+        pi_thinking=getattr(args, "pi_thinking", DEFAULT_PI_THINKING),
         display_name=args.name or "",
     )
     if args.task:
@@ -1165,46 +1186,59 @@ def _boot_command_with_standards(
     *, agent: str, agents_dict: dict[str, str], window_name: str, role: str,
     claude_effort: str = DEFAULT_CLAUDE_EFFORT,
     claude_model: str = DEFAULT_CLAUDE_MODEL,
+    pi_model: str = DEFAULT_PI_MODEL,
+    pi_thinking: str = DEFAULT_PI_THINKING,
     display_name: str = "",
 ) -> str:
-    """Build the boot command for an agent. For claude, append the durable
-    standards file via --append-system-prompt-file so the standards survive
-    /compact, plus --effort <level>, --model <slug> und --name <display_name>
-    (alle race-frei als CLI-Flags vor TUI-Start, statt /effort, /model,
-    /rename als Slash-Commands post-boot).
+    """Build the boot command for an agent.
 
-    For codex, the standards are loaded via AGENTS.md placed in the worktree
-    root by _write_codex_standards_to_worktree (only when a real worktree
-    exists; --no-worktree skips it to avoid project-repo pollution).
+    claude: --append-system-prompt-file (file form, quoting-safe), plus
+    --effort, --model, --name als CLI-Flags vor TUI-Start (race-frei vs.
+    Slash-Commands post-boot).
 
-    Robustness: only inject the flags if the boot command starts with a bare
-    'claude' token. If the user has overridden the agents.json entry with a
-    wrapper or alternative binary, we leave the boot command alone instead
-    of appending flags the wrapper may not understand. The user's wrapper
-    can read the standards file itself if it wants to.
+    codex: Standards landen als AGENTS.md im Worktree-Root (siehe
+    _write_codex_standards_to_worktree). Boot bleibt clean.
 
-    Why --append-system-prompt-file over --append-system-prompt + cat:
-    the file form is quoting-safe (no shell command-substitution), so the
-    standards content can hold backticks, $() or quotes without injection.
+    pi: --append-system-prompt akzeptiert File-Pfade direkt (pi-help:
+    "Append text or file contents to the system prompt"). Plus --model
+    fuer Boot-time Model-Wahl und --thinking fuer Reasoning-Level. Kein
+    --name in pi (Helper schreibt Pane-Title + sender-option via tmux
+    set-option, das reicht). pi liest zusaetzlich AGENTS.md aus dem
+    Worktree per Default-Discovery, also wirkt der claude/codex-Pfad
+    transitiv (Standards doppelt geladen, redundanz ist OK).
+
+    Robustness: pruefe bare-Token des Boot-Commands. Wrapper-Overrides in
+    ~/.config/tmux-pair/agents.json bleiben unangetastet.
     """
     boot = agents_dict[agent]
-    if agent != "claude":
-        return boot
     boot_tokens = shlex.split(boot)
-    if not boot_tokens or boot_tokens[0] != "claude":
+    if not boot_tokens:
         return boot
-    standards_path = _write_durable_standards_file(window_name, role)
-    parts = [boot]
-    if claude_effort:
-        parts.append(f"--effort {shlex.quote(claude_effort)}")
-    if claude_model:
-        parts.append(f"--model {shlex.quote(claude_model)}")
-    if display_name:
-        parts.append(f"--name {shlex.quote(display_name)}")
-    parts.append(
-        f"--append-system-prompt-file {shlex.quote(str(standards_path))}"
-    )
-    return " ".join(parts)
+    if agent == "claude" and boot_tokens[0] == "claude":
+        standards_path = _write_durable_standards_file(window_name, role)
+        parts = [boot]
+        if claude_effort:
+            parts.append(f"--effort {shlex.quote(claude_effort)}")
+        if claude_model:
+            parts.append(f"--model {shlex.quote(claude_model)}")
+        if display_name:
+            parts.append(f"--name {shlex.quote(display_name)}")
+        parts.append(
+            f"--append-system-prompt-file {shlex.quote(str(standards_path))}"
+        )
+        return " ".join(parts)
+    if agent == "pi" and boot_tokens[0] == "pi":
+        standards_path = _write_durable_standards_file(window_name, role)
+        parts = [boot]
+        if pi_model:
+            parts.append(f"--model {shlex.quote(pi_model)}")
+        if pi_thinking:
+            parts.append(f"--thinking {shlex.quote(pi_thinking)}")
+        parts.append(
+            f"--append-system-prompt {shlex.quote(str(standards_path))}"
+        )
+        return " ".join(parts)
+    return boot
 
 
 def _worktree_gitdir(wt_path: Path) -> Path | None:
@@ -2022,6 +2056,8 @@ def cmd_pair(args: argparse.Namespace) -> int:
             window_name=window_name, role="writer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            pi_model=getattr(args, "pi_model", DEFAULT_PI_MODEL),
+            pi_thinking=getattr(args, "pi_thinking", DEFAULT_PI_THINKING),
             display_name=writer_name,
         ),
         split="none", display_name=writer_name,
@@ -2034,6 +2070,8 @@ def cmd_pair(args: argparse.Namespace) -> int:
             window_name=window_name, role="reviewer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            pi_model=getattr(args, "pi_model", DEFAULT_PI_MODEL),
+            pi_thinking=getattr(args, "pi_thinking", DEFAULT_PI_THINKING),
             display_name=reviewer_name,
         ),
         split="h", display_name=reviewer_name,
@@ -2050,6 +2088,8 @@ def cmd_pair(args: argparse.Namespace) -> int:
                 window_name=window_name, role="reviewer",
                 claude_effort=args.claude_effort,
                 claude_model=args.claude_model,
+                pi_model=getattr(args, "pi_model", DEFAULT_PI_MODEL),
+                pi_thinking=getattr(args, "pi_thinking", DEFAULT_PI_THINKING),
                 display_name=reviewer_2_name,
             ),
             split="v", display_name=reviewer_2_name,
@@ -2176,6 +2216,8 @@ def cmd_triple(args: argparse.Namespace) -> int:
             window_name=window_name, role="orchestrator",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            pi_model=getattr(args, "pi_model", DEFAULT_PI_MODEL),
+            pi_thinking=getattr(args, "pi_thinking", DEFAULT_PI_THINKING),
             display_name=orchestrator_name,
         ),
         split="none",
@@ -2189,6 +2231,8 @@ def cmd_triple(args: argparse.Namespace) -> int:
             window_name=window_name, role="writer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            pi_model=getattr(args, "pi_model", DEFAULT_PI_MODEL),
+            pi_thinking=getattr(args, "pi_thinking", DEFAULT_PI_THINKING),
             display_name=writer_name,
         ),
         split="v", display_name=writer_name,
@@ -2201,6 +2245,8 @@ def cmd_triple(args: argparse.Namespace) -> int:
             window_name=window_name, role="reviewer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            pi_model=getattr(args, "pi_model", DEFAULT_PI_MODEL),
+            pi_thinking=getattr(args, "pi_thinking", DEFAULT_PI_THINKING),
             display_name=reviewer_name,
         ),
         split="h", display_name=reviewer_name,
@@ -2219,6 +2265,8 @@ def cmd_triple(args: argparse.Namespace) -> int:
                 window_name=window_name, role="reviewer",
                 claude_effort=args.claude_effort,
                 claude_model=args.claude_model,
+                pi_model=getattr(args, "pi_model", DEFAULT_PI_MODEL),
+                pi_thinking=getattr(args, "pi_thinking", DEFAULT_PI_THINKING),
                 display_name=reviewer_2_name,
             ),
             split="v", display_name=reviewer_2_name,
@@ -2653,6 +2701,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "Choices: low|medium|high|xhigh|max. Set as --effort "
                          "<level> in boot command (race-free vs /effort slash). "
                          "Empty string skips the flag (claude default applies).")
+    sp.add_argument("--pi-model", default=DEFAULT_PI_MODEL,
+                    help=f"pi model slug (default: {DEFAULT_PI_MODEL}). Only "
+                         "applied when --agent pi.")
+    sp.add_argument("--pi-thinking", default=DEFAULT_PI_THINKING,
+                    help=f"pi thinking level (default: {DEFAULT_PI_THINKING}). "
+                         "Only applied when --agent pi.")
     sp.set_defaults(func=cmd_spawn)
 
     se = sub.add_parser("send", help="send text to a pane")
@@ -2686,6 +2740,16 @@ def build_parser() -> argparse.ArgumentParser:
                          "Choices: low|medium|high|xhigh|max. Set as --effort "
                          "<level> in boot command for any claude pane. Empty "
                          "string skips the flag (claude default applies).")
+    pa.add_argument("--pi-model", default=DEFAULT_PI_MODEL,
+                    help=f"pi model slug (default: {DEFAULT_PI_MODEL}, Cortecs "
+                         "via the users ~/.pi/agent/settings.json). Set as "
+                         "--model <slug> im pi-Boot fuer jedes pi-Pane. "
+                         "Empty string laesst pi-Default greifen.")
+    pa.add_argument("--pi-thinking", default=DEFAULT_PI_THINKING,
+                    help=f"pi thinking level (default: {DEFAULT_PI_THINKING}). "
+                         "Choices: off|minimal|low|medium|high|xhigh. Set as "
+                         "--thinking <level> im pi-Boot. Empty string ueberlaesst "
+                         "die Wahl der pi-Defaults.")
     pa.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
     pa.add_argument("--with-standards", action="store_true",
@@ -2728,6 +2792,17 @@ def build_parser() -> argparse.ArgumentParser:
                          "<level> in boot command for any claude pane "
                          "(Writer+Orchestrator). Empty string skips the flag "
                          "(claude default applies).")
+    tr.add_argument("--pi-model", default=DEFAULT_PI_MODEL,
+                    help=f"pi model slug (default: {DEFAULT_PI_MODEL}, Cortecs "
+                         "via the users ~/.pi/agent/settings.json). Set as "
+                         "--model <slug> im pi-Boot fuer jedes pi-Pane "
+                         "(Writer/Reviewer/Orchestrator/Reviewer-2). Empty "
+                         "string laesst pi-Default greifen.")
+    tr.add_argument("--pi-thinking", default=DEFAULT_PI_THINKING,
+                    help=f"pi thinking level (default: {DEFAULT_PI_THINKING}). "
+                         "Choices: off|minimal|low|medium|high|xhigh. Set as "
+                         "--thinking <level> im pi-Boot. Empty string ueberlaesst "
+                         "die Wahl der pi-Defaults.")
     tr.add_argument("--no-worktree", action="store_true",
                     help="skip git worktree, run directly in --project on its current branch")
     tr.add_argument("--dual-review", action="store_true",
