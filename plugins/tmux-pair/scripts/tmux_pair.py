@@ -149,6 +149,48 @@ def _composer_empty(tail: str) -> bool:
     return False
 
 
+IDENTITY_PREFIX_RE = re.compile(r"^\[FROM:[^\]]+\]\s*")
+SPINNER_TITLE_RE = re.compile(r"^[\u2800-\u28ff✳✻✢✶✽✺✹✸⏺·\s]+")
+
+
+def _has_identity_prefix(text: str) -> bool:
+    return bool(IDENTITY_PREFIX_RE.match(text))
+
+
+def _current_pane_id() -> str:
+    pane = os.environ.get("TMUX_PANE", "").strip()
+    if pane:
+        return pane
+    rc, out, _ = tmux_safe("display-message", "-p", "-F", "#{pane_id}")
+    return out.strip() if rc == 0 else ""
+
+
+def _pane_display_name(pane: str) -> str:
+    if not pane:
+        return ""
+    rc, out, _ = tmux_safe(
+        "show-options", "-p", "-v", "-t", pane, "@tmux-pair-sender"
+    )
+    configured = out.strip() if rc == 0 else ""
+    if configured:
+        return configured
+    rc, out, _ = tmux_safe(
+        "display-message", "-p", "-t", pane, "-F", "#{pane_title}"
+    )
+    title = out.strip() if rc == 0 else ""
+    title = SPINNER_TITLE_RE.sub("", title).strip()
+    if "…" in title or "..." in title:
+        return pane
+    return title or pane
+
+
+def _identity_wrapped_text(text: str) -> str:
+    if _has_identity_prefix(text) or text.startswith("/"):
+        return text
+    sender = _pane_display_name(_current_pane_id()) or "unknown"
+    return f"[FROM: {sender}] {text}"
+
+
 def cmd_send(args: argparse.Namespace) -> int:
     """Send `args.text` to pane `args.pane`, handling multi-line + Enter quirks.
 
@@ -163,6 +205,8 @@ def cmd_send(args: argparse.Namespace) -> int:
     """
     pane = args.pane
     text = args.text
+    if getattr(args, "identity_wrap", False):
+        text = _identity_wrapped_text(text)
     if "\n" in text:
         buf = f"tmuxpair-{os.getpid()}-{int(time.time() * 1000) % 100000}"
         proc = subprocess.run(
@@ -366,6 +410,8 @@ def spawn_pane(
 
     if display_name:
         tmux_safe("select-pane", "-t", pane_id, "-T", display_name)
+        tmux_safe("set-option", "-p", "-t", pane_id,
+                  "@tmux-pair-sender", display_name)
         # Make pane titles visible. Server-wide setting, idempotent. Users who
         # don't want it can override in their .tmux.conf.
         tmux_safe("set-option", "-g", "pane-border-status", "top")
@@ -690,9 +736,10 @@ PLAN_QUALITY_BLOCK = (
     "  3. Test-Coverage: welche Tests bestätigen, dass das Bullet sein Goal\n"
     "     erreicht hat? Test-File-Pfad explizit. Frickel-Marker setzen wenn\n"
     "     bewusst keine Tests (mit Begründung).\n"
-    "  4. Parallelisierbarkeit: kann dieses Bullet parallel zu anderen laufen?\n"
-    "     Wenn ja, Markierung 'PARALLEL: B2' o.ä. setzen. Subagents für\n"
-    "     unabhängige Recherche/Generierung parallel spawnen, nicht seriell.\n"
+    "  4. Parallelisierbarkeit: jedes Bullet trägt einen Marker. Konvention:\n"
+    "     'B3 || B4 [parallel]' wenn die Bullets ohne shared files laufen können,\n"
+    "     oder 'B3 -> B4 [sequenziell: <Grund>]' wenn Reihenfolge nötig ist.\n"
+    "     Subagents für unabhängige Recherche/Generierung parallel spawnen.\n"
     "  5. Done-Definition: was muss messbar wahr sein, damit das Bullet als\n"
     "     erledigt gilt (Test grün, Datei existiert, Funktion liefert X)?\n"
     "  Pläne müssen ausführlich genug sein, dass der Engineer ohne weitere\n"
@@ -722,6 +769,46 @@ PLAN_QUALITY_BLOCK = (
     "  Wenn der Master GATE-3 überspringt: Reviewer darf eigenständig Verify\n"
     "  anstossen und COMPLETE als verfrüht markieren. Master darf nicht gegen\n"
     "  GATE-3-FAIL committen ohne explizite User-Eskalation.\n"
+)
+
+
+# Engineer subagent strategy: Writer, Reviewer und Orchestrator halten ihre
+# Haupt-Kontexte schlank und delegieren klar begrenzte Nebenarbeiten.
+ENGINEER_SUBAGENT_STRATEGY_BLOCK = (
+    "ENGINEER-SUBAGENT-STRATEGIE (PFLICHT BEI KOMPLEXEN TASKS)\n"
+    "  Writer, Reviewer und Orchestrator halten das Haupt-Pane schlank. Nutze\n"
+    "  Subagents für klar begrenzte Nebenarbeit, wenn sie parallel laufen kann\n"
+    "  oder mehr als drei gezielte Reads/Tests/Fix-Spikes erwarten lässt.\n"
+    "\n"
+    "  Geeignete Use-Cases:\n"
+    "  - Parallele Recon-Files: getrennte Subagents lesen unabhängige Module\n"
+    "    und liefern je <300 Wörter mit Datei:Zeile-Pointern.\n"
+    "  - Parallele Test-Suites: ein Subagent läuft Unit-Tests, ein anderer\n"
+    "    Integration- oder Browser-Smoke, während das Haupt-Pane Review oder\n"
+    "    Diff-Integration macht.\n"
+    "  - Parallele Fix-Branches: bei unabhängigen Bullets mit disjunkten Files\n"
+    "    kann der Orchestrator mehrere Worktrees oder zusätzliche Pair-Spawns\n"
+    "    vorschlagen. Der Plan muss Marker tragen, z.B. 'B3 || B4 [parallel]'.\n"
+    "\n"
+    "  Codex-Policy:\n"
+    "  - Bei Codex Subagent-Spawns mit codex apps oder Helmholtz/Maxwell-Pattern\n"
+    "    ist der Default `gpt-5.3-codex-spark` mit reasoning_effort `high`,\n"
+    "    solange das User-Limit es hergibt.\n"
+    "  - Bei Rate-Limit-Hit fällt der Spawn auf das aktuelle Default-Model\n"
+    "    `gpt-5.5` mit `high` zurück.\n"
+    "  - Kein Auto-Spawn: Engineer entscheidet, ob Subagent-Einsatz die aktuelle\n"
+    "    Bullet wirklich beschleunigt oder den kritischen Pfad blockiert.\n"
+    "\n"
+    "  Claude-Policy:\n"
+    "  - Claude bleibt beim Task-Tool. Verwende die im Subagent definierten\n"
+    "    Modelle, typischerweise Sonnet 4.6 für nuancierte Review/Plan-Arbeit\n"
+    "    und Haiku 4.5 für günstige read-only Recon oder Verifikation.\n"
+    "\n"
+    "  Disziplin:\n"
+    "  - Subagents bekommen konkrete Frage, Pfadgrenzen, Output-Limit und die\n"
+    "    Anweisung, keine fremden Edits zu revertieren.\n"
+    "  - Subagent-Resultate werden zusammengefasst integriert. Rohe Langoutputs\n"
+    "    bleiben aus dem Haupt-Pane.\n"
 )
 
 
@@ -997,6 +1084,10 @@ PAIR_PROTOCOL_BLOCK = (
     "  Macht: atomic load-buffer + paste-buffer (multi-line ohne per-newline-\n"
     "  submit-Bug), Probe-Retry mit capture-pane (Stuck-Buffer-Erkennung),\n"
     "  6 Enter-Retries über 14s (TUIs schlucken Enter manchmal).\n"
+    "  Identity: send-CLI setzt automatisch '[FROM: <pane-name>] ' vor jede\n"
+    "  Message, wenn sie nicht schon mit '[FROM:' beginnt. Idempotent: manuell\n"
+    "  prefixed Pings werden nicht doppelt prefixed. Slash-Commands wie\n"
+    "  '/compact <focus>' bleiben unverändert.\n"
     "  Verboten für Pair-Kommunikation:\n"
     "  - tmux send-keys -t <pane> '...' (raw, ohne Probe)\n"
     "  - tmux send-keys -t <pane> '...' Enter (raw, mit Enter aber ohne Retry)\n"
@@ -1399,6 +1490,9 @@ def _briefing_pair(
         f"PAIR-PROTOKOLL (während Implementation)\n"
         f"  Writer codet, Reviewer liest. Nach jeder sinnvollen Änderung:\n"
         f"    {send_cmd} \"REVIEW-READY: <ein-Zeilen-Summary>\"\n"
+        f"  send-CLI ergänzt automatisch '[FROM: <pane-name>] ' wenn die Message\n"
+        f"  nicht schon mit '[FROM:' beginnt. Beispiel sichtbar beim Empfänger:\n"
+        f"  '[FROM: wr.<feature>] REVIEW-READY: B2 ...'.\n"
         f"  Reviewer antwortet REVIEW: APPROVE oder REVIEW: <Findings>.\n"
         f"  Reviewer Pre-APPROVE-Pflicht-Checks (vor APPROVE):\n"
         f"    - `git status` im Worktree MUSS clean sein. Unclean -> BLOCK.\n"
@@ -1413,6 +1507,8 @@ def _briefing_pair(
         f"      Limits + A11y + Tokens) zitiert. Fehlt eine -> BLOCK.\n"
         f"    - Keine 'pre-existing'-Excuse für rote Tests / Lint / Build.\n"
         f"      Pair/Triple liefert IMMER 100% korrekten Code.\n"
+        f"  Bei komplexen Recon-/Implementation-/Review-Schritten nutzt der\n"
+        f"  zuständige Engineer Subagents gemäß ENGINEER-SUBAGENT-STRATEGIE.\n"
         f"  Loop bis APPROVE, dann Writer committet und pingt DONE an Human:\n"
         f"    {send_human} \"DONE {role}: <Diff-Stat / Commit-Liste>\"\n"
         f"  Eskalation Human:\n"
@@ -1423,6 +1519,7 @@ def _briefing_pair(
         f"  Peer-Messaging:\n"
         f"    {send_cmd} \"<message>\"\n\n"
         f"{PROJECT_MD_CARE_BLOCK}\n"
+        f"{ENGINEER_SUBAGENT_STRATEGY_BLOCK}\n"
         f"{_briefing_standards_block(with_standards=with_standards)}"
         f"{_briefing_procedure_block(with_standards=with_standards)}"
         f"ANTI-PATTERNS\n"
@@ -1471,6 +1568,9 @@ def _briefing_triple_engineer(
         f"PAIR-PROTOKOLL (nach PLAN-LOCKED, während Implementation)\n"
         f"  Writer codet, Reviewer liest. Nach jeder sinnvollen Änderung:\n"
         f"    {send_partner} \"REVIEW-READY: <ein-Zeilen-Summary>\"\n"
+        f"  send-CLI ergänzt automatisch '[FROM: <pane-name>] ' wenn die Message\n"
+        f"  nicht schon mit '[FROM:' beginnt. Beispiel sichtbar beim Empfänger:\n"
+        f"  '[FROM: wr.<feature>] REVIEW-READY: B2 ...'.\n"
         f"  Reviewer antwortet REVIEW: APPROVE oder REVIEW: <Findings>.\n"
         f"  Reviewer Pre-APPROVE-Pflicht-Checks (vor APPROVE):\n"
         f"    - `git status` im Worktree MUSS clean sein. Unclean -> BLOCK.\n"
@@ -1485,6 +1585,8 @@ def _briefing_triple_engineer(
         f"      Limits + A11y + Tokens) zitiert. Fehlt eine -> BLOCK.\n"
         f"    - Keine 'pre-existing'-Excuse für rote Tests / Lint / Build.\n"
         f"      Pair/Triple liefert IMMER 100% korrekten Code.\n"
+        f"  Bei komplexen Recon-/Implementation-/Review-Schritten nutzt der\n"
+        f"  zuständige Engineer Subagents gemäß ENGINEER-SUBAGENT-STRATEGIE.\n"
         f"  Loop bis APPROVE, dann Writer committet und pingt DONE an Orchestrator:\n"
         f"    {send_orch} \"DONE {role}: <Diff-Stat / Commit-Liste>\"\n"
         f"  Eskalation Orchestrator:\n"
@@ -1495,6 +1597,7 @@ def _briefing_triple_engineer(
         f"  Peer-Messaging:\n"
         f"    {send_partner} \"<message>\"\n\n"
         f"{PROJECT_MD_CARE_BLOCK}\n"
+        f"{ENGINEER_SUBAGENT_STRATEGY_BLOCK}\n"
         f"{_briefing_standards_block(with_standards=with_standards)}"
         f"{_briefing_procedure_block(with_standards=with_standards)}"
         f"ANTI-PATTERNS\n"
@@ -1615,6 +1718,7 @@ def _briefing_orchestrator(
         f"{_briefing_standards_block(with_standards=with_standards, with_pre_flight=with_greenfield)}"
         f"{PROJECT_MD_CARE_BLOCK}\n"
         f"{PLAN_QUALITY_BLOCK}\n"
+        f"{ENGINEER_SUBAGENT_STRATEGY_BLOCK}\n"
         f"{MID_RUN_PERSISTENCE_BLOCK}\n"
         f"{_briefing_procedure_block(with_standards=with_standards)}"
         f"DUTIES IN ORDER\n\n"
@@ -1747,7 +1851,8 @@ def _briefing_orchestrator(
         f"4. PLAN ERSTELLEN (siehe PLAN-QUALITÄT-Block oben)\n"
         f"   Nach GATE-1.5 READY: bilde max ~5 große Bullets. Pro Bullet PFLICHT:\n"
         f"   konkrete Files+Funktionen+Zeilen, Edit-Strategie, Test-Coverage,\n"
-        f"   Parallelisierbarkeits-Marker, Done-Definition. Plan bleibt als\n"
+        f"   Parallel-Marker ('B3 || B4 [parallel]' oder 'B3 -> B4 [sequenziell:\n"
+        f"   <Grund>]'), Done-Definition. Plan bleibt als\n"
         f"   Markdown-Block in deinem Pane (nicht als File), du brauchst ihn\n"
         f"   exakt so für GATE 2 + GATE 3 + Engineer-Briefings.\n\n"
         f"5. GATE 2: PLAN-CHECK (Subagent, scoped)\n"
@@ -1788,6 +1893,9 @@ def _briefing_orchestrator(
         f"   Send:\n"
         f"     {send_writer} \"PLAN-LOCKED: <writer briefing>\"\n"
         f"     {send_reviewer} \"PLAN-LOCKED: <reviewer briefing>\"\n\n"
+        f"   Identity: send-CLI ergänzt automatisch '[FROM: <pane-name>] ' wenn\n"
+        f"   die Message nicht schon mit '[FROM:' beginnt. Beispiel beim Writer:\n"
+        f"   '[FROM: or.<feature>] PLAN-LOCKED: ...'.\n\n"
         f"7. WATCH THE LOOP + MID-RUN-PERSISTENCE\n"
         f"   Engineers pingen dich: REVIEW-READY / REVIEW-DONE / BLOCKER /\n"
         f"   CLARIFY-NEEDED / ESCALATION.\n"
@@ -2552,7 +2660,7 @@ def build_parser() -> argparse.ArgumentParser:
     se.add_argument("text")
     se.add_argument("--no-enter", action="store_true",
                     help="don't press Enter after sending")
-    se.set_defaults(func=cmd_send)
+    se.set_defaults(func=cmd_send, identity_wrap=True)
 
     pa = sub.add_parser("pair", help="writer + reviewer in a fresh worktree")
     pa.add_argument("--project", required=True,
@@ -2569,8 +2677,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
                          "1M Context). Sent as /model post-boot for any "
                          "claude pane. Switch to claude-opus-4-6 for 200k Context "
-                         "(compact-watcher threshold scales auto). Codex uses "
-                         "gpt-5.5 xhigh by default.")
+                         "(compact-watcher threshold scales auto). Codex pane "
+                         "boot follows the user's configured CLI default; "
+                         "engineer subagent defaults are documented in the "
+                         "workflow briefing.")
     pa.add_argument("--claude-effort", default=DEFAULT_CLAUDE_EFFORT,
                     help=f"claude effort level (default: {DEFAULT_CLAUDE_EFFORT}). "
                          "Choices: low|medium|high|xhigh|max. Set as --effort "
@@ -2609,8 +2719,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "1M Context). Sent as /model post-boot for any "
                          "claude pane (Writer+Orchestrator). Switch to "
                          "claude-opus-4-6 for 200k Context (compact-watcher "
-                         "threshold scales auto). Codex uses gpt-5.5 xhigh by "
-                         "default.")
+                         "threshold scales auto). Codex pane boot follows the "
+                         "user's configured CLI default; engineer subagent "
+                         "defaults are documented in the workflow briefing.")
     tr.add_argument("--claude-effort", default=DEFAULT_CLAUDE_EFFORT,
                     help=f"claude effort level (default: {DEFAULT_CLAUDE_EFFORT}). "
                          "Choices: low|medium|high|xhigh|max. Set as --effort "

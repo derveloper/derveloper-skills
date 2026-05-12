@@ -1,0 +1,68 @@
+# tmux-pair Project Map
+
+## Project Overview
+
+`tmux-pair` is a Claude Code plugin for running writer/reviewer pairs and
+writer/reviewer/orchestrator triples in tmux panes. It creates isolated git
+worktrees, starts agent CLIs, sends role briefings, and provides helper commands
+for cross-pane messaging, compaction, monitoring, and cleanup.
+
+## Architecture
+
+- `scripts/tmux_pair.py`: main runtime. Owns tmux pane spawning, worktree
+  creation, generated briefings, durable standards, send/compact/status/monitor
+  subcommands, and pane identity handling.
+- `commands/pair.md` and `commands/triple.md`: Claude slash command wrappers
+  that parse user arguments and invoke the script.
+- `agents/*.md`: scoped subagent definitions for reviewer-readiness,
+  rules-bootstrap, plan-check, final verifier, and final code-reviewer gates.
+- `skills/tmux-pair-orchestration/`: long-form workflow documentation,
+  briefing references, failure modes, and orchestration guidance.
+- `skills/gepa/` and `skills/dg/`: bundled companion skills for prompt
+  optimization and adversarial review.
+- `templates/rules/`: language rule skeletons used by rules-bootstrap.
+
+## Feature Surface
+
+- Pair mode: writer + reviewer in a fresh worktree, with the human as
+  orchestrator.
+- Triple mode: orchestrator + writer + reviewer in a fresh worktree, with the
+  orchestrator handling recon, user clarification, plan-check, loop supervision,
+  and final verification.
+- Dual-review mode: optional second reviewer with independent review,
+  findings-swap, and orchestrator consolidation.
+- Gated workflow: Clarify, Reviewer-Readiness, Plan-Check, Implementation Loop,
+  Final-Verify.
+- Durable standards: Claude receives `--append-system-prompt-file`; Codex reads
+  generated worktree `AGENTS.md` when applicable.
+- PROJECT.md care: feature and refactor bullets update project maps when package
+  map, feature surface, design decisions, or implementation history change.
+- Engineer subagent strategy: Writer, Reviewer, and Orchestrator delegate
+  bounded side work such as parallel recon files, parallel test suites, and
+  independent fix branches.
+- Parallel-plan markers: every plan bullet carries either a parallel marker
+  such as `B3 || B4 [parallel]` or a sequencing marker with a reason.
+- Sender identity: `tmux_pair.py send` prefixes normal messages with
+  `[FROM: <pane-name>]` using stable tmux pane user options.
+
+## Design Decisions
+
+- `tmux_pair.py send` is the only supported pair communication path because it
+  handles multi-line pastes and Enter retries for agent TUIs.
+- Sender names are stored in `@tmux-pair-sender` at spawn time. `pane_title` is
+  only a fallback because agent TUIs can overwrite it with spinner or working
+  directory status.
+- Gate subagents are scoped and read-only where possible. This prevents a
+  plan-check or final verifier from accidentally editing code.
+- Codex engineer subagent spawns should default to `gpt-5.3-codex-spark` with
+  high reasoning while user limits allow it, with fallback to `gpt-5.5` high on
+  rate limits. Claude continues through the Task tool and subagent definitions.
+- Version fields in `plugin.json`, `.claude-plugin/marketplace.json`, and the
+  orchestration skill frontmatter must stay aligned for plugin updates.
+
+## Implementation History
+
+- 0.9.0: Added PROJECT.md care to the gated workflow, slim default briefings,
+  model-aware compaction, and dual-review support.
+- 0.10.0: Added engineer subagent strategy, required explicit parallel-plan
+  markers at GATE 2, and automatic sender identity prefixes for `send` pings.

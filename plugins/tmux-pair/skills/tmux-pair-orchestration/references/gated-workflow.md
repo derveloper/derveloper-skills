@@ -113,7 +113,7 @@ Base: {BASE}
 Run your checklist and return your VERDICT block.
 ```
 
-Output is `VERDICT: PASS | WARNING | BLOCKER` plus `BLOCKERS:`, `WARNINGS:`, `NOTES:` lists. The full checklist (13 items: coverage, wiring, specificity, scope-sanity, rule-conflicts, standards, falsifiability, plan-quality per bullet, tests, parallelisation, edit-efficiency, frontend-smoke + design-skill) is in the agent file, single source of truth.
+Output is `VERDICT: PASS | WARNING | BLOCKER` plus `BLOCKERS:`, `WARNINGS:`, `NOTES:` lists. The full checklist (14 items: coverage, wiring, specificity, scope-sanity, rule-conflicts, standards, falsifiability, plan-quality per bullet, tests, parallel marker per bullet, parallelisation, edit-efficiency, frontend-smoke + design-skill) is in the agent file, single source of truth.
 
 **Verdict handling:**
 
@@ -135,7 +135,7 @@ A plan that compiles past GATE 2 must be edit-optimised. Each of the (max ~5) bu
 1. **Concrete files + functions + line ranges.** No "somewhere in `src/`". No "implement auth". The orchestrator is allowed to delegate the search to a subagent, but the resulting plan must be specific.
 2. **Edit strategy.** State what tool fits: `sed -i s/A/B/g <files>` for pattern replace across N>3 spots, `MultiEdit` for clustered changes in one file, `Write` for new files, AST/codemod for structural changes. Avoid implicit "engineer decides" when the strategy is obvious. Three similar lines is a sed; thirty is mandatory.
 3. **Test coverage.** Per bullet: which test files cover the goal of this bullet, and what they assert. If a project is intentionally untested (`Frickel`-marker — one-shot script, demo, throwaway), say so explicitly with a one-line justification. GATE 2 BLOCKERs absent test coverage on non-Frickel projects.
-4. **Parallelisability marker.** Bullets that don't depend on each other are flagged (`PARALLEL: B2,B3`). Subagents for independent research/generation spawn in parallel (one message, multiple `Task` calls), not sequentially.
+4. **Parallelisability marker.** Every bullet carries an explicit marker. Use `B3 || B4 [parallel]` when bullets can run together without shared files, or `B3 -> B4 [sequenziell: <reason>]` when ordering is required. The orchestrator checks whether independent bullets are needlessly serial. Subagents for independent research/generation spawn in parallel.
 5. **Done definition.** Measurable: test green, file exists, function returns X, lint green. Not vague ("works correctly").
 
 A skeletal plan (`add user auth`) is a `GATE-2-BLOCKER`, full stop. The fix is to expand the plan, not retry the subagent on the same input.
@@ -159,12 +159,55 @@ Standard pair protocol (`references/pair-protocol.md`). Engineers wait for `PLAN
 
 1. Writer codes a logical step.
 2. Writer runs the **smart test subset** (see below) — only tests touching the diff, not the full suite.
-3. Writer pings reviewer with `REVIEW-READY: <summary>`.
-4. Reviewer responds `REVIEW: APPROVE` or `REVIEW: <findings>`.
-5. Loop until `APPROVE`. Writer commits and pings `DONE: <sha>` to orchestrator (triple) or human (pair).
-6. Engineers can ping `BLOCKER` upstream at any time.
+3. Writer or Reviewer uses subagents for complex side work when it keeps the main pane lean: parallel recon files, parallel test suites, or independent fix branches with disjoint files.
+4. Writer pings reviewer with `REVIEW-READY: <summary>`.
+5. Reviewer responds `REVIEW: APPROVE` or `REVIEW: <findings>`.
+6. Loop until `APPROVE`. Writer commits and pings `DONE: <sha>` to orchestrator (triple) or human (pair).
+7. Engineers can ping `BLOCKER` upstream at any time.
 
 The standards block in every briefing forbids `--no-verify`, AI co-author trailers, `ae/oe/ue/ss` substitutes, anti-AI-slop vocabulary, and a pile of other slop sources. Reviewers check standards as part of their review.
+
+### Sender Identity
+
+Every ping sent through `tmux_pair.py send` carries an identity prefix so
+parallel pairs and triples can share a receiver without ambiguity. The send CLI
+adds `[FROM: <pane-name>] ` automatically when the message does not already
+start with `[FROM:`. Existing prefixes are left unchanged, so manual prefixes
+are idempotent. Example: `REVIEW-READY: B2 ...` from a writer pane named
+`wr.channel-slack` arrives as `[FROM: wr.channel-slack] REVIEW-READY: B2 ...`.
+Slash-command payloads such as `/compact <focus>` are command traffic and are
+not prefixed.
+
+### Engineer-Subagent-Strategie
+
+Writer, Reviewer, and Orchestrator keep their main panes lean. Heavy reads,
+searches, tests, and bounded implementation spikes go to subagents when they can
+run parallel to the current critical path.
+
+Use-cases:
+
+- **Parallel recon files:** split independent modules across subagents, each
+  returning a short summary with `file:line` pointers.
+- **Parallel test suites:** run unit, integration, browser-smoke, or lint checks
+  in separate subagents when the suites do not share mutable state.
+- **Parallel fix branches:** for independent plan bullets with disjoint files,
+  the orchestrator may propose multiple worktrees inside the triple worktree or
+  additional pair spawns. The plan must show this with markers like
+  `B3 || B4 [parallel]`.
+
+Codex policy: for Codex subagent spawns with `codex apps` or the
+Helmholtz/Maxwell pattern, default to `gpt-5.3-codex-spark` with
+`reasoning_effort=high` while the user's limit allows it. On rate-limit hit,
+fall back to the current default model, `gpt-5.5` with `high`. This is
+documentation for the engineer's spawn choice, not an automatic spawn.
+
+Claude policy: Claude continues to use the Task tool. The model comes from the
+subagent definition, typically Sonnet 4.6 for plan and review nuance, Haiku 4.5
+for read-only recon and deterministic verification.
+
+Subagents receive concrete scope, path bounds, output limits, and a reminder to
+respect other agents' edits. The main pane integrates summaries, not raw
+scrollback.
 
 ### PROJECT.md-Pflege
 

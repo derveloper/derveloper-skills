@@ -9,11 +9,21 @@ Spawn a writer + reviewer pair plus a dedicated orchestrator in a fresh `git wor
 
 The human gets to dispatch the spawn and step away. They are not the recon agent and not the relay between writer and reviewer.
 
+Every `send` message gets a stable sender prefix such as `[FROM: or.<feature>]`
+or `[FROM: wr.<feature>]` unless the message already starts with `[FROM:`.
+The helper stores sender names in tmux pane options so agent TUI spinner titles
+do not leak into pings.
+
 The orchestrator also checks whether the repository has a project-local
 `PROJECT.md`. Feature and refactor bullets must keep it current when package
 map, feature surface, design decisions, or implementation history change.
 Reviewers sign off on the update or on a justified skip, and
 `~/git/example-project/PROJECT.md` is the reference example.
+
+Plans must include explicit parallel markers per bullet: `B3 || B4 [parallel]`
+when work can run together, or `B3 -> B4 [sequenziell: <reason>]` when ordering
+is required. The orchestrator checks whether independent bullets are needlessly
+serial and may propose additional worktrees or pair spawns for independent work.
 
 ## Invocation
 
@@ -39,7 +49,7 @@ Reviewers sign off on the update or on a justified skip, and
 - `--with-standards` — append the durable standards bundle (STANDARDS, recall discipline, bullet-start ritual, pair protocol) to engineer briefings in the Orchestrator handoff. Default is slim.
 - `--greenfield` — enable `--with-standards` plus the greenfield pre-flight block.
 - `--no-worktree` — skip `git worktree add`. Use when resuming on an existing worktree (point `--project` at the worktree path) or running directly on the project branch. With `--no-worktree`, the plugin skips writing AGENTS.md to the project repo; codex picks up standards via the briefing only.
-- `--claude-model <slug>` — claude model to switch into post-boot for orchestrator + writer (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically (700k → 140k). Codex always uses `gpt-5.5 xhigh` per user setup.
+- `--claude-model <slug>`: claude model to switch into post-boot for orchestrator + writer (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically (700k → 140k). Codex pane boot follows the user's configured CLI default; engineer subagent defaults are documented in the workflow briefing.
 - `--claude-effort <level>` — claude reasoning effort, set as `--effort <level>` in the claude boot-command for any claude pane (Writer + Orchestrator) (default `max`). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies). The CLI flag is race-free vs. the `/effort` slash-command after a `/model` switch.
 - `--dual-review` — opt-in second reviewer. Layout becomes: orchestrator on top full width, writer bottom-left, reviewer-1 + reviewer-2 stacked on the bottom-right side. Both reviewers review independently, swap findings, then send final reports to the orchestrator who consolidates before forwarding to the writer. Off by default.
 - `--reviewer-2-agent <agent>` — override the second reviewer agent (default codex). Only relevant with `--dual-review`.
@@ -72,7 +82,7 @@ If feature or task is ambiguous, ask the user.
 
 ## Output
 
-JSON with `worktree`, `branch`, `window`, `orchestrator_pane`, `writer_pane`, `reviewer_pane`, `human_pane`. With `--dual-review`: additional `reviewer_2_pane` + `reviewer_2_agent`. Relay back to the user.
+JSON with `worktree`, `branch`, `window`, `orchestrator_pane`, `orchestrator_name`, `writer_pane`, `writer_name`, `reviewer_pane`, `reviewer_name`, `human_pane`. With `--dual-review`: additional `reviewer_2_pane`, `reviewer_2_agent`, and `reviewer_2_name`. Relay back to the user.
 
 ## Cleanup (manual)
 

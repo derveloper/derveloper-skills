@@ -7,11 +7,20 @@ argument-hint: <project-path> <base> <feature> [task...] [--with-standards] [--g
 
 Spawn a writer + reviewer pair in a fresh `git worktree`, each in its own tmux pane, with a small JSON receipt printed back so you can address them later.
 
+Every `send` message gets a stable sender prefix such as `[FROM: wr.<feature>]`
+unless the message already starts with `[FROM:`. The helper stores sender names
+in tmux pane options so agent TUI spinner titles do not leak into pings.
+
 The gated workflow includes mandatory project-local `PROJECT.md` care: feature
 and refactor bullets update package map, feature surface, design decisions, or
 implementation history when those surfaces change. Reviewers sign off on the
 update or on a justified skip. `~/git/example-project/PROJECT.md` is the reference
 example.
+
+Plans must include explicit parallel markers per bullet: `B3 || B4 [parallel]`
+when work can run together, or `B3 -> B4 [sequenziell: <reason>]` when ordering
+is required. Engineers may use subagents for parallel recon files, parallel test
+suites, or independent fix branches when that keeps their main pane lean.
 
 ## Invocation
 
@@ -35,7 +44,7 @@ example.
 - `--with-standards` — append the durable standards bundle (STANDARDS, recall discipline, bullet-start ritual, pair protocol) to engineer briefings. Default is slim.
 - `--greenfield` — enable `--with-standards` plus the greenfield pre-flight block.
 - `--no-worktree` — skip `git worktree add`. Engineers commit directly on the project's current branch in the project directory. Use sparingly: any uncommitted work in the project becomes pair-visible. With `--no-worktree`, the plugin skips writing AGENTS.md (codex receives standards via the briefing only).
-- `--claude-model <slug>` — claude model to switch into post-boot via `/model <slug>` (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically. Codex always uses `gpt-5.5 xhigh` per user setup.
+- `--claude-model <slug>`: claude model to switch into post-boot via `/model <slug>` (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically. Codex pane boot follows the user's configured CLI default; engineer subagent defaults are documented in the workflow briefing.
 - `--claude-effort <level>` — claude reasoning effort, set as `--effort <level>` in the claude boot-command (default `max`). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies). The CLI flag is race-free vs. the `/effort` slash-command after a `/model` switch.
 - `--dual-review` — opt-in second reviewer. Spawns reviewer-1 (claude by default) and reviewer-2 (codex by default) stacked vertically on the right side. Both review independently, swap findings, then send a final report each to the human (= orchestrator in pair-mode) for consolidation. Off by default.
 - `--reviewer-2-agent <agent>` — override the second reviewer agent (default codex). Only relevant with `--dual-review`.
@@ -59,7 +68,7 @@ If the feature description is missing or ambiguous, ask the user before spawning
 
 ## Output
 
-JSON with `worktree`, `branch`, `window`, `writer_pane`, `reviewer_pane`, `human_pane`. With `--dual-review`: additional `reviewer_2_pane` + `reviewer_2_agent`. Relay these back to the user so they can address either agent directly via the `send` subcommand.
+JSON with `worktree`, `branch`, `window`, `writer_pane`, `writer_name`, `reviewer_pane`, `reviewer_name`, `human_pane`. With `--dual-review`: additional `reviewer_2_pane`, `reviewer_2_agent`, and `reviewer_2_name`. Relay these back to the user so they can address either agent directly via the `send` subcommand.
 
 ## Cleanup (manual)
 

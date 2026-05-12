@@ -17,7 +17,7 @@ In both modes the agents talk peer-to-peer by running:
 python3 <plugin>/scripts/tmux_pair.py send <pane-id> "<message>"
 ```
 
-The helper handles the multi-line submit quirks of common agent TUIs (paste-buffer + extra Enters) so messages reliably land.
+The helper handles the multi-line submit quirks of common agent TUIs (paste-buffer + extra Enters) so messages reliably land. It also prefixes normal send messages with `[FROM: <pane-name>] ` unless the message already starts with `[FROM:`. Spawned panes store the stable sender name in `@tmux-pair-sender`, so prefixes stay useful even when Claude or Codex overwrites the visible pane title with a spinner.
 
 ## Requirements
 
@@ -84,7 +84,7 @@ The default claude model is `claude-opus-4-7` (1M context). Override per spawn:
 /triple ~/code/myapp main greenfield-session --greenfield
 ```
 
-The compact-watcher threshold scales with the context window automatically: 1M → 700k threshold (70%), 200k → 140k threshold. Override with `monitor --threshold-k <N>` if needed. Codex always uses `gpt-5.5 xhigh` per user setup; not parameterised.
+The compact-watcher threshold scales with the context window automatically: 1M → 700k threshold (70%), 200k → 140k threshold. Override with `monitor --threshold-k <N>` if needed. Codex pane boot follows the user's configured CLI default; Codex engineer subagents use the Spark-first policy below.
 
 The default reasoning effort for any claude pane is `--effort max`, set directly in the boot-command (race-free vs. the `/effort` slash). Override per spawn with `--claude-effort <low|medium|high|xhigh|max>`; pass an empty string to skip the flag entirely so `claude` uses its own default or the `CLAUDE_CODE_EFFORT_LEVEL` env-var.
 
@@ -120,12 +120,24 @@ The orchestrator's gate-checks and recon are routed to plugin-namespaced subagen
 |------|----------|-------|-------|-----|
 | GATE 1.5 Readiness-Check | `tmux-pair:reviewer-readiness-check` | Sonnet 4.6 | Read + Grep + Glob + Bash | Reviews `.claude/rules/*.md` against an 8-item checklist (style, tests, architecture, anti-patterns, naming, security, build, domain). Returns READY or NEEDS-RULES. NO Edit/Write so it cannot bake rules itself. |
 | GATE 1.5 Rules-Bootstrap | `tmux-pair:rules-bootstrap` | Sonnet 4.6 | Read + Grep + Glob + Bash + Edit + Write | Bakes `.claude/rules/<topic>.md` from plugin language templates + repo recon + orchestrator-collected user answers. Edit+Write because writing rules files IS the job. Does not call AskUserQuestion itself; orchestrator owns the user dialog. |
-| GATE 2 Plan-Check | `tmux-pair:gate-2-plan-check` | Sonnet 4.6 | Read + Grep + Glob + Bash | Plan validation needs reasoning. NO Edit/Write so the agent cannot accidentally commit code. |
+| GATE 2 Plan-Check | `tmux-pair:gate-2-plan-check` | Sonnet 4.6 | Read + Grep + Glob + Bash | Plan validation needs reasoning. Checks every bullet for explicit `B3 || B4 [parallel]` or `B3 -> B4 [sequenziell: reason]` markers. NO Edit/Write so the agent cannot accidentally commit code. |
 | GATE 3 Verifier | `tmux-pair:gate-3-verifier` | Haiku 4.5 | Read + Grep + Glob + Bash | Goal-backward coverage check + build/test runs are deterministic; Haiku is sufficient and ~5x cheaper than Sonnet. |
 | GATE 3 Code-Reviewer | `tmux-pair:gate-3-code-reviewer` | Sonnet 4.6 | Read + Grep + Glob + Bash | Style nuance, security edge cases, anti-AI-slop detection need Sonnet's nuance. |
 | RECON | built-in `Explore` | Haiku 4.5 | read-only | File-snippet lookups + pointer extraction; Anthropic's stock Explore agent fits. |
 
 Net effect: ~60-70 percent token savings vs all-Opus subagents, no quality loss on gate-tasks. The agent files live in `agents/` and ship with the plugin; per-spawn customisation goes in those files, not in the orchestrator briefing.
+
+### Engineer subagents and parallel plans
+
+Writer, reviewer, and orchestrator briefings tell engineers to keep their main panes lean by using subagents for bounded side work:
+
+- parallel recon files, where each subagent reads an independent module and returns short `file:line` pointers
+- parallel test suites, where unit, integration, lint, or browser-smoke checks can run without shared mutable state
+- parallel fix branches, where independent plan bullets with disjoint files can use extra worktrees or additional pair spawns
+
+For Codex subagent spawns using codex apps or the Helmholtz/Maxwell pattern, the documented default is `gpt-5.3-codex-spark` with `reasoning_effort=high` while the user limit allows it. On rate-limit hit, fall back to the current default model, `gpt-5.5` with `high`. Claude stays on the Task tool and uses the model from the subagent definition.
+
+Plans must make parallelism visible. Use markers like `B3 || B4 [parallel]` for independent work and `B3 -> B4 [sequenziell: shared file scripts/tmux_pair.py]` when ordering is required. GATE 2 warns when independent bullets are needlessly serial and blocks missing per-bullet markers.
 
 ### PROJECT.md care
 
