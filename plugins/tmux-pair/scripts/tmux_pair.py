@@ -64,24 +64,34 @@ DEFAULT_CLAUDE_EFFORT = "max"
 # stabiler). Override per Spawn via --pi-model / --pi-thinking.
 DEFAULT_PI_MODEL = "glm-5.1"
 DEFAULT_PI_THINKING = "high"
+# pi --list-models zeigt Models pro Provider an. Wenn nur --model glm-5.1
+# gesetzt wird, sucht pi nach dem ersten Provider der diesen Slug kennt -
+# das ist bei Modellen wie "glm-5.1" oder "kimi-k2.6" der native Anbieter
+# (opencode, moonshotai etc.), nicht Cortecs. Damit alle Cortecs-Modelle
+# zuverlaessig durch Cortecs routen, setzen wir --provider explizit.
+# Override per Spawn via --pi-provider / --pi-<role>-provider.
+DEFAULT_PI_PROVIDER = "cortecs"
 
 
-def _pi_overrides_for_role(args, role: str) -> tuple[str, str]:
-    """Resolve pi model + thinking for a specific role with override-chain.
+def _pi_overrides_for_role(args, role: str) -> tuple[str, str, str]:
+    """Resolve pi provider + model + thinking for a specific role.
 
     role in {"writer", "reviewer", "reviewer_2", "orchestrator"}.
 
-    Order: per-role override (--pi-<role>-model) → global --pi-model →
-    DEFAULT_PI_MODEL. Same for --thinking. None and empty string are treated
-    as "not set" so callers can pass empty strings to fall back upward.
+    Override chain: per-role override (--pi-<role>-{provider,model,thinking})
+    → global --pi-{provider,model,thinking} → DEFAULTS. None and empty
+    string are treated as "not set" so callers can fall back upward.
     """
+    base_provider = getattr(args, "pi_provider", DEFAULT_PI_PROVIDER) or DEFAULT_PI_PROVIDER
     base_model = getattr(args, "pi_model", DEFAULT_PI_MODEL) or DEFAULT_PI_MODEL
     base_thinking = getattr(args, "pi_thinking", DEFAULT_PI_THINKING) or DEFAULT_PI_THINKING
+    provider_override = getattr(args, f"pi_{role}_provider", None)
     model_override = getattr(args, f"pi_{role}_model", None)
     thinking_override = getattr(args, f"pi_{role}_thinking", None)
+    provider = provider_override if provider_override else base_provider
     model = model_override if model_override else base_model
     thinking = thinking_override if thinking_override else base_thinking
-    return model, thinking
+    return provider, model, thinking
 
 # Compact-Watcher Default: bei diesem Token-Wert pingt der Watcher den
 # Orchestrator. Conservative für 200k-Context-Modelle (Opus 4.6 = 200k):
@@ -509,6 +519,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         window_name=window_name, role=args.name or "agent",
         claude_effort=args.claude_effort,
         claude_model=args.claude_model,
+        pi_provider=getattr(args, "pi_provider", DEFAULT_PI_PROVIDER),
         pi_model=getattr(args, "pi_model", DEFAULT_PI_MODEL),
         pi_thinking=getattr(args, "pi_thinking", DEFAULT_PI_THINKING),
         display_name=args.name or "",
@@ -1204,6 +1215,7 @@ def _boot_command_with_standards(
     *, agent: str, agents_dict: dict[str, str], window_name: str, role: str,
     claude_effort: str = DEFAULT_CLAUDE_EFFORT,
     claude_model: str = DEFAULT_CLAUDE_MODEL,
+    pi_provider: str = DEFAULT_PI_PROVIDER,
     pi_model: str = DEFAULT_PI_MODEL,
     pi_thinking: str = DEFAULT_PI_THINKING,
     display_name: str = "",
@@ -1248,6 +1260,8 @@ def _boot_command_with_standards(
     if agent == "pi" and boot_tokens[0] == "pi":
         standards_path = _write_durable_standards_file(window_name, role)
         parts = [boot]
+        if pi_provider:
+            parts.append(f"--provider {shlex.quote(pi_provider)}")
         if pi_model:
             parts.append(f"--model {shlex.quote(pi_model)}")
         if pi_thinking:
@@ -2066,9 +2080,9 @@ def cmd_pair(args: argparse.Namespace) -> int:
     reviewer_name = f"rv1.{window_name}" if dual else f"rv.{window_name}"
     reviewer_2_name = f"rv2.{window_name}" if dual else None
 
-    pi_writer_model, pi_writer_thinking = _pi_overrides_for_role(args, "writer")
-    pi_reviewer_model, pi_reviewer_thinking = _pi_overrides_for_role(args, "reviewer")
-    pi_reviewer_2_model, pi_reviewer_2_thinking = _pi_overrides_for_role(args, "reviewer_2")
+    pi_writer_provider, pi_writer_model, pi_writer_thinking = _pi_overrides_for_role(args, "writer")
+    pi_reviewer_provider, pi_reviewer_model, pi_reviewer_thinking = _pi_overrides_for_role(args, "reviewer")
+    pi_reviewer_2_provider, pi_reviewer_2_model, pi_reviewer_2_thinking = _pi_overrides_for_role(args, "reviewer_2")
 
     writer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
@@ -2078,6 +2092,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
             window_name=window_name, role="writer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            pi_provider=pi_writer_provider,
             pi_model=pi_writer_model,
             pi_thinking=pi_writer_thinking,
             display_name=writer_name,
@@ -2092,6 +2107,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
             window_name=window_name, role="reviewer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            pi_provider=pi_reviewer_provider,
             pi_model=pi_reviewer_model,
             pi_thinking=pi_reviewer_thinking,
             display_name=reviewer_name,
@@ -2110,6 +2126,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
                 window_name=window_name, role="reviewer",
                 claude_effort=args.claude_effort,
                 claude_model=args.claude_model,
+                pi_provider=pi_reviewer_2_provider,
                 pi_model=pi_reviewer_2_model,
                 pi_thinking=pi_reviewer_2_thinking,
                 display_name=reviewer_2_name,
@@ -2229,10 +2246,10 @@ def cmd_triple(args: argparse.Namespace) -> int:
     reviewer_name = f"rv1.{window_name}" if dual else f"rv.{window_name}"
     reviewer_2_name = f"rv2.{window_name}" if dual else None
 
-    pi_orchestrator_model, pi_orchestrator_thinking = _pi_overrides_for_role(args, "orchestrator")
-    pi_writer_model, pi_writer_thinking = _pi_overrides_for_role(args, "writer")
-    pi_reviewer_model, pi_reviewer_thinking = _pi_overrides_for_role(args, "reviewer")
-    pi_reviewer_2_model, pi_reviewer_2_thinking = _pi_overrides_for_role(args, "reviewer_2")
+    pi_orchestrator_provider, pi_orchestrator_model, pi_orchestrator_thinking = _pi_overrides_for_role(args, "orchestrator")
+    pi_writer_provider, pi_writer_model, pi_writer_thinking = _pi_overrides_for_role(args, "writer")
+    pi_reviewer_provider, pi_reviewer_model, pi_reviewer_thinking = _pi_overrides_for_role(args, "reviewer")
+    pi_reviewer_2_provider, pi_reviewer_2_model, pi_reviewer_2_thinking = _pi_overrides_for_role(args, "reviewer_2")
 
     # Layout: orchestrator on top full width, writer bottom-left, reviewer bottom-right.
     orchestrator_pane = spawn_pane(
@@ -2243,6 +2260,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
             window_name=window_name, role="orchestrator",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            pi_provider=pi_orchestrator_provider,
             pi_model=pi_orchestrator_model,
             pi_thinking=pi_orchestrator_thinking,
             display_name=orchestrator_name,
@@ -2258,6 +2276,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
             window_name=window_name, role="writer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            pi_provider=pi_writer_provider,
             pi_model=pi_writer_model,
             pi_thinking=pi_writer_thinking,
             display_name=writer_name,
@@ -2272,6 +2291,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
             window_name=window_name, role="reviewer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            pi_provider=pi_reviewer_provider,
             pi_model=pi_reviewer_model,
             pi_thinking=pi_reviewer_thinking,
             display_name=reviewer_name,
@@ -2292,6 +2312,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
                 window_name=window_name, role="reviewer",
                 claude_effort=args.claude_effort,
                 claude_model=args.claude_model,
+                pi_provider=pi_reviewer_2_provider,
                 pi_model=pi_reviewer_2_model,
                 pi_thinking=pi_reviewer_2_thinking,
                 display_name=reviewer_2_name,
@@ -2728,6 +2749,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "Choices: low|medium|high|xhigh|max. Set as --effort "
                          "<level> in boot command (race-free vs /effort slash). "
                          "Empty string skips the flag (claude default applies).")
+    sp.add_argument("--pi-provider", default=DEFAULT_PI_PROVIDER,
+                    help=f"pi provider (default: {DEFAULT_PI_PROVIDER}). Only "
+                         "applied when --agent pi.")
     sp.add_argument("--pi-model", default=DEFAULT_PI_MODEL,
                     help=f"pi model slug (default: {DEFAULT_PI_MODEL}). Only "
                          "applied when --agent pi.")
@@ -2767,6 +2791,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "Choices: low|medium|high|xhigh|max. Set as --effort "
                          "<level> in boot command for any claude pane. Empty "
                          "string skips the flag (claude default applies).")
+    pa.add_argument("--pi-provider", default=DEFAULT_PI_PROVIDER,
+                    help=f"pi provider name (default: {DEFAULT_PI_PROVIDER}). "
+                         "Set as --provider <name> im pi-Boot. Stellt sicher dass "
+                         "alle pi-Panes ueber denselben Provider routen (sonst "
+                         "matcht pi den Model-Slug auf den nativen Anbieter und "
+                         "scheitert ohne API-Key).")
     pa.add_argument("--pi-model", default=DEFAULT_PI_MODEL,
                     help=f"pi model slug (default: {DEFAULT_PI_MODEL}, Cortecs "
                          "via the users ~/.pi/agent/settings.json). Set as "
@@ -2777,15 +2807,21 @@ def build_parser() -> argparse.ArgumentParser:
                          "Choices: off|minimal|low|medium|high|xhigh. Set as "
                          "--thinking <level> im pi-Boot. Empty string ueberlaesst "
                          "die Wahl der pi-Defaults.")
+    pa.add_argument("--pi-writer-provider", default=None,
+                    help="pi provider override fuer das pi-Writer-Pane.")
     pa.add_argument("--pi-writer-model", default=None,
                     help="pi model slug override speziell fuer das pi-Writer-Pane. "
                          "Default: Wert von --pi-model.")
     pa.add_argument("--pi-writer-thinking", default=None,
                     help="pi thinking override fuer pi-Writer. Default: --pi-thinking.")
+    pa.add_argument("--pi-reviewer-provider", default=None,
+                    help="pi provider override fuer das pi-Reviewer-Pane.")
     pa.add_argument("--pi-reviewer-model", default=None,
                     help="pi model slug override fuer das pi-Reviewer-Pane.")
     pa.add_argument("--pi-reviewer-thinking", default=None,
                     help="pi thinking override fuer pi-Reviewer.")
+    pa.add_argument("--pi-reviewer-2-provider", default=None,
+                    help="pi provider override fuer das pi-Reviewer-2-Pane (mit --dual-review).")
     pa.add_argument("--pi-reviewer-2-model", default=None,
                     help="pi model slug override fuer das pi-Reviewer-2-Pane (mit --dual-review).")
     pa.add_argument("--pi-reviewer-2-thinking", default=None,
@@ -2843,19 +2879,30 @@ def build_parser() -> argparse.ArgumentParser:
                          "Choices: off|minimal|low|medium|high|xhigh. Set as "
                          "--thinking <level> im pi-Boot. Empty string ueberlaesst "
                          "die Wahl der pi-Defaults.")
+    tr.add_argument("--pi-provider", default=DEFAULT_PI_PROVIDER,
+                    help=f"pi provider name (default: {DEFAULT_PI_PROVIDER}). "
+                         "Set as --provider <name> im pi-Boot.")
+    tr.add_argument("--pi-writer-provider", default=None,
+                    help="pi provider override fuer pi-Writer-Pane.")
     tr.add_argument("--pi-writer-model", default=None,
                     help="pi model slug override speziell fuer das pi-Writer-Pane. "
                          "Default: Wert von --pi-model.")
     tr.add_argument("--pi-writer-thinking", default=None,
                     help="pi thinking override fuer pi-Writer. Default: --pi-thinking.")
+    tr.add_argument("--pi-reviewer-provider", default=None,
+                    help="pi provider override fuer pi-Reviewer-Pane.")
     tr.add_argument("--pi-reviewer-model", default=None,
                     help="pi model slug override fuer das pi-Reviewer-Pane.")
     tr.add_argument("--pi-reviewer-thinking", default=None,
                     help="pi thinking override fuer pi-Reviewer.")
+    tr.add_argument("--pi-orchestrator-provider", default=None,
+                    help="pi provider override fuer pi-Orchestrator-Pane.")
     tr.add_argument("--pi-orchestrator-model", default=None,
                     help="pi model slug override fuer das pi-Orchestrator-Pane.")
     tr.add_argument("--pi-orchestrator-thinking", default=None,
                     help="pi thinking override fuer pi-Orchestrator.")
+    tr.add_argument("--pi-reviewer-2-provider", default=None,
+                    help="pi provider override fuer pi-Reviewer-2-Pane (mit --dual-review).")
     tr.add_argument("--pi-reviewer-2-model", default=None,
                     help="pi model slug override fuer das pi-Reviewer-2-Pane (mit --dual-review).")
     tr.add_argument("--pi-reviewer-2-thinking", default=None,
