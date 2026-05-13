@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, PROJECT.md care, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), sender identity prefixes, explicit parallel-plan markers, engineer subagent strategy, bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.10.0
+version: 0.12.1
 ---
 
 # tmux-pair-orchestration
@@ -71,7 +71,7 @@ Briefings are slim by default: task-focused and compact.
 
 - **claude panes** boot with `--append-system-prompt-file <path>` pointing at `/tmp/tmux-pair-durable-<window>-<role>.md`. The file is generated per-spawn from a single in-script constant (`DURABLE_STANDARDS_PROMPT`) so updates to standards land in the next spawn automatically.
 - **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created (i.e. not when `--no-worktree` is passed). If the repo already owns an `AGENTS.md`, the plugin leaves it alone: repo standards win.
-- **pi panes** boot with `--append-system-prompt <path>` (the users Custom-CLI, `~/.pi/agent/`). pi liest zusätzlich `AGENTS.md` und `CLAUDE.md` via Default-Discovery, also wirkt der codex-Pfad transitiv mit. Default-Model `glm-5.1` (Cortecs-Backend), default `--thinking high` (Mapping aus claude `--effort max`). Override per Spawn via `--pi-model` und `--pi-thinking`. Bekannte Beschränkungen: kein mid-session `/model`-Wechsel (Pane-Restart nötig) und kein `/compact`-Equivalent (Compact-Watcher pingt pi-Panes nicht).
+- **pi panes** boot with `--append-system-prompt <path>` (the users Custom-CLI, `~/.pi/agent/`). pi liest zusätzlich `AGENTS.md` und `CLAUDE.md` via Default-Discovery, also wirkt der codex-Pfad transitiv mit. Default-Model `claude-opus-4-7` via Default-Provider `claude-bridge` (pi-claude-bridge wrappt die Claude Pro/Max-Subscription), default `--thinking high` (Mapping aus claude `--effort max`). Override per Spawn via `--pi-provider`, `--pi-model`, `--pi-thinking`. Bekannte Beschränkungen: kein mid-session `/model`-Wechsel (Pane-Restart nötig) und kein `/compact`-Equivalent (Compact-Watcher pingt pi-Panes nicht).
 - **`--with-standards`** appends the durable standards bundle to briefings (reviewer standards, recall discipline, bullet-start ritual, pair protocol).
 - **`--greenfield`** enables `--with-standards` plus greenfield pre-flight.
 - **`--no-worktree`**: if codex is one of the spawned roles, standards are auto-enabled in the briefing so codex still receives durable standards context even without a workspace `AGENTS.md` write.

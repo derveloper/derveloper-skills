@@ -76,3 +76,7 @@ for cross-pane messaging, compaction, monitoring, and cleanup.
   per-role provider/model/thinking overrides; Pi engineer panes default to
   minimal extension-stack via `env PI_BASELINE_DISABLED=1 PI_MEMORY_DISABLED=1
   PI_MODE_DISABLED=1`, opt-out via `TMUX_PAIR_PI_FULL=1`.
+- 0.12.0: Pi engineer default switched from `cortecs/glm-5.1` to
+  `claude-bridge/claude-opus-4-7` (via pi-claude-bridge wrapping the Claude
+  Pro/Max subscription). Token-cost effectively $0 within subscription rate
+  limits; OSS/EU stack still reachable via `--pi-provider cortecs`.

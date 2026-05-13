@@ -57,20 +57,18 @@ DEFAULT_CLAUDE_MODEL = "claude-opus-4-7"
 # greift.
 DEFAULT_CLAUDE_EFFORT = "max"
 
-# pi (custom CLI) Model + Thinking-Level. glm-5.1 ist the users aktueller pi
-# Default (~/.pi/agent/settings.json, Cortecs-Provider). Thinking-Level Skala
-# unterscheidet sich von claude --effort: pi hat off|minimal|low|medium|high|
-# xhigh. Wir mappen claude-effort max -> pi thinking high (kein xhigh weil
-# stabiler). Override per Spawn via --pi-model / --pi-thinking.
-DEFAULT_PI_MODEL = "glm-5.1"
+# pi (custom CLI) Model + Thinking-Level. claude-opus-4-7 via pi-claude-bridge
+# ist the users aktueller Pi-Default (Pro/Max-Subscription, Token-Cost effektiv 0,
+# 1M ctx). Thinking-Level-Skala: off|minimal|low|medium|high|xhigh. claude-effort
+# max -> pi thinking high (kein xhigh, stabiler). Override per Spawn via
+# --pi-model / --pi-thinking.
+DEFAULT_PI_MODEL = "claude-opus-4-7"
 DEFAULT_PI_THINKING = "high"
-# pi --list-models zeigt Models pro Provider an. Wenn nur --model glm-5.1
-# gesetzt wird, sucht pi nach dem ersten Provider der diesen Slug kennt -
-# das ist bei Modellen wie "glm-5.1" oder "kimi-k2.6" der native Anbieter
-# (opencode, moonshotai etc.), nicht Cortecs. Damit alle Cortecs-Modelle
-# zuverlaessig durch Cortecs routen, setzen wir --provider explizit.
-# Override per Spawn via --pi-provider / --pi-<role>-provider.
-DEFAULT_PI_PROVIDER = "cortecs"
+# pi --list-models zeigt Models pro Provider an. Damit Pi den richtigen Provider
+# erwischt (claude-bridge fuer Anthropic-Modelle, cortecs fuer OSS, openai-codex
+# fuer Codex-Stack), setzen wir --provider explizit. Override per Spawn via
+# --pi-provider / --pi-<role>-provider.
+DEFAULT_PI_PROVIDER = "claude-bridge"
 
 
 def _pi_overrides_for_role(args, role: str) -> tuple[str, str, str]:
@@ -313,16 +311,22 @@ def cmd_send(args: argparse.Namespace) -> int:
     # False-Negatives because [Pasted text] placeholders linger briefly
     # in the bottom rows while the TUI relays out after a successful
     # submit.
-    for attempt in range(8):
+    # Budget bumped 2026-05-13: previous 8 iter (~40s) was too short for
+    # long-running tool calls in the receiving TUI. 40 iter * (1.5s burst
+    # + capped 2..5s wait) ≈ 4min worst-case. Karl-Slack-Bridge observed
+    # leaving DMs stuck in composer while Karl was busy with a multi-file
+    # workflow.
+    max_iter = 40
+    for attempt in range(max_iter):
         for burst in range(3):
             tmux_safe("send-keys", "-t", pane, "Enter")
             time.sleep(0.5)
-        time.sleep(2.0 + 0.5 * attempt)
+        time.sleep(min(2.0 + 0.3 * attempt, 5.0))
         tail = _pane_tail(pane, 12)
         if _composer_empty(tail):
             return 0
     print(f"warning: pane {pane} may not have accepted the message "
-          f"(composer still non-empty after 8 Enter-burst retries)",
+          f"(composer still non-empty after {max_iter} Enter-burst retries)",
           file=sys.stderr)
     return 0
 
