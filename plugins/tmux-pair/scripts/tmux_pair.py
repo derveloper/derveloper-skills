@@ -165,20 +165,32 @@ def _pane_tail(pane: str, lines: int) -> str:
 
 
 def _composer_empty(tail: str) -> bool:
-    """Return True if the pane tail shows an empty agent composer.
+    """Return True if the pane tail shows an empty agent composer OR an
+    actively running tool-call.
 
-    A submitted message scrolls upward and the input line at the bottom of
-    the TUI returns to its idle prompt: claude shows '❯' (sometimes inside
-    a bordered box, optionally followed by spaces), codex shows '›'. We
-    accept either prompt char alone on its own line, with optional leading
-    box-drawing or whitespace and no trailing content.
+    Two success paths:
 
-    This positive check is more reliable than the previous negative
-    'paste-marker is gone' heuristic, because the [Pasted text #N] markers
-    can briefly remain visible in the bottom-rows window while the TUI is
-    still re-laying-out after a successful submit, which produced spurious
-    False-Negatives + manual-Enter recoveries.
+    1. Idle prompt visible: a submitted message scrolls upward and the
+       input line at the bottom returns to its idle prompt. claude shows
+       '❯' (sometimes inside a bordered box), codex shows '›'. We accept
+       either prompt char alone on its own line, with optional leading
+       box-drawing or whitespace.
+
+    2. Tool-call running: claude shows 'esc to interrupt' (claude-code
+       spinner footer), codex shows '(esc to interrupt)' under
+       'Waiting for background terminal ...'. Both unambiguously prove
+       that the prior message was submitted and is being processed, so
+       the composer has effectively cleared. Without this branch the
+       verify-loop blocks for the full retry budget whenever the
+       receiver is mid tool-call when we send the next message.
+
+    Positive checks here beat the older 'paste-marker is gone' negative
+    heuristic: [Pasted text #N] placeholders linger briefly during the
+    TUI's post-submit re-layout and produced false-negatives.
     """
+    lowered = tail.lower()
+    if "esc to interrupt" in lowered:
+        return True
     for line in tail.splitlines():
         stripped = line.strip()
         # Drop leading/trailing box-drawing chars some TUIs render around
