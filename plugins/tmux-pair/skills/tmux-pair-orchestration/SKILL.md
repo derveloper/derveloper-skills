@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, PROJECT.md care, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), sender identity prefixes, explicit parallel-plan markers, engineer subagent strategy, bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.12.1
+version: 0.13.0
 ---
 
 # tmux-pair-orchestration
@@ -37,13 +37,13 @@ Both modes accept `--dual-review` to spawn TWO reviewers (default: claude as rev
 Reviewer protocol per cycle:
 
 1. Writer pings `REVIEW-READY` to BOTH reviewers in parallel.
-2. Both reviewers review independently — no crosstalk before they have their own findings.
+2. Both reviewers review independently: no crosstalk before they have their own findings.
 3. Reviewers swap findings (`REVIEWER-FINDINGS:` to peer), give each other a `PEER-REVIEW:` (agree, disagree, missed-this).
 4. Each reviewer sends a final `REVIEW-FINAL (Reviewer):` to the Orchestrator (= human in pair, = orchestrator agent in triple).
 5. Orchestrator consolidates both reports into ONE merged review (keep all unique BLOCKERs, dedupe overlaps, surface contradictions with context).
 6. Orchestrator sends ONE `REVIEW-CONSOLIDATED:` to the writer. Reviewers never speak directly to the writer.
 
-Override the second reviewer with `--reviewer-2-agent <agent>`. Without `--dual-review` the default single-reviewer flow stays exactly as before — no change for existing users.
+Override the second reviewer with `--reviewer-2-agent <agent>`. Without `--dual-review` the default single-reviewer flow stays exactly as before. No change for existing users.
 
 When to opt in: risky refactors, security-sensitive code, blast-radius changes, anything where you want diversity of opinions on the diff. Cost: one extra agent token-burn and one extra review-merge step in the orchestrator.
 
@@ -113,6 +113,72 @@ Cross-cutting:
 Greenfield repos (no `CLAUDE.md`, no `.claude/rules/`) are handled by GATE 1.5 automatically: the readiness-check returns `NEEDS-RULES` with all 8 topics as gaps, the bootstrap loop generates the full rules set from plugin templates + user answers + repo recon, and engineers are briefed only AFTER rules exist. Plan stays focused on the actual feature work; rules-generation is no longer a plan bullet.
 
 The full workflow with subagent prompt templates, gate event vocabulary, and failure modes is in `references/gated-workflow.md`. Gate events extend the base pair-protocol vocabulary documented in `references/pair-protocol.md`.
+
+## Smart workflow (V1-V5)
+
+The workflow is unattended by default. The orchestrator or pair master handles small, reversible decisions inside the documented threshold, logs every self-decision in `COMPLETE`, and only pauses for decisions that change scope, budget, external dependencies, or security posture. Pass `--interactive` to `/pair` or `/triple` when the user wants every self-decision to become a pause point.
+
+### V1 Reviewer-Trivial-Fix-Inline
+
+Reviewers may include an inline patch when a finding is under 20 LOC and is clearly isolated.
+
+Trigger:
+- cosmetic change
+- typo
+- missing-doc addition
+
+Anti-trigger:
+- architecture question
+- security finding
+- test-logic error
+- more than 20 LOC
+
+Format:
+
+````text
+INLINE-FIX: <bullet>
+```diff
+<unified-diff>
+```
+END-INLINE-FIX
+````
+
+Writer behavior: apply the patch silently with `git apply`, then ACK `applied B<N> inline-fix (X lines)`. The writer may also fix a WARNING when it matches the same trivial pattern.
+
+### V2 Orchestrator-Direct-Decision-Threshold
+
+| Decision class | Default action |
+|----------------|----------------|
+| Style finding already APPROVE-worthy | Self-decide and log rationale in `COMPLETE`. |
+| Test coverage edge case with clear risk assessment | Self-decide and log the risk note. |
+| Optional-vs-required default with existing repo precedent | Self-decide by repo pattern. |
+| Naming convention with repo-pattern match | Self-decide by local convention. |
+| Plan revision after GATE-2-BLOCKER with clear fix direction | Self-decide and send the revised plan. |
+| Budget, stakeholder approval, external service status, real scope expansion, security trade-off | Escalate to the user. |
+
+Every self-decision is recorded in the final `COMPLETE` ping as a one-line rationale. This is a full audit trail, not a sample.
+
+### V3 Adaptive GATE-Strictness
+
+`task_kind` has three allowed classes: `bug-fix`, `feature`, and `refactor`. The orchestrator classifies it during recon and passes it to GATE 2, GATE 3 verifier, and GATE 3 code-reviewer subagents.
+
+| task_kind | Subagent impact |
+|-----------|-----------------|
+| `bug-fix` | Keep core coverage, specificity, rules, plan quality, and test checks active. Skip wiring, parallel markers, UI-smoke, and PROJECT.md only for one-file fixes with no new surface. |
+| `feature` | Default strictness. All checklist items stay active. |
+| `refactor` | Treat coverage as preservation and tests as regression evidence. Skip wiring and UI-smoke only when the diff has no behavior or UI surface change. Keep design-decision and implementation-history checks where relevant. |
+
+### V4 Engineer-Auto-Resolve WARNINGs
+
+GATE 3 verdicts use three severities:
+
+- BLOCKER: correctness, security, maintainability, explicit project-rule violation, dirty worktree, or failed verification. Engineers enter the fix-loop.
+- WARNING: preference or nice-to-have. Engineers may ignore it, but the orchestrator records follow-up-memory and PROJECT.md when relevant.
+- NOTE: info-only context for reviewer or verifier memory.
+
+### V5 Unattended-Default
+
+Default mode is unattended in both pair and triple. Without `--interactive`, V2 self-decisions proceed autonomously and are logged in `COMPLETE`. With `--interactive`, the orchestrator or pair master pauses before every self-decision and asks the user via `AskUserQuestion`. The flag changes briefing text only; it does not add a Python runtime branch after spawn.
 
 ## Pair protocol (the core loop)
 
@@ -236,7 +302,7 @@ The orchestrator briefing kicks off `monitor` automatically as DUTY 0 (backgroun
 
 `status` returns JSON with the detected agent and the parsed token count. Claude prints `N tokens` in its footer, so the count is reliable. Codex usually does not, so its `tokens` field comes back `null`: fall back to a feel-based heuristic (elapsed wall-time, number of REVIEW cycles, whether the agent is repeating itself).
 
-`compact` sends `/compact [focus]` to the pane (claude's official `/compact [instructions]` form), polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop ≥50% as a fallback), and then sends the re-brief from `--briefing-file` through the regular submit-with-retry path. The optional `--focus` hint shapes the summary so the agent retains plan + REVIEW-state + peer-protocol — without it the summary is generic and important context can drop.
+`compact` sends `/compact [focus]` to the pane (claude's official `/compact [instructions]` form), polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop ≥50% as a fallback), and then sends the re-brief from `--briefing-file` through the regular submit-with-retry path. The optional `--focus` hint shapes the summary so the agent retains plan + REVIEW-state + peer-protocol; without it the summary is generic and important context can drop.
 
 **Authoring the re-brief.** After `/compact` the agent has lost the conversational state and only remembers the summary. The re-brief MUST stand on its own. Include:
 

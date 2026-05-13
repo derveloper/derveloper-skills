@@ -21,7 +21,7 @@ The helper handles the multi-line submit quirks of common agent TUIs (paste-buff
 
 ## Requirements
 
-- `tmux` (running session — the script spawns into the current session)
+- `tmux` (running session: the script spawns into the current session)
 - `git` 2.5+ (worktrees)
 - `python3` 3.9+
 - One or more agent CLIs on `PATH` (defaults assume `claude` and `codex`, configurable)
@@ -55,6 +55,7 @@ Spawn-time flags (both modes unless noted):
 --dual-review                   # opt-in second reviewer (off by default)
 --reviewer-2-agent codex        # second reviewer when --dual-review (default: codex)
 --no-worktree                   # skip git worktree, run on the project's current branch
+--interactive                   # opt-in Decision-Pause-Points for V2 decisions
 --claude-model claude-opus-4-7  # default model for any claude pane
 --claude-effort max             # default --effort level for any claude pane
 ```
@@ -127,6 +128,21 @@ The orchestrator's gate-checks and recon are routed to plugin-namespaced subagen
 
 Net effect: ~60-70 percent token savings vs all-Opus subagents, no quality loss on gate-tasks. The agent files live in `agents/` and ship with the plugin; per-spawn customisation goes in those files, not in the orchestrator briefing.
 
+## Smart workflow (V1-V5)
+
+- V1 Reviewer-Trivial-Fix-Inline: reviewers can send isolated <20 LOC cosmetic,
+  typo, or missing-doc patches as `INLINE-FIX`; writers apply and ACK with
+  `applied B<N> inline-fix (X lines)`.
+- V2 Orchestrator-Direct-Decision-Threshold: small repo-pattern decisions run
+  autonomously by default and every self-decision is logged in `COMPLETE`.
+- V3 Adaptive GATE-Strictness: `task_kind` is `bug-fix`, `feature`, or
+  `refactor`; GATE 2 and GATE 3 verifier adapt deterministic checklist items
+  per class.
+- V4 Engineer-Auto-Resolve WARNINGs: BLOCKER enters the fix-loop, WARNING goes
+  to follow-up memory plus PROJECT.md when relevant, NOTE is log-only.
+- V5 Unattended-Default: `/pair` and `/triple` run unattended by default;
+  `--interactive` turns V2 self-decisions into `AskUserQuestion` pause points.
+
 ### Engineer subagents and parallel plans
 
 Writer, reviewer, and orchestrator briefings tell engineers to keep their main panes lean by using subagents for bounded side work:
@@ -156,7 +172,7 @@ detail depth.
 
 ### Reviewer-Readiness + rules-bootstrap (GATE 1.5)
 
-A reviewer without rules says "looks fine" — that is the failure mode GATE 1.5 prevents. The orchestrator runs the readiness-check before planning. On `NEEDS-RULES`, it loops: per gap one `AskUserQuestion`, then the bootstrap subagent generates `.claude/rules/<topic>.md` from one of seven shipped language templates (Rust, TypeScript, Python, Go, JavaScript, Java, generic skeleton) plus repo recon plus user answers. Templates ship in `templates/rules/` and are sanitized — no company-specific naming, ADRs, or domain references. Project-specific content comes from the user's own answers, baked into the user's own repo.
+A reviewer without rules says "looks fine": that is the failure mode GATE 1.5 prevents. The orchestrator runs the readiness-check before planning. On `NEEDS-RULES`, it loops: per gap one `AskUserQuestion`, then the bootstrap subagent generates `.claude/rules/<topic>.md` from one of seven shipped language templates (Rust, TypeScript, Python, Go, JavaScript, Java, generic skeleton) plus repo recon plus user answers. Templates ship in `templates/rules/` and are sanitized: no company-specific naming, ADRs, or domain references. Project-specific content comes from the user's own answers, baked into the user's own repo.
 
 Optional opt-in `/gepa` pass after fresh rules; the plugin does not call `/gepa` automatically because the GEPA skill is optional user setup. If the user opts in, they trigger `/gepa` themselves out-of-band after the run.
 
@@ -174,7 +190,7 @@ python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> <id
 
 `compact` sends `/compact [focus]` to the pane (the official claude `/compact [instructions]` form, see [code.claude.com/docs/en/commands](https://code.claude.com/docs/en/commands)), polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop ≥50% as a fallback signal), then sends the re-brief from `--briefing-file` via the regular send path. The optional `--focus` hint shapes the summary so the agent retains plan + REVIEW-state + peer-protocol. The re-brief MUST be self-contained: after `/compact` the agent has lost the conversational state and only remembers the summary. Include role, task, current progress recap, the next concrete step, the peer protocol, and the standards.
 
-**Compact has two paths.** The orchestrator-driven path uses `tmux_pair.py compact <pane>` (sends `/compact` plus Re-Brief, useful when the watcher pings or the engineer is mid-tool-call and unaware). The engineer-driven self-compact path uses `tmux_pair.py send <eigener_pane> "/compact <focus>"` — same mechanic, engineer-initiated. Self-compact discipline: between cycles only, never mid-edit; prepare a self-re-brief file (plan-bullet, REVIEW-state, next step, peer pane ids) BEFORE sending; signal `SELF-COMPACT-PLANNED: <bullet> <focus>` to the orchestrator so the watcher does not also fire. Codex panes have no known `/compact` form; self-compact is claude-only.
+**Compact has two paths.** The orchestrator-driven path uses `tmux_pair.py compact <pane>` (sends `/compact` plus Re-Brief, useful when the watcher pings or the engineer is mid-tool-call and unaware). The engineer-driven self-compact path uses `tmux_pair.py send <eigener_pane> "/compact <focus>"`: same mechanic, engineer-initiated. Self-compact discipline: between cycles only, never mid-edit; prepare a self-re-brief file (plan-bullet, REVIEW-state, next step, peer pane ids) BEFORE sending; signal `SELF-COMPACT-PLANNED: <bullet> <focus>` to the orchestrator so the watcher does not also fire. Codex panes have no known `/compact` form; self-compact is claude-only.
 
 `monitor` runs as a background watcher. The triple orchestrator briefing kicks one off automatically as DUTY 0; pair-mode does not auto-start it (the human is in the loop).
 
@@ -190,9 +206,9 @@ To compact both engineers in a triple in parallel, run two `compact` calls with 
 
 The plugin ships three skills:
 
-- **`tmux-pair-orchestration`** — documents the pair protocol (`REVIEW-READY` → `REVIEW` → loop), when to choose pair vs. triple, briefing templates for each role, and failure modes. Triggers when the user asks for things like "spin up a writer/reviewer pair", "run two agents on this", "set up an orchestrator + pair", or names the workflow directly.
-- **`/tmux-pair:gepa`** — Genetic-Pareto prompt/text-artifact optimization (paper arXiv:2507.19457). Used opt-in after rules-bootstrap to optimize freshly generated `.claude/rules/*.md` against user-supplied test diffs. Plugin-namespaced so it does not collide with a user-local `/gepa` install. Skill files: `skills/gepa/`.
-- **`/tmux-pair:dg`** — Dinesh-vs-Gilfoyle adversarial code review. Two AI personas (attacker + defender) debate a diff or file until convergence. Useful as an optional pre-GATE-3 step on security/concurrency/auth/crypto/migration bullets. Skill files: `skills/dg/`.
+- **`tmux-pair-orchestration`**: documents the pair protocol (`REVIEW-READY` → `REVIEW` → loop), when to choose pair vs. triple, briefing templates for each role, and failure modes. Triggers when the user asks for things like "spin up a writer/reviewer pair", "run two agents on this", "set up an orchestrator + pair", or names the workflow directly.
+- **`/tmux-pair:gepa`**: Genetic-Pareto prompt/text-artifact optimization (paper arXiv:2507.19457). Used opt-in after rules-bootstrap to optimize freshly generated `.claude/rules/*.md` against user-supplied test diffs. Plugin-namespaced so it does not collide with a user-local `/gepa` install. Skill files: `skills/gepa/`.
+- **`/tmux-pair:dg`**: Dinesh-vs-Gilfoyle adversarial code review. Two AI personas (attacker + defender) debate a diff or file until convergence. Useful as an optional pre-GATE-3 step on security/concurrency/auth/crypto/migration bullets. Skill files: `skills/dg/`.
 
 External companion (NOT bundled, install separately): the official `code-simplifier` plugin from `claude-plugins-official` for refactor-passes after a feature lands.
 

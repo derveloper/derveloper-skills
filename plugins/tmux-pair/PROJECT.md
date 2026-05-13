@@ -33,6 +33,17 @@ for cross-pane messaging, compaction, monitoring, and cleanup.
   findings-swap, and orchestrator consolidation.
 - Gated workflow: Clarify, Reviewer-Readiness, Plan-Check, Implementation Loop,
   Final-Verify.
+- Adaptive GATE-Strictness: Orch klassifiziert task_kind
+  (bug-fix/feature/refactor) im Recon; gate-2-plan-check, gate-3-verifier und
+  gate-3-code-reviewer lockern/schärfen Checklist-Items per Klasse.
+- --interactive Flag (Pair + Triple): opt-in Decision-Pause-Points. Default off
+  (unattended-by-default mit V2-Threshold-Self-Decisions, alle geloggt im
+  COMPLETE-Ping).
+- Inline-Fix-Spec: Reviewer darf <20-LOC-Findings als INLINE-FIX im
+  REVIEW-Output mitsenden (Trigger: cosmetic/typo/missing-doc; Anti-Trigger:
+  Architektur/Sicherheit/Test-Logik). Writer auto-applied stumm + ACK.
+- WARNING/NOTE-Schema: BLOCKER = fix-loop pflicht, WARNING =
+  followup-memory + PROJECT.md (kein fix-loop), NOTE = log-only.
 - Durable standards: Claude receives `--append-system-prompt-file`; Codex reads
   generated worktree `AGENTS.md` when applicable.
 - PROJECT.md care: feature and refactor bullets update project maps when package
@@ -59,6 +70,10 @@ for cross-pane messaging, compaction, monitoring, and cleanup.
   rate limits. Claude continues through the Task tool and subagent definitions.
 - Version fields in `plugin.json`, `.claude-plugin/marketplace.json`, and the
   orchestration skill frontmatter must stay aligned for plugin updates.
+- `gate-3-code-reviewer` receives `task_kind` for audit context but keeps
+  code-review strictness invariant across bug-fix, feature, and refactor.
+  Adaptive relaxation belongs to plan coverage and verifier checks, while
+  correctness, security, maintainability, and standards review stay stable.
 - Pi engineer panes boot in a minimal mode by default (`PI_BASELINE_DISABLED=1
   PI_MEMORY_DISABLED=1 PI_MODE_DISABLED=1`) so the user's main-Pi workflow
   extensions (baseline system-prompt, MEMORY.md auto-load, /mode layer) do not
@@ -80,3 +95,7 @@ for cross-pane messaging, compaction, monitoring, and cleanup.
   `claude-bridge/claude-opus-4-7` (via pi-claude-bridge wrapping the Claude
   Pro/Max subscription). Token-cost effectively $0 within subscription rate
   limits; OSS/EU stack still reachable via `--pi-provider cortecs`.
+- 0.13.0: Workflow-Smartness (V1 Inline-Fix-Spec, V2
+  Orch-Decision-Threshold mit Decision-Log im COMPLETE, V3 Adaptive
+  GATE-Strictness per task_kind, V4 WARNING/NOTE-Auto-Resolve, V5
+  Unattended-Default mit --interactive Flag).

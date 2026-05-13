@@ -155,7 +155,7 @@ def _probe_for(text: str) -> str:
 def _pane_tail(pane: str, lines: int) -> str:
     """Return the last `lines` rows of the *visible* pane (no scrollback).
     TUI agents render their input area near the bottom and submitted messages
-    scroll into the chat history above the viewport edge — so a probe still
+    scroll into the chat history above the viewport edge: so a probe still
     found in the bottom rows means Enter was swallowed."""
     rc, out, _ = tmux_safe("capture-pane", "-t", pane, "-p")
     if rc != 0:
@@ -298,7 +298,7 @@ def cmd_send(args: argparse.Namespace) -> int:
             time.sleep(0.2)
         # Extra settle so the TUI finishes its post-paste re-layout before
         # we press submit. Observed empirically with claude-code TUI: a 1s
-        # wait plus a single submit-key was not enough — claude swallowed
+        # wait plus a single submit-key was not enough: claude swallowed
         # the submit while still wiring up the [Pasted text] placeholder.
         # Bumping the initial settle to 3s and bursting 3 submit keys per
         # retry iteration plus switching the submit-key from `C-m` to
@@ -399,7 +399,7 @@ def _wait_panes_ready(panes_with_agents: list[tuple[str, str]],
     """Wait for several panes to become ready in parallel.
 
     Returns a {pane_id: ready_bool} map. Logs a warning for any pane that
-    timed out, but does not fail the spawn — caller decides what to do.
+    timed out, but does not fail the spawn: caller decides what to do.
     """
     results: dict[str, bool] = {}
 
@@ -662,7 +662,7 @@ def _send_command(pane: str) -> str:
 
 
 # Hardcoded project standards baked into every briefing. Engineers can read
-# CLAUDE.md and .claude/rules/*.md on top of this — but these defaults apply
+# CLAUDE.md and .claude/rules/*.md on top of this: but these defaults apply
 # even in greenfield repos that haven't been seeded with rules yet.
 STANDARDS_BLOCK = (
     'PROJEKTSTANDARDS (PFLICHT)\n'
@@ -1074,7 +1074,7 @@ PRE_FLIGHT_BLOCK = (
     "  Plugin-Templates (templates/rules/{generic,rust,typescript,python,go,\n"
     "  javascript,java}.md) + Repo-Recon + User-Antworten via AskUserQuestion.\n"
     "  Falls Rules dünn: GATE 1.5 erweitert nur die GAPS, bestehende Files bleiben.\n"
-    "  Engineers werden NIEMALS vor GATE 1.5 gebrieft — Reviewer-Rules sind Teil\n"
+    "  Engineers werden NIEMALS vor GATE 1.5 gebrieft: Reviewer-Rules sind Teil\n"
     "  des PLAN-LOCKED-Briefings.\n"
 )
 
@@ -1213,6 +1213,131 @@ DURABLE_STANDARDS_PROMPT = (
     "Human bleibt unblocked). Anti-Pattern: 'ich nehme Option A' ohne Recall\n"
     "ist genau die Failure-Klasse die diese Regel verhindert.\n"
 )
+
+DECISION_THRESHOLD_BLOCK = (
+    "V2 ORCH-DIRECT-DECISION-THRESHOLD\n"
+    "Self-decidable, mit 1-Zeiler Rationale im COMPLETE-Ping:\n"
+    "  - Style-Finding bei APPROVE-würdigem Code\n"
+    "  - Test-Coverage-Edge-Case bei klarer Risiko-Einschätzung\n"
+    "  - optional-vs-required Default bei Repo-Pattern-Match\n"
+    "  - Naming-Konvention bei Repo-Pattern-Match\n"
+    "  - Plan-Revision nach GATE-2-BLOCKER bei klarer Fix-Direction\n"
+    "User-eskalieren via AskUserQuestion:\n"
+    "  - Budget\n"
+    "  - Stakeholder-Abnahme\n"
+    "  - externer Service-Status\n"
+    "  - echte Scope-Erweiterung\n"
+    "  - Sicherheits-Tradeoff\n"
+    "ALLE Self-Decisions kommen in COMPLETE, nicht nur Beispiele.\n"
+)
+
+INLINE_FIX_SPEC_BLOCK = (
+    "V1 REVIEWER-TRIVIAL-FIX-INLINE\n"
+    "Trigger für INLINE-FIX im Review-Output: <20 LOC und klar isoliert,\n"
+    "cosmetic oder typo oder missing-doc.\n"
+    "Anti-Trigger: Architektur-Frage, Sicherheits-Finding,\n"
+    "Test-Logik-Fehler, >20 LOC.\n"
+    "Format:\n"
+    "INLINE-FIX: <bullet>\n"
+    "```diff\n"
+    "<unified-diff>\n"
+    "```\n"
+    "END-INLINE-FIX\n"
+    "Writer darf auch triviale WARNINGs inline fixen wenn Trigger-Kriterien passen.\n"
+    "Writer-Behavior: git apply stumm, dann ACK exakt:\n"
+    "applied B<N> inline-fix (X lines)\n"
+)
+
+TASK_KIND_BLOCK = (
+    "V3 ADAPTIVE GATE-STRICTNESS\n"
+    "Orchestrator klassifiziert in Recon genau eine Klasse:\n"
+    "task_kind = bug-fix|feature|refactor. Keine docs/tooling-Klasse.\n"
+    "Das Feld task_kind MUSS in die Task user-message für GATE 2,\n"
+    "GATE 3 verifier und GATE 3 code-reviewer.\n"
+    "bug-fix: Kernchecks aktiv, Surface-Checks nur nach deterministischen\n"
+    "Skip-Kriterien lockern.\n"
+    "feature: Default, alle Checks aktiv.\n"
+    "refactor: Coverage als Erhaltung lesen, Tests als Regression-Evidence.\n"
+)
+
+WARNING_SCHEMA_BLOCK = (
+    "V4 BLOCKER/WARNING/NOTE-SCHEMA\n"
+    "BLOCKER = correctness/security/maintainability, dirty worktree,\n"
+    "failed verification oder explicit project-rule violation. Fix-loop Pflicht.\n"
+    "WARNING = preference/nice-to-have. Engineers dürfen fixen oder in\n"
+    "followup-memory + PROJECT.md festhalten. Kein Pflicht-Fix-Loop.\n"
+    "NOTE = info-only. Log für Reviewer-/Verifier-Memory, keine Engineer-Action.\n"
+)
+
+UNATTENDED_DEFAULT_BLOCK = (
+    "V5 UNATTENDED-DEFAULT\n"
+    "{mode_line}\n"
+    "Ohne --interactive laufen V2-Self-Decisions autonom und werden im\n"
+    "COMPLETE-Ping mit 1-Zeiler Rationale geloggt.\n"
+    "Mit --interactive hält Orch/Master vor jeder Self-Decision an und\n"
+    "fragt den User via AskUserQuestion.\n"
+    "Das Flag ändert Briefing-Text, keinen Runtime-Branch nach Spawn.\n"
+)
+
+
+def _unattended_default_block(
+    *, interactive: bool, owner_label: str, self_owned: bool
+) -> str:
+    if interactive:
+        if self_owned:
+            mode_line = (
+                "Du bist im INTERACTIVE-Mode: bei jeder Self-Decision halt "
+                "an und frag User via AskUserQuestion, auch wenn der "
+                "V2-Threshold sie als self-decidable erlaubt."
+            )
+        else:
+            mode_line = (
+                f"{owner_label} ist im INTERACTIVE-Mode: bei jeder "
+                "Self-Decision hält der Owner an und fragt den User via "
+                "AskUserQuestion."
+            )
+    elif self_owned:
+        mode_line = (
+            "Du bist im UNATTENDED-Mode: triff Self-Decisions im "
+            "V2-Threshold autonom und log ALLE Self-Decisions im "
+            "COMPLETE-Ping mit 1-Zeiler Rationale."
+        )
+    else:
+        mode_line = (
+            f"{owner_label} ist im UNATTENDED-Mode: Self-Decisions im "
+            "V2-Threshold laufen autonom und werden im COMPLETE-Ping geloggt."
+        )
+    return UNATTENDED_DEFAULT_BLOCK.format(mode_line=mode_line)
+
+
+def _engineer_smart_workflow_block(
+    *, role: str, decision_owner: str, interactive: bool
+) -> str:
+    mode_block = _unattended_default_block(
+        interactive=interactive,
+        owner_label=decision_owner,
+        self_owned=False,
+    )
+    if role.lower() == "writer":
+        role_block = (
+            "Writer-Pflicht bei INLINE-FIX: Patch stumm applizieren und ACK\n"
+            "exakt `applied B<N> inline-fix (X lines)` senden. Wenn der\n"
+            "Patch nicht sauber anwendbar ist, REVIEW-Finding als BLOCKER\n"
+            "behandeln und normalen Fix-Loop starten.\n"
+        )
+        return f"SMART-WORKFLOW V1-V5\n{mode_block}\n{INLINE_FIX_SPEC_BLOCK}{role_block}\n"
+    if role.lower() == "reviewer":
+        role_block = (
+            "Reviewer-Pflicht: BLOCKER/WARNING/NOTE sauber trennen. Nur\n"
+            "triviale Findings als INLINE-FIX senden. WARNING darf vom\n"
+            "Engineer ignoriert werden, wenn Follow-up-Memory und PROJECT.md\n"
+            "bei Bedarf gepflegt werden.\n"
+        )
+        return (
+            f"SMART-WORKFLOW V1-V5\n{mode_block}\n"
+            f"{WARNING_SCHEMA_BLOCK}\n{INLINE_FIX_SPEC_BLOCK}{role_block}\n"
+        )
+    return f"SMART-WORKFLOW V1-V5\n{mode_block}\n"
 
 
 def _write_durable_standards_file(window_name: str, role: str) -> Path:
@@ -1374,7 +1499,7 @@ def _briefing_gate_prompts(*, wt_path: Path, base: str) -> str:
 
     Each plugin agent carries its own checklist + output format in its system
     prompt. The orchestrator only passes runtime inputs (task, plan, diff-stat,
-    commit-log) as the Task user-message — keep those prompts short.
+    commit-log) as the Task user-message: keep those prompts short.
     """
     return (
         "GATE-1.5 READINESS-CHECK SUBAGENT-CALL\n"
@@ -1400,7 +1525,7 @@ def _briefing_gate_prompts(*, wt_path: Path, base: str) -> str:
         "      3. Erneut readiness-check spawnen.\n"
         "      4. Bei VERDICT=READY: weiter. Bei VERDICT=NEEDS-RULES nach 3.\n"
         "         Iteration: User per AskUserQuestion fragen ob abbrechen oder\n"
-        "         manuell Rules ergänzen. Master pingen NICHT — du löst es.\n"
+        "         manuell Rules ergänzen. Master pingen NICHT: du löst es.\n"
         "    Optional nach READY (vor GATE 2): User via AskUserQuestion fragen\n"
         "    ob die frisch gebackenen Rules durch GEPA-Optimization sollen\n"
         "    (kostet Tokens). Default: skip. Wenn ja: Hinweis im Plan-Bullet,\n"
@@ -1432,6 +1557,7 @@ def _briefing_gate_prompts(*, wt_path: Path, base: str) -> str:
         "    Task vom Human: {TASK}\n"
         "    User-Antworten aus GATE 1: {CLARIFY_RESPONSE}\n"
         "    Plan (Bullets): {PLAN_BULLETS}\n"
+        "    task_kind: {TASK_KIND}\n"
         f"    Worktree: {wt_path}\n"
         f"    Base: {base}\n"
         "    Run your checklist and return your VERDICT block.\n"
@@ -1448,6 +1574,7 @@ def _briefing_gate_prompts(*, wt_path: Path, base: str) -> str:
         "      Task vom Human: {TASK}\n"
         "      Plan (Bullets): {PLAN_BULLETS}\n"
         "      User-Antworten aus GATE 1: {CLARIFY_RESPONSE}\n"
+        "      task_kind: {TASK_KIND}\n"
         f"      Worktree: {wt_path}\n"
         f"      Base: {base}\n"
         "      Diff-Stat: {DIFF_STAT}\n"
@@ -1458,6 +1585,7 @@ def _briefing_gate_prompts(*, wt_path: Path, base: str) -> str:
         "    Sonnet 4.6, Read+Grep+Glob+Bash. Adversarial diff review.\n"
         "    Pass these inputs:\n"
         "      ---\n"
+        "      task_kind: {TASK_KIND}\n"
         f"      Worktree: {wt_path}\n"
         f"      Base: {base}\n"
         "      Diff-Range: {COMMIT_LOG}\n"
@@ -1554,12 +1682,18 @@ def _briefing_pair(
     task: str,
     peer_reviewer_pane: str | None = None,
     with_standards: bool = False,
+    interactive: bool = False,
 ) -> str:
     send_cmd = _send_command(partner_pane)
     send_human = _send_command(human_pane)
     dual_block = _dual_review_block(role, partner_pane, peer_reviewer_pane,
                                     final_target_pane=human_pane,
                                     final_target_label="Human (Orchestrator)")
+    smart_workflow_block = _engineer_smart_workflow_block(
+        role=role,
+        decision_owner="Pair-Master/Human",
+        interactive=interactive,
+    )
     return (
         f"[ROLE: {role} (gated workflow, human orchestriert)]\n\n"
         f"Partner: {partner_role} ({partner_pane}).\n"
@@ -1572,13 +1706,14 @@ def _briefing_pair(
         f"BRANCH:   {branch}\n"
         f"BASE:     {base}\n"
         f"PROJECT:  {project}\n\n"
-        f"TASK (initial vom Human)\n{task or '(keine — warte auf Human)'}\n\n"
+        f"TASK (initial vom Human)\n{task or '(keine: warte auf Human)'}\n\n"
         f"GATE-WORKFLOW\n"
         f"  GATE 1 Clarify, GATE 1.5 Reviewer-Readiness, GATE 2 Plan-Check:\n"
         f"  macht der Human (im Pair-Mode ist der Human der Orchestrator).\n"
         f"  Du startest Code erst NACH 'PLAN-LOCKED:' Briefing.\n"
         f"  GATE 3 Final-Verify: macht der Human, nachdem du DONE pingst.\n"
         f"  BLOCKER vom Human in GATE 3: zurück in den Loop, fixen, neuer DONE-Ping.\n\n"
+        f"{smart_workflow_block}"
         f"PAIR-PROTOKOLL (während Implementation)\n"
         f"  Writer codet, Reviewer liest. Nach jeder sinnvollen Änderung:\n"
         f"    {send_cmd} \"REVIEW-READY: <ein-Zeilen-Summary>\"\n"
@@ -1629,6 +1764,7 @@ def _briefing_triple_engineer(
     wt_path: Path, branch: str, base: str, project: str,
     peer_reviewer_pane: str | None = None,
     with_standards: bool = False,
+    interactive: bool = False,
 ) -> str:
     """Briefing for writer/reviewer in a triple. Engineers stay idle until the
     orchestrator delivers a 'PLAN-LOCKED:' briefing post GATE 2."""
@@ -1637,6 +1773,11 @@ def _briefing_triple_engineer(
     dual_block = _dual_review_block(role, partner_pane, peer_reviewer_pane,
                                     final_target_pane=orchestrator_pane,
                                     final_target_label="Orchestrator")
+    smart_workflow_block = _engineer_smart_workflow_block(
+        role=role,
+        decision_owner=f"Orchestrator {orchestrator_pane}",
+        interactive=interactive,
+    )
     return (
         f"[ROLE: {role} (gated workflow, orchestrator geführt)]\n\n"
         f"Partner: {partner_role} ({partner_pane}).\n"
@@ -1657,6 +1798,7 @@ def _briefing_triple_engineer(
         f"  Du startest Code erst NACH 'PLAN-LOCKED:'-Briefing.\n"
         f"  GATE 3 Final-Verify (Subagents nach DONE): Orchestrator-Job.\n"
         f"  BLOCKER aus GATE 3: zurück in Pair-Loop, fixen, neuer DONE-Ping.\n\n"
+        f"{smart_workflow_block}"
         f"PAIR-PROTOKOLL (nach PLAN-LOCKED, während Implementation)\n"
         f"  Writer codet, Reviewer liest. Nach jeder sinnvollen Änderung:\n"
         f"    {send_partner} \"REVIEW-READY: <ein-Zeilen-Summary>\"\n"
@@ -1721,6 +1863,7 @@ def _briefing_orchestrator(
     reviewer_2_agent: str | None = None,
     with_standards: bool = False,
     with_greenfield: bool = False,
+    interactive: bool = False,
 ) -> str:
     send_writer = _send_command(writer_pane)
     send_reviewer = _send_command(reviewer_pane)
@@ -1760,6 +1903,14 @@ def _briefing_orchestrator(
         f"  Reviewer sprechen NICHT direkt mit Writer. Writer kennt nur DICH.\n\n"
         if dual_review else ""
     )
+    smart_workflow_block = (
+        f"SMART-WORKFLOW V1-V5\n"
+        f"{_unattended_default_block(interactive=interactive, owner_label='Orchestrator', self_owned=True)}\n"
+        f"{DECISION_THRESHOLD_BLOCK}\n"
+        f"{TASK_KIND_BLOCK}\n"
+        f"{WARNING_SCHEMA_BLOCK}\n"
+        f"{INLINE_FIX_SPEC_BLOCK}\n"
+    )
     return (
         f"[ROLE: Orchestrator (gated workflow)]\n\n"
         f"Du führst Writer + Reviewer durch einen 5-Gate-Workflow:\n"
@@ -1770,7 +1921,7 @@ def _briefing_orchestrator(
         f"User-Decisions die in GATE 2/3 hochkommen), erstellst Plan, rufst\n"
         f"Subagents für Plan-Check und Final-Verify, briefst die Engineers, watcht\n"
         f"den Loop.\n\n"
-        f"DU bist der Eskalationspunkt — NICHT der Master. Der Master ist nur\n"
+        f"DU bist der Eskalationspunkt: NICHT der Master. Der Master ist nur\n"
         f"Spawner + Cleanup-Entscheider. Du pingst den Master genau zweimal pro\n"
         f"Run:\n"
         f"  1. COMPLETE (Phase done, NACH GATE-3-PASS, mit gate-3=PASS via\n"
@@ -1805,8 +1956,9 @@ def _briefing_orchestrator(
         f"{(' oben' if dual_review else '')}\n"
         f"{dual_review_panes_line}"
         f"  {human_pane}    Human              - andere Pane\n\n"
-        f"TASK (vom Human)\n{task or '(keine — frage Human)'}\n\n"
+        f"TASK (vom Human)\n{task or '(keine: frage Human)'}\n\n"
         f"{dual_review_directive}"
+        f"{smart_workflow_block}"
         f"{_briefing_standards_block(with_standards=with_standards, with_pre_flight=with_greenfield)}"
         f"{PROJECT_MD_CARE_BLOCK}\n"
         f"{PLAN_QUALITY_BLOCK}\n"
@@ -1841,7 +1993,7 @@ def _briefing_orchestrator(
         f"   3. Engineer macht weiter.\n"
         f"\n"
         f"   Self-Compact ist erlaubt: Engineers dürfen sich selbst compacten\n"
-        f"   via `tmux_pair.py send <eigener_pane> '/compact <focus>'` — das\n"
+        f"   via `tmux_pair.py send <eigener_pane> '/compact <focus>'`: das\n"
         f"   ist die gleiche Mechanik, nur vom Engineer initiiert. Voraussetzung:\n"
         f"   - zwischen REVIEW-Cycles, NICHT mid-edit oder mid-tool-call\n"
         f"   - Self-Re-Brief vorbereiten (Plan-Bullet + REVIEW-Status + nächster\n"
@@ -1859,6 +2011,15 @@ def _briefing_orchestrator(
         f"\n"
         f"   Watcher exitet automatisch wenn Orch-Pane gone (5 leere Captures).\n"
         f"\n"
+        f"0.5 TASK-KIND-CLASSIFICATION\n"
+        f"   Klassifiziere nach Recon genau ein task_kind: bug-fix, feature oder\n"
+        f"   refactor. Keine docs/tooling-Klasse. Wenn unklar, frage User via\n"
+        f"   AskUserQuestion bevor GATE 2 startet.\n"
+        f"   Übergib task_kind in alle Subagent-Inputs: GATE 2 Plan-Check,\n"
+        f"   GATE 3 Verifier und GATE 3 Code-Reviewer. GATE-3-Code-Reviewer nutzt\n"
+        f"   task_kind für Kontext, verzweigt seine Review-Strictness aber nicht:\n"
+        f"   Code-Qualität bleibt invariant, nur Plan-/Verifier-Checks lockern\n"
+        f"   deterministisch.\n\n"
         f"1. RECON (Subagent wenn tief, siehe KONTEXT-ÖKONOMIE)\n"
         f"   - Pre-Flight: notiere ob ./CLAUDE.md und .claude/rules/ existieren.\n"
         f"   - PROJECT.md-Check: notiere ob ./PROJECT.md existiert. Wenn nicht,\n"
@@ -1895,7 +2056,7 @@ def _briefing_orchestrator(
         f"   Ausnahme: keine offenen Fragen + alle Annahmen low-risk -> direkt zu GATE 1.5.\n\n"
         f"3. GATE 1.5: REVIEWER-READINESS-CHECK (Subagent, scoped, READ-ONLY)\n"
         f"   BEVOR du planst, klärst du ob der Reviewer überhaupt einen soliden\n"
-        f"   Review machen kann. Ein Reviewer ohne Rules sagt 'looks fine' — genau\n"
+        f"   Review machen kann. Ein Reviewer ohne Rules sagt 'looks fine': genau\n"
         f"   das verhindert dieses Gate.\n"
         f"\n"
         f"   Ablauf:\n"
@@ -2053,7 +2214,7 @@ def _briefing_orchestrator(
         f"   Engineer-Self-Compact: erlaubt zwischen Cycles. Engineer ruft selbst\n"
         f"     `tmux_pair.py send <eigener_pane> '/compact <focus>'` mit Self-Re-\n"
         f"     Brief im eigenen Pane vorbereitet. Du musst Engineer NICHT zum\n"
-        f"     Compact zwingen — wenn er dir das aktiv signalisiert\n"
+        f"     Compact zwingen: wenn er dir das aktiv signalisiert\n"
         f"     ('SELF-COMPACT-PLANNED: <bullet>'), bestätige kurz und lass\n"
         f"     ihn machen.\n"
         f"   Human compactet DICH bei Bedarf, dafür machst du nichts.\n\n"
@@ -2188,7 +2349,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
                      args.reviewer_2_agent if dual else ""],
     )
 
-    writer_brief = _briefing_pair(
+    writer_brief = _briefing_pair(interactive=args.interactive,
         role="Writer", partner_role="reviewer", partner_pane=reviewer_pane,
         human_pane=human_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
@@ -2196,7 +2357,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
         peer_reviewer_pane=reviewer_2_pane,
         with_standards=with_standards,
     )
-    reviewer_brief = _briefing_pair(
+    reviewer_brief = _briefing_pair(interactive=args.interactive,
         role="Reviewer", partner_role="writer", partner_pane=writer_pane,
         human_pane=human_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
@@ -2208,7 +2369,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
     _send_briefing_sync(writer_pane, writer_brief)
     _send_briefing_sync(reviewer_pane, reviewer_brief)
     if dual:
-        reviewer_2_brief = _briefing_pair(
+        reviewer_2_brief = _briefing_pair(interactive=args.interactive,
             role="Reviewer", partner_role="writer", partner_pane=writer_pane,
             human_pane=human_pane,
             wt_path=wt_path, branch=branch, base=args.base,
@@ -2385,7 +2546,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
         f"--base für 'git diff <SHA>..HEAD' und 'git log <SHA>..HEAD'."
     ) if no_worktree else ""
 
-    orchestrator_brief = _briefing_orchestrator(
+    orchestrator_brief = _briefing_orchestrator(interactive=args.interactive,
         writer_pane=writer_pane, writer_agent=args.writer_agent,
         reviewer_pane=reviewer_pane, reviewer_agent=args.reviewer_agent,
         orchestrator_pane=orchestrator_pane, human_pane=human_pane,
@@ -2398,14 +2559,14 @@ def cmd_triple(args: argparse.Namespace) -> int:
         with_standards=with_standards,
         with_greenfield=with_greenfield,
     )
-    writer_brief = _briefing_triple_engineer(
+    writer_brief = _briefing_triple_engineer(interactive=args.interactive,
         role="Writer", partner_role="reviewer", partner_pane=reviewer_pane,
         orchestrator_pane=orchestrator_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         peer_reviewer_pane=reviewer_2_pane,
         with_standards=with_standards,
     )
-    reviewer_brief = _briefing_triple_engineer(
+    reviewer_brief = _briefing_triple_engineer(interactive=args.interactive,
         role="Reviewer", partner_role="writer", partner_pane=writer_pane,
         orchestrator_pane=orchestrator_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
@@ -2421,7 +2582,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
     _send_briefing_sync(writer_pane, writer_brief)
     _send_briefing_sync(reviewer_pane, reviewer_brief)
     if dual:
-        reviewer_2_brief = _briefing_triple_engineer(
+        reviewer_2_brief = _briefing_triple_engineer(interactive=args.interactive,
             role="Reviewer", partner_role="writer", partner_pane=writer_pane,
             orchestrator_pane=orchestrator_pane,
             wt_path=wt_path, branch=branch, base=args.base,
@@ -2868,6 +3029,12 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--reviewer-2-agent", default="codex",
                     help="second reviewer agent when --dual-review is set (default: codex). "
                          "Ignored without --dual-review.")
+    pa.add_argument("--interactive", action="store_true", default=False,
+                    help="opt-in Decision-Pause-Points: ohne Flag laufen "
+                         "V2-Self-Decisions autonom mit Log im COMPLETE-Ping; "
+                         "mit Flag hält Orch/Master vor jeder Self-Decision "
+                         "an und fragt User via AskUserQuestion. Default off "
+                         "(unattended-by-default).")
     pa.set_defaults(func=cmd_pair)
 
     tr = sub.add_parser("triple",
@@ -2949,6 +3116,12 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--greenfield", action="store_true",
                     help="alias for --with-standards plus greenfield pre-flight block "
                          "(default: off).")
+    tr.add_argument("--interactive", action="store_true", default=False,
+                    help="opt-in Decision-Pause-Points: ohne Flag laufen "
+                         "V2-Self-Decisions autonom mit Log im COMPLETE-Ping; "
+                         "mit Flag hält Orch/Master vor jeder Self-Decision "
+                         "an und fragt User via AskUserQuestion. Default off "
+                         "(unattended-by-default).")
     tr.set_defaults(func=cmd_triple)
 
     li = sub.add_parser("list", help="list panes in the current session")

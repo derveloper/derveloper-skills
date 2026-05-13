@@ -1,6 +1,6 @@
 ---
 description: Spawn an orchestrator + writer + reviewer triple in a fresh git worktree, with PROJECT.md care in the gated workflow
-argument-hint: <project-path> <base> <feature> [task...] [--with-standards] [--greenfield] [--no-worktree] [--dual-review] [--writer-agent claude|codex|pi] [--reviewer-agent claude|codex|pi] [--orchestrator-agent claude|codex|pi] [--claude-model SLUG] [--claude-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL] [--reviewer-2-agent NAME]
+argument-hint: <project-path> <base> <feature> [task...] [--interactive] [--with-standards] [--greenfield] [--no-worktree] [--dual-review] [--writer-agent claude|codex|pi] [--reviewer-agent claude|codex|pi] [--orchestrator-agent claude|codex|pi] [--claude-model SLUG] [--claude-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL] [--reviewer-2-agent NAME]
 ---
 
 # triple
@@ -27,7 +27,7 @@ serial and may propose additional worktrees or pair spawns for independent work.
 
 ## Invocation
 
-`/triple <project-path> <base> <feature> [task...]`
+`/triple <project-path> <base> <feature> [task...] [--interactive]`
 
 - `<project-path>`: path to the git repository
 - `<base>`: ref to branch from (default `origin/main`)
@@ -43,23 +43,25 @@ serial and may propose additional worktrees or pair spawns for independent work.
 - `/triple ~/code/myapp main first-session --greenfield` (adds standards and greenfield pre-flight)
 - `/triple ~/code/myapp main resume-existing --no-worktree --project ~/code/myapp-wt-existing` (reuse an existing worktree directly)
 - `/triple ~/code/myapp main risky-refactor --dual-review` (orchestrator + writer + two cross-checking reviewers)
+- `/triple ~/code/myapp main workflow-tune --interactive`
 - `/triple ~/code/myapp main pi-driven --writer-agent pi --reviewer-agent pi --orchestrator-agent pi` (alle drei Rollen via pi, claude-opus-4-7 via pi-claude-bridge als Default-Model)
 - `/triple ~/code/myapp main pi-eu --writer-agent pi --reviewer-agent pi --orchestrator-agent pi --pi-provider cortecs --pi-model qwen3-coder-next` (EU/ZDR-Stack mit OSS-Modellen via Cortecs)
 
 ## Optional flags
 
-- `--with-standards` — append the durable standards bundle (STANDARDS, recall discipline, bullet-start ritual, pair protocol) to engineer briefings in the Orchestrator handoff. Default is slim.
-- `--greenfield` — enable `--with-standards` plus the greenfield pre-flight block.
-- `--no-worktree` — skip `git worktree add`. Use when resuming on an existing worktree (point `--project` at the worktree path) or running directly on the project branch. With `--no-worktree`, the plugin skips writing AGENTS.md to the project repo; codex picks up standards via the briefing only.
+- `--with-standards`: append the durable standards bundle (STANDARDS, recall discipline, bullet-start ritual, pair protocol) to engineer briefings in the Orchestrator handoff. Default is slim.
+- `--greenfield`: enable `--with-standards` plus the greenfield pre-flight block.
+- `--no-worktree`: skip `git worktree add`. Use when resuming on an existing worktree (point `--project` at the worktree path) or running directly on the project branch. With `--no-worktree`, the plugin skips writing AGENTS.md to the project repo; codex picks up standards via the briefing only.
+- `--interactive` (default off): aktiviert Decision-Pause-Points im Orch-Briefing. Ohne Flag laufen alle V2-Self-Decisions autonom mit Log im COMPLETE-Ping. Mit Flag hält Orch vor jeder Self-Decision an und fragt den User via AskUserQuestion.
 - `--claude-model <slug>`: claude model to switch into post-boot for orchestrator + writer (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically (700k → 140k). Codex pane boot follows the user's configured CLI default; engineer subagent defaults are documented in the workflow briefing.
-- `--claude-effort <level>` — claude reasoning effort, set as `--effort <level>` in the claude boot-command for any claude pane (Writer + Orchestrator) (default `max`). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies). The CLI flag is race-free vs. the `/effort` slash-command after a `/model` switch.
-- `--writer-agent <name>` / `--reviewer-agent <name>` / `--orchestrator-agent <name>` — Agent-Wahl pro Rolle. Erlaubt: `claude` (Default Reviewer + Orchestrator), `codex` (Default Writer), `pi` (Custom CLI mit pi-claude-bridge als Default-Backend, in allen drei Rollen einsetzbar).
-- `--pi-model <slug>` — pi-Model-Slug für jedes pi-Pane (default `claude-opus-4-7` via Default-Provider `claude-bridge`). Wird als `--model <slug>` im pi-Boot gesetzt. Alternative Slugs aus dem User-Catalog: `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-5.3-codex`, `gpt-5.5`, `glm-5.1`, `deepseek-v3.2`. Beachte: pi kann das Model NICHT mid-session wechseln (kein `/model` Slash-Command), nur Restart der Pane.
-- `--pi-provider <name>` — pi-Provider (default `claude-bridge`). Alternativen: `openai-codex` für Codex-Stack, `cortecs` für EU/OSS-Stack, `anthropic` für direkte API.
-- `--pi-thinking <level>` — pi-Reasoning-Level (default `high`). Choices: `off|minimal|low|medium|high|xhigh`. Wird als `--thinking <level>` im pi-Boot gesetzt. Pendant zu `--claude-effort`, aber andere Skala.
-- `--pi-<role>-model <slug>` / `--pi-<role>-thinking <level>` / `--pi-<role>-provider <name>` — pro-Rolle Override für pi-Panes. Rollen: `writer`, `reviewer`, `orchestrator`, `reviewer-2` (mit `--dual-review`). Wenn gesetzt, gewinnt die Rolle-Variante gegenüber `--pi-model` / `--pi-thinking` / `--pi-provider`. Beispiel: `--writer-agent pi --pi-writer-model claude-opus-4-7 --reviewer-2-agent pi --pi-reviewer-2-provider cortecs --pi-reviewer-2-model deepseek-v3.2 --dual-review` mischt Bridge-Writer mit OSS-EU-Second-Reviewer.
-- `--dual-review` — opt-in second reviewer. Layout becomes: orchestrator on top full width, writer bottom-left, reviewer-1 + reviewer-2 stacked on the bottom-right side. Both reviewers review independently, swap findings, then send final reports to the orchestrator who consolidates before forwarding to the writer. Off by default.
-- `--reviewer-2-agent <agent>` — override the second reviewer agent (default codex). Only relevant with `--dual-review`.
+- `--claude-effort <level>`: claude reasoning effort, set as `--effort <level>` in the claude boot-command for any claude pane (Writer + Orchestrator) (default `max`). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies). The CLI flag is race-free vs. the `/effort` slash-command after a `/model` switch.
+- `--writer-agent <name>` / `--reviewer-agent <name>` / `--orchestrator-agent <name>`: Agent-Wahl pro Rolle. Erlaubt: `claude` (Default Reviewer + Orchestrator), `codex` (Default Writer), `pi` (Custom CLI mit pi-claude-bridge als Default-Backend, in allen drei Rollen einsetzbar).
+- `--pi-model <slug>`: pi-Model-Slug für jedes pi-Pane (default `claude-opus-4-7` via Default-Provider `claude-bridge`). Wird als `--model <slug>` im pi-Boot gesetzt. Alternative Slugs aus dem User-Catalog: `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-5.3-codex`, `gpt-5.5`, `glm-5.1`, `deepseek-v3.2`. Beachte: pi kann das Model NICHT mid-session wechseln (kein `/model` Slash-Command), nur Restart der Pane.
+- `--pi-provider <name>`: pi-Provider (default `claude-bridge`). Alternativen: `openai-codex` für Codex-Stack, `cortecs` für EU/OSS-Stack, `anthropic` für direkte API.
+- `--pi-thinking <level>`: pi-Reasoning-Level (default `high`). Choices: `off|minimal|low|medium|high|xhigh`. Wird als `--thinking <level>` im pi-Boot gesetzt. Pendant zu `--claude-effort`, aber andere Skala.
+- `--pi-<role>-model <slug>` / `--pi-<role>-thinking <level>` / `--pi-<role>-provider <name>`: pro-Rolle Override für pi-Panes. Rollen: `writer`, `reviewer`, `orchestrator`, `reviewer-2` (mit `--dual-review`). Wenn gesetzt, gewinnt die Rolle-Variante gegenüber `--pi-model` / `--pi-thinking` / `--pi-provider`. Beispiel: `--writer-agent pi --pi-writer-model claude-opus-4-7 --reviewer-2-agent pi --pi-reviewer-2-provider cortecs --pi-reviewer-2-model deepseek-v3.2 --dual-review` mischt Bridge-Writer mit OSS-EU-Second-Reviewer.
+- `--dual-review`: opt-in second reviewer. Layout becomes: orchestrator on top full width, writer bottom-left, reviewer-1 + reviewer-2 stacked on the bottom-right side. Both reviewers review independently, swap findings, then send final reports to the orchestrator who consolidates before forwarding to the writer. Off by default.
+- `--reviewer-2-agent <agent>`: override the second reviewer agent (default codex). Only relevant with `--dual-review`.
 
 ## When to use triple instead of pair
 
@@ -81,7 +83,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py triple \
   --base <base> \
   --feature <feature> \
   --task "<task>" \
-  [--with-standards] [--greenfield] [--no-worktree] \
+  [--interactive] [--with-standards] [--greenfield] [--no-worktree] \
   [--writer-agent <claude|codex|pi>] [--reviewer-agent <claude|codex|pi>] \
   [--orchestrator-agent <claude|codex|pi>] \
   [--claude-model <slug>] [--claude-effort <level>] \

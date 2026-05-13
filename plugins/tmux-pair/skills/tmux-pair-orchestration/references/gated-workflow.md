@@ -8,7 +8,7 @@ Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Ch
 
 Gates exist because pair-loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 1.5, 2, and 3; the user enforces gate 1 via `AskUserQuestion`.
 
-This file is the long version. The bundled briefings already encode the workflow — read this when adapting briefings, debugging a stuck gate, or deciding when to force a `BLOCKER`.
+This file is the long version. The bundled briefings already encode the workflow: read this when adapting briefings, debugging a stuck gate, or deciding when to force a `BLOCKER`.
 
 ## Who runs which gate
 
@@ -18,6 +18,101 @@ This file is the long version. The bundled briefings already encode the workflow
 | **pair** | Human asks user directly via `AskUserQuestion` | Human spawns readiness-check subagent; bootstrap loop owned by human | Human spawns subagent from their own context | Human spawns two subagents from their own context |
 
 In a triple the orchestrator owns the `AskUserQuestion` call so the human stays unblocked. The human only sees major events (`MAJOR-STEP`, `BLOCKER`, `DONE`, `ABORT`, gate-3 verdicts, plus rare `GATE-1-ESCALATE` if the orchestrator hits a question outside its decision authority). In a pair the human IS the orchestrator and asks directly.
+
+## Smart workflow (V1-V5)
+
+The smart workflow makes the gated run adaptive by `task_kind` while keeping the audit trail explicit. The orchestrator or pair master classifies every task during recon as `bug-fix`, `feature`, or `refactor`, passes that value to GATE 2 and GATE 3 subagents, and includes all self-decisions in the final `COMPLETE` ping.
+
+### V1 Reviewer-Trivial-Fix-Inline
+
+Reviewers can send a tiny patch directly in review output when a finding is under 20 LOC and isolated.
+
+Trigger:
+- cosmetic change
+- typo
+- missing-doc addition
+
+Anti-trigger:
+- architecture question
+- security finding
+- test-logic error
+- more than 20 LOC
+
+Format:
+
+````text
+INLINE-FIX: <bullet>
+```diff
+<unified-diff>
+```
+END-INLINE-FIX
+````
+
+Writer behavior: apply with `git apply` silently, then ACK `applied B<N> inline-fix (X lines)`. The writer may also fix a WARNING when it matches the same trivial pattern.
+
+Failure modes:
+- Reviewer sends a design change as `INLINE-FIX`: treat as `REVIEW: BLOCKER` and ask for a normal finding.
+- Patch touches more than the isolated finding: writer rejects it and asks for a smaller diff.
+- Writer applies without ACK: reviewer blocks the cycle because the patch path lost traceability.
+
+### V2 Orchestrator-Direct-Decision-Threshold
+
+Self-decidable decisions:
+- style findings that are already APPROVE-worthy
+- test coverage edge cases with clear risk assessment
+- optional-vs-required defaults with repo precedent
+- naming convention choices with repo-pattern match
+- plan revision after GATE-2-BLOCKER with clear fix direction
+
+User-escalated decisions:
+- budget
+- stakeholder approval
+- external service status
+- real scope expansion
+- security trade-off
+
+All self-decisions are listed in `COMPLETE` with one-line rationale. This includes decisions that felt obvious.
+
+Failure modes:
+- Hidden self-decision: final `COMPLETE` is incomplete and GATE 3 can ask for the missing log.
+- Trivia escalation: slows unattended mode and trains humans to ignore real pings.
+- Scope expansion classified as self-decision: stop and escalate through `AskUserQuestion`.
+
+### V3 Adaptive GATE-Strictness
+
+| task_kind | GATE behavior |
+|-----------|---------------|
+| `bug-fix` | Keep goal coverage, specificity, rules, plan quality, and tests active. Skip wiring, parallel markers, UI-smoke, and PROJECT.md only for one-file fixes with no new surface. |
+| `feature` | Default. All checks stay active. |
+| `refactor` | Treat coverage as preservation and tests as regression evidence. Skip wiring and UI-smoke only when there is no behavior or UI surface change. Keep design-decision and implementation-history checks when relevant. |
+
+Failure modes:
+- Missing `task_kind`: subagents grade as `feature`, which is strictest and safest.
+- Introducing `docs` or `tooling` as a fourth class: invalid, reclassify into the three allowed classes.
+- Fuzzy skip criteria: haiku verifier must use diff facts such as new function, struct, class, command, flag, UI file, or feature-surface docs.
+
+### V4 Engineer-Auto-Resolve WARNINGs
+
+Severity handling:
+- BLOCKER: correctness, security, maintainability, explicit project-rule violation, dirty worktree, or failed verification. Engineers fix and re-run the loop.
+- WARNING: preference or nice-to-have. Engineers may fix it, or record follow-up-memory plus PROJECT.md when relevant.
+- NOTE: info-only. Log for memory if useful.
+
+Failure modes:
+- WARNING treated as mandatory fix-loop: wastes the pair loop on non-blocking preferences.
+- WARNING silently dropped when it affects future runs: missing follow-up-memory or PROJECT.md entry.
+- NOTE turns into implementation work: reviewer should restate it as WARNING or BLOCKER if action is required.
+
+### V5 Unattended-Default
+
+Default mode is unattended in both pair and triple. Without `--interactive`, V2 self-decisions are made autonomously and logged in `COMPLETE`. With `--interactive`, the orchestrator or pair master pauses before every self-decision and asks the user via `AskUserQuestion`.
+
+This is briefing-text behavior. The Python runtime only carries the flag into generated briefings; it does not manage decision pauses after spawn.
+
+Failure modes:
+- Default run pauses for self-decidable choices: violates unattended default.
+- `--interactive` affects triple but not pair, or pair but not triple: command docs and briefing wiring are inconsistent.
+- Decision is made in interactive mode without asking: missing pause point, re-brief the owner and log the incident.
 
 ## Gate 1: Clarify
 
@@ -31,7 +126,7 @@ In a triple the orchestrator owns the `AskUserQuestion` call so the human stays 
    - assumptions (`A1..An`) the run is implicitly making (defaults, library choices, file layout)
    - open questions (`Q1..Qn`) the user must answer (explicit choices between approaches)
    - pre-flight result: does `./CLAUDE.md` exist? does `.claude/rules/` exist? if greenfield, list of rules-files to generate
-2. Triple orchestrator calls `AskUserQuestion` ITSELF in its own pane (multiple-choice preferred — forces specificity). Each question gets 2-4 concrete options; the recommended one is the first option suffixed `(Recommended)`. Max four questions per call, sequential calls if more are needed. The human is NOT pinged. Optional one-line FYI to human is fine (`[Orch <window>] GATE-1 starts: N questions to user`), but the orchestrator does not wait on the human.
+2. Triple orchestrator calls `AskUserQuestion` ITSELF in its own pane. Multiple choice is preferred because it forces specificity. Each question gets 2-4 concrete options; the recommended one is the first option suffixed `(Recommended)`. Max four questions per call, sequential calls if more are needed. The human is NOT pinged. Optional one-line FYI to human is fine (`[Orch <window>] GATE-1 starts: N questions to user`), but the orchestrator does not wait on the human.
 3. Pair human calls `AskUserQuestion` directly. Same option/recommendation discipline.
 4. Escalation path (triple only): if a question is outside the orchestrator's decision authority (budget, scope change, stakeholder dependency, or the user is unreachable), ping human:
    ```
@@ -39,7 +134,7 @@ In a triple the orchestrator owns the `AskUserQuestion` call so the human stays 
    <reason>
    <questions needing human input>
    ```
-   Wait for `GATE-1-DECISION` before continuing. Pair has no escalation — human is already the decision layer.
+   Wait for `GATE-1-DECISION` before continuing. Pair has no escalation: human is already the decision layer.
 
 **Skip condition:** no open questions AND every assumption is low-risk (won't change implementation). Rare. Default is: ask.
 
@@ -81,7 +176,7 @@ Output: `VERDICT: READY | NEEDS-RULES` plus `LANGUAGES`, `COVERAGE` per topic, `
   1. Per gap, orchestrator/human calls `AskUserQuestion` with 2-4 concrete options ("Welcher Linter blockiert Merges?", "Welcher Test-Runner ist Pflicht?", etc.). Recommended option first, suffix `(Recommended)`.
   2. Spawn `tmux-pair:rules-bootstrap` subagent (Sonnet 4.6, `Read+Grep+Glob+Bash+Edit+Write`). Inputs: GAPS list, user-answer block, detected languages, plugin templates path (`${CLAUDE_PLUGIN_ROOT}/templates/rules/`). Subagent bakes `.claude/rules/<topic>.md` from templates + repo recon + user answers.
   3. Re-run readiness-check. If `READY` -> proceed. If `NEEDS-RULES` after a third iteration: `AskUserQuestion` "abort, manually amend, or accept partial coverage?". No master ping; the orchestrator owns the loop.
-- `READY` after a fresh bootstrap (rules just generated): orchestrator may ask the user via `AskUserQuestion` whether to run a `/tmux-pair:gepa` optimization pass on the new rules. Default: skip. GEPA is shipped as a plugin skill (`skills/gepa/`, Genetic-Pareto algorithm, paper arXiv:2507.19457). The orchestrator does NOT call GEPA autonomously — it requires user-supplied test diffs (3-5 known-bug diffs in `.gepa/test-diffs/`) for the eval script. If the user opts in and has those inputs, the orchestrator points them at `/tmux-pair:gepa init` and the user runs the loop in their own pane. Without test diffs the optimization score is wishful thinking; the orchestrator skips rather than fake it.
+- `READY` after a fresh bootstrap (rules just generated): orchestrator may ask the user via `AskUserQuestion` whether to run a `/tmux-pair:gepa` optimization pass on the new rules. Default: skip. GEPA is shipped as a plugin skill (`skills/gepa/`, Genetic-Pareto algorithm, paper arXiv:2507.19457). The orchestrator does NOT call GEPA autonomously because it requires user-supplied test diffs (3-5 known-bug diffs in `.gepa/test-diffs/`) for the eval script. If the user opts in and has those inputs, the orchestrator points them at `/tmux-pair:gepa init` and the user runs the loop in their own pane. Without test diffs the optimization score is wishful thinking; the orchestrator skips rather than fake it.
 
 **Why a separate gate, not part of GATE 2:** the rules state SHAPES the plan (which test runner, which architecture boundary, which security check). The plan-check then verifies the plan against those rules. Doing both in GATE 2 confuses two different judgements (intent vs craft).
 
@@ -113,7 +208,7 @@ Base: {BASE}
 Run your checklist and return your VERDICT block.
 ```
 
-Output is `VERDICT: PASS | WARNING | BLOCKER` plus `BLOCKERS:`, `WARNINGS:`, `NOTES:` lists. The full checklist (14 items: coverage, wiring, specificity, scope-sanity, rule-conflicts, standards, falsifiability, plan-quality per bullet, tests, parallel marker per bullet, parallelisation, edit-efficiency, frontend-smoke + design-skill) is in the agent file, single source of truth.
+Output is `VERDICT: PASS | WARNING | BLOCKER` plus `BLOCKERS:`, `WARNINGS:`, `NOTES:` lists. The full checklist (15 items: rules-read, coverage, wiring, specificity, scope-sanity, rule-conflicts, standards, falsifiability, plan-quality per bullet, tests, parallel marker per bullet, parallelisation, edit-efficiency, frontend-smoke + design-skill, PROJECT.md-care) is in the agent file, single source of truth.
 
 **Verdict handling:**
 
@@ -134,7 +229,7 @@ A plan that compiles past GATE 2 must be edit-optimised. Each of the (max ~5) bu
 
 1. **Concrete files + functions + line ranges.** No "somewhere in `src/`". No "implement auth". The orchestrator is allowed to delegate the search to a subagent, but the resulting plan must be specific.
 2. **Edit strategy.** State what tool fits: `sed -i s/A/B/g <files>` for pattern replace across N>3 spots, `MultiEdit` for clustered changes in one file, `Write` for new files, AST/codemod for structural changes. Avoid implicit "engineer decides" when the strategy is obvious. Three similar lines is a sed; thirty is mandatory.
-3. **Test coverage.** Per bullet: which test files cover the goal of this bullet, and what they assert. If a project is intentionally untested (`Frickel`-marker — one-shot script, demo, throwaway), say so explicitly with a one-line justification. GATE 2 BLOCKERs absent test coverage on non-Frickel projects.
+3. **Test coverage.** Per bullet: which test files cover the goal of this bullet, and what they assert. If a project is intentionally untested (`Frickel`-marker: one-shot script, demo, throwaway), say so explicitly with a one-line justification. GATE 2 BLOCKERs absent test coverage on non-Frickel projects.
 4. **Parallelisability marker.** Every bullet carries an explicit marker. Use `B3 || B4 [parallel]` when bullets can run together without shared files, or `B3 -> B4 [sequenziell: <reason>]` when ordering is required. The orchestrator checks whether independent bullets are needlessly serial. Subagents for independent research/generation spawn in parallel.
 5. **Done definition.** Measurable: test green, file exists, function returns X, lint green. Not vague ("works correctly").
 
@@ -151,14 +246,14 @@ docs(plan-amendment): <Bullet> Estimate +X percent because <reason> (Plan vN)
 
 `REVIEW-READY` on a bullet with documented drift but no preceding amendment commit is a `BLOCK`. This catches cap-breaker drift before it lands as a one-line review-finding ("file is over the cap") at GATE 3.
 
-Source: this rule was synthesised from real BLOCKERs in past pair runs (a frontend file at 183/200 LOC after a "should be quick" estimate, a Rust skills module at 504 LOC against a 200 cap, a plan task estimated at 265 LOC and shipped at 480 — 1.8x drift). Each one would have been caught by a plan-amendment commit; none were, and each one surfaced as a pile-up of single-line review findings.
+Source: this rule was synthesised from real BLOCKERs in past pair runs (a frontend file at 183/200 LOC after a "should be quick" estimate, a Rust skills module at 504 LOC against a 200 cap, a plan task estimated at 265 LOC and shipped at 480: 1.8x drift). Each one would have been caught by a plan-amendment commit; none were, and each one surfaced as a pile-up of single-line review findings.
 
 ## Implementation Loop
 
 Standard pair protocol (`references/pair-protocol.md`). Engineers wait for `PLAN-LOCKED:` before touching code. Once briefed:
 
 1. Writer codes a logical step.
-2. Writer runs the **smart test subset** (see below) — only tests touching the diff, not the full suite.
+2. Writer runs the **smart test subset** (see below): only tests touching the diff, not the full suite.
 3. Writer or Reviewer uses subagents for complex side work when it keeps the main pane lean: parallel recon files, parallel test suites, or independent fix branches with disjoint files.
 4. Writer pings reviewer with `REVIEW-READY: <summary>`.
 5. Reviewer responds `REVIEW: APPROVE` or `REVIEW: <findings>`.
@@ -254,15 +349,15 @@ Both rituals exist because in pair-runs prior to the rules-from-sessions changes
 
 Engineer pings without these three fields are blocked by the reviewer without code review:
 
-1. **Was geändert** — bullet/pain number + files + LOC-diff or NEW marker.
-2. **Verifikation** — concrete result. For code bullets: `workspace-gate=PASS` plus test-run output (e.g. `cargo-nextest "247 passed 0 failed"`). For doc-only: `workspace-gate=N/A doc-only`.
-3. **Bezug** — which plan-bullet / pain-point. So the reviewer knows the acceptance criterion.
+1. **Was geändert**: bullet/pain number + files + LOC-diff or NEW marker.
+2. **Verifikation**: concrete result. For code bullets: `workspace-gate=PASS` plus test-run output (e.g. `cargo-nextest "247 passed 0 failed"`). For doc-only: `workspace-gate=N/A doc-only`.
+3. **Bezug**: which plan-bullet / pain-point. So the reviewer knows the acceptance criterion.
 
 Workspace-gate is mandatory: code bullets must run their test suite (or smart test subset, if so planned) green BEFORE pinging `REVIEW-READY`. "Tests still running" is a discipline violation, not a status.
 
 ### CLARIFY-NEEDED (engineer needs a user decision)
 
-If the engineer hits a question that requires a user decision (scope change, behavior choice, UX, architectural call) — not just a `BLOCKER` (broken test/build) — they ping:
+If the engineer hits a question that requires a user decision (scope change, behavior choice, UX, architectural call), and not just a `BLOCKER` (broken test/build), they ping:
 
 ```
 CLARIFY-NEEDED: <question + 2-4 options>
@@ -286,7 +381,7 @@ When the orchestrator or engineers discover a pattern, policy, or architectural 
 
 1. **Memory entry** (project-scoped): `~/.claude/projects/<sanitized-project>/memory/project_<key>.md` plus the `MEMORY.md` index. Only entries that future runs need; not ephemeral loop state.
 2. **Rules file** (in repo): `.claude/rules/<key>.md` for code conventions (test policy, edit pattern, naming). Committed with the run.
-3. **Engineer briefing update** (in-run): if the discovery should change engineer behaviour during this run, the orchestrator pings `PLAN-AMENDMENT: <diff>` to writer + reviewer. Not a fresh `PLAN-LOCKED:` — that would invalidate the loop state.
+3. **Engineer briefing update** (in-run): if the discovery should change engineer behaviour during this run, the orchestrator pings `PLAN-AMENDMENT: <diff>` to writer + reviewer. Not a fresh `PLAN-LOCKED:`: that would invalidate the loop state.
 
 After persisting, the orchestrator pings the human one line: `[Orch <window>] Persisted: <what> in <where>`.
 
@@ -330,15 +425,15 @@ In pair mode the human IS the orchestrator. The plugin spawns engineers and prin
 
 The duties:
 
-1. **Recon** — read upstream docs, grep the codebase, identify pointers. Heavy reads via `Task(subagent_type='Explore')` (Haiku, read-only) with a concrete question and "report in <300 words". External docs / web go to a `general-purpose` subagent.
-2. **GATE 1 (Clarify)** — call `AskUserQuestion` directly. The master is its own user-decision layer. Empty user input on day one is the most expensive failure mode in a long pair-run.
-3. **Plan** — max ~5 large bullets, each with concrete files+lines, edit strategy, test coverage, parallelisability marker, measurable done-definition.
-4. **GATE 2 (Plan-Check)** — spawn one `tmux-pair:gate-2-plan-check` subagent (Sonnet 4.6, scoped, no Edit/Write). `BLOCKER` → revise the plan or escalate to user (don't auto-retry).
-5. **Brief engineers** — send `PLAN-LOCKED:` with the writer-briefing and reviewer-briefing as separate messages.
-6. **Watch loop** — engineers ping `REVIEW-READY` / `BLOCKER` / `CLARIFY-NEEDED`. Master forwards `CLARIFY-NEEDED` via `AskUserQuestion`, escalates `BLOCKER` to user when out of decision authority, otherwise nudges and waits.
-7. **GATE 3 (Final-Verify)** — spawn TWO scoped subagents in parallel after writer's `DONE` ping: `tmux-pair:gate-3-verifier` (Haiku 4.5) + `tmux-pair:gate-3-code-reviewer` (Sonnet 4.6).
-8. **COMPLETE** — only after `GATE 3 PASS`, with `gate-3=PASS via <verifier-name + code-reviewer-name>` mandatory in the ping.
-9. **Cleanup** — merge, push, kill window, remove worktree, delete branch. Strictly the master's call, never the engineers'.
+1. **Recon**: read upstream docs, grep the codebase, identify pointers. Heavy reads via `Task(subagent_type='Explore')` (Haiku, read-only) with a concrete question and "report in <300 words". External docs / web go to a `general-purpose` subagent.
+2. **GATE 1 (Clarify)**: call `AskUserQuestion` directly. The master is its own user-decision layer. Empty user input on day one is the most expensive failure mode in a long pair-run.
+3. **Plan**: max ~5 large bullets, each with concrete files+lines, edit strategy, test coverage, parallelisability marker, measurable done-definition.
+4. **GATE 2 (Plan-Check)**: spawn one `tmux-pair:gate-2-plan-check` subagent (Sonnet 4.6, scoped, no Edit/Write). `BLOCKER` → revise the plan or escalate to user (don't auto-retry).
+5. **Brief engineers**: send `PLAN-LOCKED:` with the writer-briefing and reviewer-briefing as separate messages.
+6. **Watch loop**: engineers ping `REVIEW-READY` / `BLOCKER` / `CLARIFY-NEEDED`. Master forwards `CLARIFY-NEEDED` via `AskUserQuestion`, escalates `BLOCKER` to user when out of decision authority, otherwise nudges and waits.
+7. **GATE 3 (Final-Verify)**: spawn TWO scoped subagents in parallel after writer's `DONE` ping: `tmux-pair:gate-3-verifier` (Haiku 4.5) + `tmux-pair:gate-3-code-reviewer` (Sonnet 4.6).
+8. **COMPLETE**: only after `GATE 3 PASS`, with `gate-3=PASS via <verifier-name + code-reviewer-name>` mandatory in the ping.
+9. **Cleanup**: merge, push, kill window, remove worktree, delete branch. Strictly the master's call, never the engineers'.
 
 The master does NOT code, does NOT review, does NOT commit on behalf of the engineers, does NOT decide user-facing questions on its own. The triple orchestrator does the same job but in a dedicated pane; if you find yourself in pair-mode running a task that needs all of duties 1-9, switch to triple next time.
 
@@ -371,9 +466,9 @@ Source: a recent run sent COMPLETE before GATE 3, then ~30 minutes later came ba
 
 **Mechanism:** spawn TWO scoped subagents in parallel (one message, two Task calls):
 
-- **Subagent A — `tmux-pair:gate-3-verifier`** (Haiku 4.5, Read+Grep+Glob+Bash). Reads the plan + diff (`git diff base..HEAD`), runs the project's build/test commands, checks plan-bullet coverage. Cheap and fast — Haiku is sufficient for goal-backward coverage checks because the work is read-only matching of bullets to commits. Inputs passed as Task user-message: task, plan-bullets, clarify-answers, worktree, base, diff-stat, commit-log. The full checklist (9 items: rules-read, goal-backward, deep-file-reads, wiring, real-vs-stub tests, build/test commands by language, standards, frontend-smoke, worktree-clean) lives in `agents/gate-3-verifier.md`.
+- **Subagent A: `tmux-pair:gate-3-verifier`** (Haiku 4.5, Read+Grep+Glob+Bash). Reads the plan + diff (`git diff base..HEAD`), runs the project's build/test commands, checks plan-bullet coverage. Cheap and fast: Haiku is sufficient for goal-backward coverage checks because the work is read-only matching of bullets to commits. Inputs passed as Task user-message: task, plan-bullets, clarify-answers, worktree, base, diff-stat, commit-log. The full checklist (10 items: rules-read, goal-backward, deep-file-reads, wiring, real-vs-stub tests, build/test commands by language, standards, frontend-smoke, PROJECT.md-care, worktree-clean) lives in `agents/gate-3-verifier.md`.
 
-- **Subagent B — `tmux-pair:gate-3-code-reviewer`** (Sonnet 4.6, Read+Grep+Glob+Bash). Adversarial diff review against project rules. Sonnet here, not Haiku — style-subtleties, security edge cases, anti-AI-slop detection need nuance Haiku misses. Inputs: worktree, base, diff-range. The full checklist (9 items: rules-read, bugs, security, quality, performance-only-if-correctness, worktree-state, frontend-smoke, anti-AI-slop, standards conformance) lives in `agents/gate-3-code-reviewer.md`.
+- **Subagent B: `tmux-pair:gate-3-code-reviewer`** (Sonnet 4.6, Read+Grep+Glob+Bash). Adversarial diff review against project rules. Sonnet here, not Haiku: style-subtleties, security edge cases, anti-AI-slop detection need nuance Haiku misses. Inputs: worktree, base, diff-range. The full checklist (9 items: rules-read, bugs, security, quality, performance-only-if-correctness, worktree-state, frontend-smoke, anti-AI-slop, standards conformance) lives in `agents/gate-3-code-reviewer.md`.
 
 Output for both: `VERDICT: PASS | WARNING | BLOCKER` plus `BLOCKERS:`, `WARNINGS:`, `NOTES:` lists with `file:line` falsifiable findings.
 
@@ -418,7 +513,7 @@ GATE 2 and GATE 3 explicitly check the diff against these standards.
 
 GATE 1.5 handles greenfield automatically. With no `.claude/rules/` directory, the readiness-check returns `NEEDS-RULES` with all 8 topics as gaps; the bootstrap loop initialises the complete rules set from plugin templates + user answers + repo recon. Engineers are briefed AFTER rules exist, not before.
 
-The orchestrator does NOT make rules-generation the first plan bullet anymore — rules land in GATE 1.5, before planning. That keeps the plan focused on the actual feature work.
+The orchestrator does NOT make rules-generation the first plan bullet anymore: rules land in GATE 1.5, before planning. That keeps the plan focused on the actual feature work.
 
 For projects with thin or partial rules, GATE 1.5 fills only the missing topics (`GAPS`); existing rules are not rewritten.
 
@@ -437,7 +532,7 @@ For projects with thin or partial rules, GATE 1.5 fills only the missing topics 
 
 `GATE-1-ESCALATE`/`GATE-1-DECISION` are the ONLY gate-1 events crossing pane boundaries in normal triples. The orchestrator's regular `AskUserQuestion`/answer cycle stays inside its own pane and never reaches the human.
 
-These extend the base pair-protocol vocabulary (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`, etc. — see `references/pair-protocol.md`). Engineers send those; gate events go between orchestrator and human.
+These extend the base pair-protocol vocabulary (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`, etc., see `references/pair-protocol.md`). Engineers send those; gate events go between orchestrator and human.
 
 ## Failure modes specific to gated runs
 
