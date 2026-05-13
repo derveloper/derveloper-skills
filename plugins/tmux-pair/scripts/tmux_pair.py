@@ -57,18 +57,19 @@ DEFAULT_CLAUDE_MODEL = "claude-opus-4-7"
 # greift.
 DEFAULT_CLAUDE_EFFORT = "max"
 
-# pi (custom CLI) Model + Thinking-Level. claude-opus-4-7 via pi-claude-bridge
-# ist the users aktueller Pi-Default (Pro/Max-Subscription, Token-Cost effektiv 0,
-# 1M ctx). Thinking-Level-Skala: off|minimal|low|medium|high|xhigh. claude-effort
-# max -> pi thinking high (kein xhigh, stabiler). Override per Spawn via
-# --pi-model / --pi-thinking.
-DEFAULT_PI_MODEL = "claude-opus-4-7"
+# pi (custom CLI) Model + Thinking-Level. cortecs/qwen3-coder-next ist
+# the users aktueller Pi-Default (EU-Pay-per-Use, ~0.15/0.80 EUR pro 1M Tokens,
+# 256k ctx, coder-spec). Bewusst auf günstigem Cortecs-Model für Bulk-Work;
+# Top-Quality-Gates laufen über Anthropic-Subscription via claude (Reviewer/
+# Orchestrator). Thinking-Level-Skala: off|minimal|low|medium|high|xhigh.
+# Override per Spawn via --pi-model / --pi-thinking.
+DEFAULT_PI_MODEL = "qwen3-coder-next"
 DEFAULT_PI_THINKING = "high"
 # pi --list-models zeigt Models pro Provider an. Damit Pi den richtigen Provider
 # erwischt (claude-bridge fuer Anthropic-Modelle, cortecs fuer OSS, openai-codex
 # fuer Codex-Stack), setzen wir --provider explizit. Override per Spawn via
 # --pi-provider / --pi-<role>-provider.
-DEFAULT_PI_PROVIDER = "claude-bridge"
+DEFAULT_PI_PROVIDER = "cortecs"
 
 
 def _pi_overrides_for_role(args, role: str) -> tuple[str, str, str]:

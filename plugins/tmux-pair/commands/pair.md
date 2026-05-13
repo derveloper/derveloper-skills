@@ -39,8 +39,8 @@ suites, or independent fix branches when that keeps their main pane lean.
 - `/pair ~/code/myapp main small-job --claude-model claude-opus-4-6` (200k context, cheaper for short tasks)
 - `/pair ~/code/myapp main risky-refactor --dual-review` (two reviewers cross-checking, codex + claude)
 - `/pair ~/code/myapp main workflow-tune --interactive`
-- `/pair ~/code/myapp main pi-experiment --writer-agent pi` (pi als Writer, Standard claude-opus-4-7 via pi-claude-bridge)
-- `/pair ~/code/myapp main eu-only --writer-agent pi --pi-provider cortecs --pi-model qwen3-coder-next` (pi mit EU/ZDR-Stack via Cortecs)
+- `/pair ~/code/myapp main pi-experiment --writer-agent pi` (pi als Writer, Default cortecs/qwen3-coder-next, günstige EU-Bulk-Lane)
+- `/pair ~/code/myapp main pi-bridge --writer-agent pi --pi-provider claude-bridge --pi-model claude-opus-4-7` (pi via Anthropic-Subscription)
 
 ## Optional flags
 
@@ -50,9 +50,9 @@ suites, or independent fix branches when that keeps their main pane lean.
 - `--interactive` (default off): aktiviert Decision-Pause-Points im Master-Briefing. Ohne Flag laufen alle V2-Self-Decisions autonom mit Log im COMPLETE-Ping. Mit Flag hält der Master vor jeder Self-Decision an und fragt den User via AskUserQuestion.
 - `--claude-model <slug>`: claude model to switch into post-boot via `/model <slug>` (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically. Codex pane boot follows the user's configured CLI default; engineer subagent defaults are documented in the workflow briefing.
 - `--claude-effort <level>`: claude reasoning effort, set as `--effort <level>` in the claude boot-command (default `max`). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies). The CLI flag is race-free vs. the `/effort` slash-command after a `/model` switch.
-- `--writer-agent <name>` / `--reviewer-agent <name>`: Agent-Wahl pro Rolle. Erlaubt: `claude` (Default Reviewer), `codex` (Default Writer), `pi` (Custom CLI mit pi-claude-bridge als Default-Backend, alle drei Rollen unterstützt).
-- `--pi-model <slug>`: pi-Model-Slug für jedes pi-Pane (default `claude-opus-4-7` via Default-Provider `claude-bridge`). Wird als `--model <slug>` im pi-Boot gesetzt. Alternative Slugs aus dem User-Catalog: `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-5.3-codex`, `gpt-5.5`, `glm-5.1`, `deepseek-v3.2`.
-- `--pi-provider <name>`: pi-Provider (default `claude-bridge`). Alternativen: `openai-codex` für Codex-Stack, `cortecs` für EU/OSS-Stack, `anthropic` für direkte API (sofern Key konfiguriert).
+- `--writer-agent <name>` / `--reviewer-agent <name>`: Agent-Wahl pro Rolle. Erlaubt: `claude` (Default Reviewer), `codex` (Default Writer), `pi` (Custom CLI mit Cortecs als Default-Backend für günstige Bulk-Work, alle drei Rollen unterstützt).
+- `--pi-model <slug>`: pi-Model-Slug für jedes pi-Pane (default `qwen3-coder-next` via Default-Provider `cortecs`, EU Pay-per-Use). Wird als `--model <slug>` im pi-Boot gesetzt. Alternative Slugs: `glm-4.6` (mid), `glm-4.7` (planner), `glm-5.1` (top), `kimi-k2.6` (code), `deepseek-v4-pro` (reasoning), oder via `--pi-provider claude-bridge` mit `claude-opus-4-7` / `claude-sonnet-4-6` / `claude-haiku-4-5`.
+- `--pi-provider <name>`: pi-Provider (default `cortecs`). Alternativen: `claude-bridge` für Anthropic-Subscription, `openai-codex` für Codex-Stack, `anthropic` für direkte API (sofern Key konfiguriert).
 - `--pi-thinking <level>`: pi-Reasoning-Level (default `high`). Choices: `off|minimal|low|medium|high|xhigh`. Wird als `--thinking <level>` im pi-Boot gesetzt. Äquivalent zu `--claude-effort`, aber andere Skala.
 - `--pi-<role>-model <slug>` / `--pi-<role>-thinking <level>`: pro-Rolle Override für pi-Panes. Rollen: `writer`, `reviewer`, `reviewer-2` (mit `--dual-review`). Wenn gesetzt, gewinnt die Rolle-Variante gegenüber `--pi-model` / `--pi-thinking`. Beispiel: `--writer-agent pi --pi-writer-model deepseek-v4-pro --reviewer-2-agent pi --pi-reviewer-2-model kimi-k2.6` startet Writer mit deepseek und Reviewer-2 mit kimi.
 - `--dual-review`: opt-in second reviewer. Spawns reviewer-1 (claude by default) and reviewer-2 (codex by default) stacked vertically on the right side. Both review independently, swap findings, then send a final report each to the human (= orchestrator in pair-mode) for consolidation. Off by default.

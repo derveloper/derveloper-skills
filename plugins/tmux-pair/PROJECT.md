@@ -99,3 +99,9 @@ for cross-pane messaging, compaction, monitoring, and cleanup.
   Orch-Decision-Threshold mit Decision-Log im COMPLETE, V3 Adaptive
   GATE-Strictness per task_kind, V4 WARNING/NOTE-Auto-Resolve, V5
   Unattended-Default mit --interactive Flag).
+- 0.13.x: Pi engineer default switched back to Cortecs, this time
+  `cortecs/qwen3-coder-next` (256k ctx, coder-spec, ~0.15/0.80 EUR per 1M
+  tokens). Anthropic-API-Pricing-Druck macht Cortecs-Bulk-Work attraktiv;
+  Quality kommt aus Review-Loop (Reviewer/Orchestrator bleiben claude
+  bzw. claude-bridge/claude-opus-4-7 als Top-Gate). Anthropic-Subscription
+  weiter via `--pi-provider claude-bridge --pi-model claude-opus-4-7`.
