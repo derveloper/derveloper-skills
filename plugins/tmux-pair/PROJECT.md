@@ -59,6 +59,12 @@ for cross-pane messaging, compaction, monitoring, and cleanup.
   rate limits. Claude continues through the Task tool and subagent definitions.
 - Version fields in `plugin.json`, `.claude-plugin/marketplace.json`, and the
   orchestration skill frontmatter must stay aligned for plugin updates.
+- Pi engineer panes boot in a minimal mode by default (`PI_BASELINE_DISABLED=1
+  PI_MEMORY_DISABLED=1 PI_MODE_DISABLED=1`) so the user's main-Pi workflow
+  extensions (baseline system-prompt, MEMORY.md auto-load, /mode layer) do not
+  contaminate engineer context. Durable standards arrive via
+  `--append-system-prompt` regardless. Opt-out for a full-stack engineer Pi:
+  `TMUX_PAIR_PI_FULL=1`.
 
 ## Implementation History
 
@@ -66,3 +72,7 @@ for cross-pane messaging, compaction, monitoring, and cleanup.
   model-aware compaction, and dual-review support.
 - 0.10.0: Added engineer subagent strategy, required explicit parallel-plan
   markers at GATE 2, and automatic sender identity prefixes for `send` pings.
+- 0.11.x: Added Pi as third engineer-agent (`--writer-agent pi` etc.) with
+  per-role provider/model/thinking overrides; Pi engineer panes default to
+  minimal extension-stack via `env PI_BASELINE_DISABLED=1 PI_MEMORY_DISABLED=1
+  PI_MODE_DISABLED=1`, opt-out via `TMUX_PAIR_PI_FULL=1`.

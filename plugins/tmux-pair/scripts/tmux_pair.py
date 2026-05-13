@@ -1259,7 +1259,17 @@ def _boot_command_with_standards(
         return " ".join(parts)
     if agent == "pi" and boot_tokens[0] == "pi":
         standards_path = _write_durable_standards_file(window_name, role)
-        parts = [boot]
+        # Engineer-Pi-Panes booten per Default minimal: baseline / memory /
+        # mode-Extensions disabled, damit der Engineer-Kontext nicht mit
+        # Haupt-Pi-State (MEMORY.md, the user-Defaults, aktive Modes)
+        # vollläuft. Durable Standards kommen via --append-system-prompt
+        # ohnehin rein. Opt-out für vollen Boot: TMUX_PAIR_PI_FULL=1.
+        parts: list[str] = []
+        if not os.environ.get("TMUX_PAIR_PI_FULL"):
+            parts.append(
+                "env PI_BASELINE_DISABLED=1 PI_MEMORY_DISABLED=1 PI_MODE_DISABLED=1"
+            )
+        parts.append(boot)
         if pi_provider:
             parts.append(f"--provider {shlex.quote(pi_provider)}")
         if pi_model:
