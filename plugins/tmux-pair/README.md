@@ -134,7 +134,9 @@ Net effect: ~60-70 percent token savings vs all-Opus subagents, no quality loss 
   typo, or missing-doc patches as `INLINE-FIX`; writers apply and ACK with
   `applied B<N> inline-fix (X lines)`.
 - V2 Orchestrator-Direct-Decision-Threshold: small repo-pattern decisions run
-  autonomously by default and every self-decision is logged in `COMPLETE`.
+  autonomously by default and every self-decision is logged in `COMPLETE` AND
+  persisted as a row in the consumer repo's `PROJECT.md` Implementation
+  History. The triple is not complete without that `PROJECT.md` entry.
 - V3 Adaptive GATE-Strictness: `task_kind` is `bug-fix`, `feature`, or
   `refactor`; GATE 2 and GATE 3 verifier adapt deterministic checklist items
   per class.

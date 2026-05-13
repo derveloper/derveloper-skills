@@ -116,7 +116,7 @@ The full workflow with subagent prompt templates, gate event vocabulary, and fai
 
 ## Smart workflow (V1-V5)
 
-The workflow is unattended by default. The orchestrator or pair master handles small, reversible decisions inside the documented threshold, logs every self-decision in `COMPLETE`, and only pauses for decisions that change scope, budget, external dependencies, or security posture. Pass `--interactive` to `/pair` or `/triple` when the user wants every self-decision to become a pause point.
+The workflow is unattended by default. The orchestrator or pair master handles small, reversible decisions inside the documented threshold, logs every self-decision in `COMPLETE` AND persists every self-decision in the consumer repo's `PROJECT.md` under Implementation History, and only pauses for decisions that change scope, budget, external dependencies, or security posture. Pass `--interactive` to `/pair` or `/triple` when the user wants every self-decision to become a pause point.
 
 ### V1 Reviewer-Trivial-Fix-Inline
 
@@ -156,7 +156,7 @@ Writer behavior: apply the patch silently with `git apply`, then ACK `applied B<
 | Plan revision after GATE-2-BLOCKER with clear fix direction | Self-decide and send the revised plan. |
 | Budget, stakeholder approval, external service status, real scope expansion, security trade-off | Escalate to the user. |
 
-Every self-decision is recorded in the final `COMPLETE` ping as a one-line rationale. This is a full audit trail, not a sample.
+Every self-decision is recorded in the final `COMPLETE` ping as a one-line rationale AND persisted as a row in the consumer repo's `PROJECT.md` under a new Implementation-History phase heading (with phase marker, implementation anchor SHA, and a Markdown table of `ID | Decision | Rationale`). This is a full audit trail, not a sample. The `COMPLETE` ping is ephemeral context; `PROJECT.md` is the permanent record. A triple is not considered complete without the `PROJECT.md` entry.
 
 ### V3 Adaptive GATE-Strictness
 
@@ -178,7 +178,7 @@ GATE 3 verdicts use three severities:
 
 ### V5 Unattended-Default
 
-Default mode is unattended in both pair and triple. Without `--interactive`, V2 self-decisions proceed autonomously and are logged in `COMPLETE`. With `--interactive`, the orchestrator or pair master pauses before every self-decision and asks the user via `AskUserQuestion`. The flag changes briefing text only; it does not add a Python runtime branch after spawn.
+Default mode is unattended in both pair and triple. Without `--interactive`, V2 self-decisions proceed autonomously and are logged in both `COMPLETE` and `PROJECT.md`. With `--interactive`, the orchestrator or pair master pauses before every self-decision and asks the user via `AskUserQuestion`. The flag changes briefing text only; it does not add a Python runtime branch after spawn.
 
 ## Pair protocol (the core loop)
 

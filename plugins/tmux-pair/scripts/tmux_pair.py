@@ -1229,6 +1229,12 @@ DECISION_THRESHOLD_BLOCK = (
     "  - echte Scope-Erweiterung\n"
     "  - Sicherheits-Tradeoff\n"
     "ALLE Self-Decisions kommen in COMPLETE, nicht nur Beispiele.\n"
+    "PERSISTENZ-PFLICHT: ALLE Self-Decisions zusätzlich als Tabelle in\n"
+    "PROJECT.md unter Implementation-History (Phase-Heading mit Datum +\n"
+    "Phase-Marker + Implementation-Anchor SHA) eintragen. Spalten:\n"
+    "ID, Decision, Rationale. COMPLETE-Ping ist ephemeral, PROJECT.md ist\n"
+    "der dauerhafte Audit-Trail. Ohne PROJECT.md-Eintrag gilt der Triple\n"
+    "als nicht abgeschlossen.\n"
 )
 
 INLINE_FIX_SPEC_BLOCK = (

@@ -21,7 +21,7 @@ In a triple the orchestrator owns the `AskUserQuestion` call so the human stays 
 
 ## Smart workflow (V1-V5)
 
-The smart workflow makes the gated run adaptive by `task_kind` while keeping the audit trail explicit. The orchestrator or pair master classifies every task during recon as `bug-fix`, `feature`, or `refactor`, passes that value to GATE 2 and GATE 3 subagents, and includes all self-decisions in the final `COMPLETE` ping.
+The smart workflow makes the gated run adaptive by `task_kind` while keeping the audit trail explicit. The orchestrator or pair master classifies every task during recon as `bug-fix`, `feature`, or `refactor`, passes that value to GATE 2 and GATE 3 subagents, includes all self-decisions in the final `COMPLETE` ping, AND persists every self-decision as a `PROJECT.md` Implementation-History row before the triple is considered complete.
 
 ### V1 Reviewer-Trivial-Fix-Inline
 
@@ -71,10 +71,11 @@ User-escalated decisions:
 - real scope expansion
 - security trade-off
 
-All self-decisions are listed in `COMPLETE` with one-line rationale. This includes decisions that felt obvious.
+All self-decisions are listed in `COMPLETE` with one-line rationale AND persisted as rows in the consumer repo's `PROJECT.md` under a new Implementation-History phase heading (with phase marker, implementation anchor SHA, and a Markdown table of `ID | Decision | Rationale`). This includes decisions that felt obvious. The `COMPLETE` ping is ephemeral; `PROJECT.md` is the permanent record.
 
 Failure modes:
 - Hidden self-decision: final `COMPLETE` is incomplete and GATE 3 can ask for the missing log.
+- Missing `PROJECT.md` Implementation-History row: GATE 3 verifier blocks the triple until the row exists.
 - Trivia escalation: slows unattended mode and trains humans to ignore real pings.
 - Scope expansion classified as self-decision: stop and escalate through `AskUserQuestion`.
 
@@ -105,7 +106,7 @@ Failure modes:
 
 ### V5 Unattended-Default
 
-Default mode is unattended in both pair and triple. Without `--interactive`, V2 self-decisions are made autonomously and logged in `COMPLETE`. With `--interactive`, the orchestrator or pair master pauses before every self-decision and asks the user via `AskUserQuestion`.
+Default mode is unattended in both pair and triple. Without `--interactive`, V2 self-decisions are made autonomously and recorded in both `COMPLETE` and `PROJECT.md`. With `--interactive`, the orchestrator or pair master pauses before every self-decision and asks the user via `AskUserQuestion`.
 
 This is briefing-text behavior. The Python runtime only carries the flag into generated briefings; it does not manage decision pauses after spawn.
 
