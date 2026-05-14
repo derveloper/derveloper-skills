@@ -115,6 +115,60 @@ Failure modes:
 - `--interactive` affects triple but not pair, or pair but not triple: command docs and briefing wiring are inconsistent.
 - Decision is made in interactive mode without asking: missing pause point, re-brief the owner and log the incident.
 
+## Smart workflow (V6-V10)
+
+V6-V10 add caching, trust-chains, and inline decisions for trivial plans. All additive: the classic flow continues to work; smart-features kick in only when caches are warm or thresholds match. Two new spawn flags govern opt-out: `--no-cache` disables V6 (readiness) + V9 (recon) caches; `--no-shared-target` disables V8 (CARGO_TARGET_DIR sharing).
+
+### V6 Readiness-Cache
+
+The reviewer-readiness-check is the most repetitive gate. V6 caches the verdict for 24h keyed by (rules-content-hash, commit-sha).
+
+- Storage: `~/.cache/tmux-pair/readiness/<repo-slug>-<rules-hash[:16]>-<commit>.json`.
+- Payload: `{verdict, timestamp, missing-items, languages}`.
+- Cache-Hit on PASS: orchestrator skips the subagent spawn and logs `readiness cached from <ts>`.
+- Cache-Miss or stale: normal subagent flow. On PASS the orchestrator writes the cache (atomic same-dir tmp+rename).
+- `NEEDS-RULES` is never cached: the bootstrap loop must always run when rules are missing.
+- Cache-Bust: `--no-cache`, or `rm ~/.cache/tmux-pair/readiness/<file>`.
+
+### V7 Test-Trust-Chain
+
+Writer commits append a `TESTS-PROOF:` block to the commit-message body with the test/lint/fmt result lines and `COMMIT_SHA: <sha>`. `gate-3-verifier` parses the block via `python3 scripts/tmux_pair.py parse-tests-proof --commit HEAD` (or directly via `git log -1 --format=%B`):
+
+- HEAD == `COMMIT_SHA`: trust, skip re-run, log.
+- HEAD moved past `COMMIT_SHA`: re-run + WARNING `test-marker stale`.
+- Marker missing on a 0.14+ run: BLOCKER `missing test-marker`.
+- Marker missing on a legacy commit (pre-0.14 session): re-run + WARNING `legacy commit, no marker`.
+
+Reviewer panes inside the loop trust the marker for spot-checks too. They may still re-run targeted tests on touched files.
+
+### V8 Cargo-Target-Sharing
+
+`cmd_pair`/`cmd_triple` compute `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>/` (slug = basename, non-alphanumeric replaced by `_`) and prepend `env CARGO_TARGET_DIR=<path>` to every spawned boot command. Non-Cargo repos skip the env entirely. `--no-shared-target` disables sharing per spawn.
+
+Parallel worktrees on the same repo share the build cache. Cargo's own lock-file handles concurrency; occasional short blocks are normal.
+
+### V9 Recon-Cache with Delta-Mode
+
+Orchestrator recon output (file map, crate list, PROJECT.md snapshot, key-function inventory) is dumped as JSON to `/tmp/tmux-pair-recon-<repo-slug>-<commit-sha>.json` with 1h TTL.
+
+- Subsequent triple spawns on the same commit read the cache and only re-scan files with `mtime > cache-time` (delta-mode).
+- Cache-Bust: `--no-cache`, or `rm /tmp/tmux-pair-recon-*`.
+
+### V10 Inline-Gates for Trivial Plans
+
+`task_kind=bug-fix` + bullets <= 3 + predicted files-touched <= 5 lets the orchestrator run GATE 2 inline using a built-in 8-item checklist instead of spawning the gate-2-plan-check subagent. The Python helper `inline-gate-decide --plan-file <path> --task-kind bug-fix` returns the deterministic decision payload (`{inline, bullets, files_predicted, reason, ...}`).
+
+- `gate-3-verifier` may also run inline under the same trivial-plan condition AND a valid TESTS-PROOF marker for HEAD.
+- `gate-3-code-reviewer` always stays in a subagent: adversarial review benefits from a fresh context.
+- Anti-Triggers (force the subagent path): dirty worktree, formatter failures, ambiguous plan text, `task_kind` in (`feature`, `refactor`).
+
+Failure modes:
+- **Stale readiness cache.** Rules edited but cache-hit returned old verdict: hash collision (slug + 16-hex prefix). Recovery: `--no-cache` for the affected spawn, then re-check. Prevention: keep the rules-content-hash deterministic (sorted glob, file-bytes only).
+- **TESTS-PROOF marker missing on 0.14+ commit.** Writer forgot the block. BLOCKER in GATE 3, fix-loop fixes by amending the bullet commit with the proper marker. Prevention: writer briefing template includes the marker block as a copy-paste skeleton.
+- **fmt-drift from shared target.** `cargo fmt` on a shared CARGO_TARGET_DIR sometimes triggers a rebuild for sibling worktrees on first run after rust-toolchain changes. Recovery: let cargo build re-warm; no functional problem. Prevention: keep `rust-toolchain.toml` consistent across worktrees.
+- **Falsch-positive Trivial-Plan-Detection.** `_predict_files_touched` overcounts (prose with file-paths) or undercounts (bullets referencing files only by description). Inline-mode only triggers below the threshold, so undercounting is the risky direction. Recovery: orchestrator should add explicit `Files zu ändern:` blocks in plans to make the regex prediction stable. Prevention: keep `bug-fix` as the only inline-eligible task_kind for now.
+- **Recon-cache hits on stale `/tmp`.** Reboot wipes `/tmp` on macOS but not on Linux; an old recon snapshot can outlive the source tree. Recovery: `--no-cache`. Prevention: 1h TTL is short enough that drift is bounded.
+
 ## Gate 1: Clarify
 
 **Goal:** validate assumptions and resolve open points BEFORE planning. Empty user input on day one is the most expensive failure mode in a long pair-run.

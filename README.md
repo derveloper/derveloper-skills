@@ -4,7 +4,7 @@ Personal Claude Code plugin marketplace.
 
 ## Plugins
 
-- **[tmux-pair](plugins/tmux-pair/)** — Spawn writer/reviewer agent pairs (or writer/reviewer/orchestrator triples) in fresh git worktrees, wired up via tmux.
+- **[tmux-pair](plugins/tmux-pair/)** (v0.14.0) — Spawn writer/reviewer agent pairs (or writer/reviewer/orchestrator triples) in fresh git worktrees, wired up via tmux. Features: 5-gate workflow, V1-V5 smart-workflow primitives (inline-fix, decision-threshold, adaptive strictness, BLOCKER/WARNING/NOTE, unattended default), V6-V10 caching + trust-chains (readiness-cache, TESTS-PROOF marker, cargo-target sharing, recon-cache with delta, inline-gates for trivial plans), PROJECT.md care, durable standards, parallel-plan markers, dual-review.
 
 ## Install
 

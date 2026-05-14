@@ -143,6 +143,273 @@ def slugify(s: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "-", s.strip().lstrip("/"))
 
 
+# ---------------------------------------------------------------------------
+# V6-V10 smart-workflow primitives: caches, TESTS-PROOF parser, inline-gate
+# predictor. All self-contained helpers, no tmux dependency. Tested via the
+# new `parse-tests-proof` and `inline-gate-decide` subcommands plus
+# import-smoke (see tmux-pair PROJECT.md 0.14.0 implementation history).
+# ---------------------------------------------------------------------------
+
+import hashlib  # local import keeps top-of-file lean for legacy readers
+
+
+# V6 + V9: cache locations.
+READINESS_CACHE_DIR = Path.home() / ".cache" / "tmux-pair" / "readiness"
+RECON_CACHE_DIR = Path("/tmp")
+# V8: cargo target sharing.
+CARGO_TARGET_BASE = Path.home() / ".cache" / "tmux-pair" / "cargo-target"
+
+# V6 readiness-cache TTL: 24h. Below this and an identical (rules-hash, commit)
+# pair returns the prior VERDICT without spawning the subagent again.
+READINESS_TTL_SECONDS = 24 * 60 * 60
+
+# V9 recon-cache TTL: 1h. Recon snapshots (file map, crate list, key-function
+# inventory) reuse within an hour as long as the commit-sha matches.
+RECON_TTL_SECONDS = 60 * 60
+
+
+def _cache_repo_slug(repo_root: Path) -> str:
+    """Return a filesystem-safe slug for a repo, per V8 convention:
+    basename of the repo path with non-alphanumeric characters replaced by `_`.
+
+    Distinct from the existing `slugify()` (which uses hyphens and is meant
+    for tmux window-names): cache filenames use underscores so they survive
+    shell-glob and tmux-quoting without escaping.
+    """
+    base = Path(repo_root).resolve().name or "repo"
+    return re.sub(r"[^A-Za-z0-9]", "_", base)
+
+
+def _rules_content_hash(rules_dir: Path) -> str:
+    """Stable sha256 of `.claude/rules/*.md` content, sorted by filename.
+
+    Empty directory or missing path returns the sha256 of the empty string,
+    so the cache key still varies with the commit-sha alone.
+    """
+    h = hashlib.sha256()
+    if rules_dir.is_dir():
+        files = sorted(p for p in rules_dir.glob("*.md") if p.is_file())
+        for f in files:
+            try:
+                h.update(f.name.encode("utf-8") + b"\0")
+                h.update(f.read_bytes())
+                h.update(b"\0")
+            except OSError:
+                continue
+    return h.hexdigest()
+
+
+def _readiness_cache_path(slug: str, rules_hash: str, commit: str) -> Path:
+    short_hash = (rules_hash or "")[:16] or "nohash"
+    short_commit = (commit or "nocommit")[:40]
+    fname = f"{slug}-{short_hash}-{short_commit}.json"
+    return READINESS_CACHE_DIR / fname
+
+
+def _recon_cache_path(slug: str, commit: str) -> Path:
+    short_commit = (commit or "nocommit")[:40]
+    fname = f"tmux-pair-recon-{slug}-{short_commit}.json"
+    return RECON_CACHE_DIR / fname
+
+
+def _load_cache(path: Path, ttl_seconds: int) -> dict | None:
+    """Return parsed JSON if file exists, parses, and is fresh; else None.
+
+    Freshness is measured against the file mtime, not a payload field, so
+    cache-bust = `rm`. JSON-parse failures are silent (treated as miss) to
+    keep cache problems from blocking the workflow.
+    """
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    if ttl_seconds > 0 and (time.time() - st.st_mtime) > ttl_seconds:
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _save_cache(path: Path, data: dict) -> None:
+    """Atomic write: serialise to `<path>.tmp` in the same directory, then
+    rename. Same-dir rename avoids cross-device-link errors and stays atomic
+    on POSIX. Parent directories are created on demand.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True),
+                   encoding="utf-8")
+    tmp.replace(path)
+
+
+def _cargo_target_dir(repo_root: Path, no_shared: bool) -> Path | None:
+    """V8 shared cargo target directory or None (per-worktree default).
+
+    Returns None when --no-shared-target is set or when the project clearly
+    isn't a cargo workspace (no Cargo.toml within two levels). Callers that
+    set CARGO_TARGET_DIR for non-Rust projects don't break anything (cargo
+    just ignores the env), but skipping the prepend keeps the boot command
+    readable.
+    """
+    if no_shared:
+        return None
+    root = Path(repo_root).resolve()
+    has_cargo = (root / "Cargo.toml").is_file() or any(
+        (root / sub).is_dir() and (root / sub / "Cargo.toml").is_file()
+        for sub in ("crates", "src-tauri", "rust")
+    )
+    if not has_cargo:
+        return None
+    return CARGO_TARGET_BASE / _cache_repo_slug(root)
+
+
+# V7 TESTS-PROOF marker schema (parsed from commit-message bodies).
+#
+#   TESTS-PROOF:
+#     <test-cmd>: PASS (<N> tests)
+#     <lint-cmd>: clean
+#     <fmt-cmd>: clean
+#     COMMIT_SHA: <sha>
+#
+# Writer appends this block to the commit message (in addition to the
+# DONE-Ping that lands in the reviewer pane). gate-3-verifier reads the
+# block via `git log --format=%B` so it can trust-and-skip Re-Runs when
+# HEAD == COMMIT_SHA. Legacy commits without the block trigger a Re-Run
+# with WARNING (kein BLOCKER, backward-compat for pre-0.14 sessions).
+TESTS_PROOF_HEADER_RE = re.compile(r"^TESTS-PROOF:\s*$", re.MULTILINE)
+TESTS_PROOF_FIELD_RE = re.compile(
+    r"^\s+(?P<key>[A-Za-z_][\w./+-]*):\s+(?P<value>.+?)\s*$", re.MULTILINE
+)
+TESTS_PROOF_COMMIT_RE = re.compile(
+    r"^\s+COMMIT_SHA:\s+(?P<sha>[0-9a-fA-F]{7,40})\s*$", re.MULTILINE
+)
+
+
+def _parse_tests_proof(commit_body: str) -> dict | None:
+    """Parse a TESTS-PROOF block from a commit message body.
+
+    Returns a dict with at least `commit_sha` (str) and `entries`
+    (list of {key, value} dicts) if the block is present and contains a
+    COMMIT_SHA line. Returns None otherwise.
+
+    The parser is forgiving: extra blank lines and unknown keys are kept in
+    `entries`, only the COMMIT_SHA line is structurally required. Other
+    lines must be indented at least one space so the block-end is clear.
+    """
+    if not commit_body:
+        return None
+    header = TESTS_PROOF_HEADER_RE.search(commit_body)
+    if header is None:
+        return None
+    tail = commit_body[header.end():]
+    end_idx = len(tail)
+    for m in re.finditer(r"^(?!\s)(?!\s*$).+$", tail, re.MULTILINE):
+        end_idx = m.start()
+        break
+    block = tail[:end_idx]
+    sha_match = TESTS_PROOF_COMMIT_RE.search(block)
+    if sha_match is None:
+        return None
+    entries: list[dict] = []
+    for field in TESTS_PROOF_FIELD_RE.finditer(block):
+        key = field.group("key")
+        if key == "COMMIT_SHA":
+            continue
+        entries.append({"key": key, "value": field.group("value")})
+    return {
+        "commit_sha": sha_match.group("sha"),
+        "entries": entries,
+    }
+
+
+# V10 inline-gate predictor: predicts the number of distinct files mentioned
+# in a plan text and counts top-level bullets. Used by the orchestrator to
+# decide whether the trivial-plan branch (inline GATE 2 + inline GATE 3
+# verifier) is safe to take.
+_BACKTICK_PATH_RE = re.compile(r"`([^`\n]+\.[A-Za-z0-9]+)`")
+_BARE_PATH_RE = re.compile(
+    r"(?<![\w./])([A-Za-z0-9_./\-]+/[A-Za-z0-9_./\-]+\.[A-Za-z0-9]{1,8})"
+)
+_PLAN_BULLET_RE = re.compile(r"^\s*B(\d+)\b", re.MULTILINE)
+
+
+def _predict_files_touched(plan_text: str) -> int:
+    """Predict how many distinct files a plan touches.
+
+    Heuristic: collect (a) every backtick-quoted token that contains a dot
+    and looks like a path, plus (b) every bare token of the form
+    `dir/sub/file.ext`. De-duplicate and return the count. False positives
+    (e.g. `function.name` in prose) are accepted because the inline-mode
+    decision falls back to the safer subagent branch whenever the count
+    exceeds the threshold.
+    """
+    if not plan_text:
+        return 0
+    found: set[str] = set()
+    for m in _BACKTICK_PATH_RE.finditer(plan_text):
+        token = m.group(1).strip()
+        if "/" in token or token.startswith("."):
+            found.add(token)
+    for m in _BARE_PATH_RE.finditer(plan_text):
+        found.add(m.group(1))
+    return len(found)
+
+
+def _count_plan_bullets(plan_text: str) -> int:
+    """Return the number of distinct top-level plan bullets (B1, B2, ...).
+
+    Counts unique B<N> tokens at line start. Robust against bullets being
+    discussed inline in prose (e.g. ``B3 || B4 [parallel]``) because that
+    line still has a leading-anchored B-token.
+    """
+    if not plan_text:
+        return 0
+    seen: set[str] = set()
+    for m in _PLAN_BULLET_RE.finditer(plan_text):
+        seen.add(m.group(1))
+    return len(seen)
+
+
+def _inline_gate_decision(task_kind: str, plan_text: str,
+                          max_bullets: int = 3,
+                          max_files: int = 5) -> dict:
+    """V10 trivial-plan decision payload.
+
+    Returns a dict describing whether the orchestrator may run GATE 2 (and
+    the GATE 3 verifier) inline rather than via a subagent. The caller logs
+    the dict and reads `inline` to branch. `reason` is human-readable.
+    """
+    bullets = _count_plan_bullets(plan_text)
+    files = _predict_files_touched(plan_text)
+    eligible = (task_kind == "bug-fix"
+                and 0 < bullets <= max_bullets
+                and 0 < files <= max_files)
+    if eligible:
+        reason = (f"task_kind=bug-fix, bullets={bullets}<={max_bullets}, "
+                  f"files_predicted={files}<={max_files}")
+    else:
+        reasons = []
+        if task_kind != "bug-fix":
+            reasons.append(f"task_kind={task_kind!r} requires bug-fix")
+        if not (0 < bullets <= max_bullets):
+            reasons.append(f"bullets={bullets} not in 1..{max_bullets}")
+        if not (0 < files <= max_files):
+            reasons.append(f"files_predicted={files} not in 1..{max_files}")
+        reason = "; ".join(reasons) or "fallback to subagent"
+    return {
+        "inline": eligible,
+        "task_kind": task_kind,
+        "bullets": bullets,
+        "files_predicted": files,
+        "max_bullets": max_bullets,
+        "max_files": max_files,
+        "reason": reason,
+    }
+
+
 def _probe_for(text: str) -> str:
     """Return a verification probe: last 40 chars of the last non-empty line.
     Used to detect whether a TUI swallowed Enter while busy with a tool call."""
@@ -1367,6 +1634,7 @@ def _boot_command_with_standards(
     pi_model: str = DEFAULT_PI_MODEL,
     pi_thinking: str = DEFAULT_PI_THINKING,
     display_name: str = "",
+    cargo_target_dir: Path | None = None,
 ) -> str:
     """Build the boot command for an agent.
 
@@ -1391,7 +1659,7 @@ def _boot_command_with_standards(
     boot = agents_dict[agent]
     boot_tokens = shlex.split(boot)
     if not boot_tokens:
-        return boot
+        return _wrap_with_cargo_env(boot, cargo_target_dir)
     if agent == "claude" and boot_tokens[0] == "claude":
         standards_path = _write_durable_standards_file(window_name, role)
         parts = [boot]
@@ -1404,7 +1672,7 @@ def _boot_command_with_standards(
         parts.append(
             f"--append-system-prompt-file {shlex.quote(str(standards_path))}"
         )
-        return " ".join(parts)
+        return _wrap_with_cargo_env(" ".join(parts), cargo_target_dir)
     if agent == "pi" and boot_tokens[0] == "pi":
         standards_path = _write_durable_standards_file(window_name, role)
         # Engineer-Pi-Panes booten per Default minimal: baseline / memory /
@@ -1427,8 +1695,22 @@ def _boot_command_with_standards(
         parts.append(
             f"--append-system-prompt {shlex.quote(str(standards_path))}"
         )
-        return " ".join(parts)
-    return boot
+        return _wrap_with_cargo_env(" ".join(parts), cargo_target_dir)
+    return _wrap_with_cargo_env(boot, cargo_target_dir)
+
+
+def _wrap_with_cargo_env(boot_cmd: str, cargo_target_dir: Path | None) -> str:
+    """Prepend `env CARGO_TARGET_DIR=<path>` to a boot command when V8 is on.
+
+    When `cargo_target_dir` is None (e.g. --no-shared-target or non-Cargo
+    project) the boot command is returned unchanged. The prefix uses
+    `env KEY=VALUE -- ...` form so existing `env PI_*=1` prefixes still work
+    (the outer `env` augments the environment for the inner `env`).
+    """
+    if cargo_target_dir is None:
+        return boot_cmd
+    cargo_target_dir.mkdir(parents=True, exist_ok=True)
+    return f"env CARGO_TARGET_DIR={shlex.quote(str(cargo_target_dir))} {boot_cmd}"
 
 
 def _worktree_gitdir(wt_path: Path) -> Path | None:
@@ -2270,6 +2552,9 @@ def cmd_pair(args: argparse.Namespace) -> int:
     project, wt_path, branch, window_name, human_pane = _common_pair_setup(args)
     session = current_session()
 
+    no_shared_target = bool(getattr(args, "no_shared_target", False))
+    cargo_target = _cargo_target_dir(project, no_shared_target)
+
     writer_name = f"wr.{window_name}"
     reviewer_name = f"rv1.{window_name}" if dual else f"rv.{window_name}"
     reviewer_2_name = f"rv2.{window_name}" if dual else None
@@ -2286,6 +2571,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
             window_name=window_name, role="writer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            cargo_target_dir=cargo_target,
             pi_provider=pi_writer_provider,
             pi_model=pi_writer_model,
             pi_thinking=pi_writer_thinking,
@@ -2301,6 +2587,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
             window_name=window_name, role="reviewer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            cargo_target_dir=cargo_target,
             pi_provider=pi_reviewer_provider,
             pi_model=pi_reviewer_model,
             pi_thinking=pi_reviewer_thinking,
@@ -2320,6 +2607,7 @@ def cmd_pair(args: argparse.Namespace) -> int:
                 window_name=window_name, role="reviewer",
                 claude_effort=args.claude_effort,
                 claude_model=args.claude_model,
+                cargo_target_dir=cargo_target,
                 pi_provider=pi_reviewer_2_provider,
                 pi_model=pi_reviewer_2_model,
                 pi_thinking=pi_reviewer_2_thinking,
@@ -2435,6 +2723,9 @@ def cmd_triple(args: argparse.Namespace) -> int:
     project, wt_path, branch, window_name, human_pane = _common_pair_setup(args)
     session = current_session()
 
+    no_shared_target = bool(getattr(args, "no_shared_target", False))
+    cargo_target = _cargo_target_dir(project, no_shared_target)
+
     orchestrator_name = f"or.{window_name}"
     writer_name = f"wr.{window_name}"
     reviewer_name = f"rv1.{window_name}" if dual else f"rv.{window_name}"
@@ -2454,6 +2745,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
             window_name=window_name, role="orchestrator",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            cargo_target_dir=cargo_target,
             pi_provider=pi_orchestrator_provider,
             pi_model=pi_orchestrator_model,
             pi_thinking=pi_orchestrator_thinking,
@@ -2470,6 +2762,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
             window_name=window_name, role="writer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            cargo_target_dir=cargo_target,
             pi_provider=pi_writer_provider,
             pi_model=pi_writer_model,
             pi_thinking=pi_writer_thinking,
@@ -2485,6 +2778,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
             window_name=window_name, role="reviewer",
             claude_effort=args.claude_effort,
             claude_model=args.claude_model,
+            cargo_target_dir=cargo_target,
             pi_provider=pi_reviewer_provider,
             pi_model=pi_reviewer_model,
             pi_thinking=pi_reviewer_thinking,
@@ -2506,6 +2800,7 @@ def cmd_triple(args: argparse.Namespace) -> int:
                 window_name=window_name, role="reviewer",
                 claude_effort=args.claude_effort,
                 claude_model=args.claude_model,
+                cargo_target_dir=cargo_target,
                 pi_provider=pi_reviewer_2_provider,
                 pi_model=pi_reviewer_2_model,
                 pi_thinking=pi_reviewer_2_thinking,
@@ -2921,6 +3216,94 @@ def cmd_compact(args: argparse.Namespace) -> int:
     return cmd_send(send_args)
 
 
+def cmd_parse_tests_proof(args: argparse.Namespace) -> int:
+    """V7: parse a TESTS-PROOF marker block from a commit-message body.
+
+    Reads the body via `git log -1 --format=%B <commit-ish>` (default HEAD)
+    in `--repo` (default cwd), parses the marker, and prints JSON with:
+
+      {
+        "found": bool,
+        "commit_sha": "<sha or null>",
+        "head_matches": bool,    # True if parsed COMMIT_SHA == git rev-parse HEAD
+        "entries": [{"key": ..., "value": ...}, ...],
+        "head_sha": "<sha>",     # current HEAD for cross-check
+      }
+
+    gate-3-verifier invokes this via Bash to decide trust-vs-re-run for the
+    branch tip. Missing markers return found=false; verifier then chooses
+    Re-Run + WARNING (legacy backward-compat) per agents/gate-3-verifier.md.
+    """
+    repo = Path(args.repo).resolve()
+    rev = args.commit
+    body_proc = subprocess.run(
+        ["git", "-C", str(repo), "log", "-1", "--format=%B", rev],
+        capture_output=True, text=True,
+    )
+    if body_proc.returncode != 0:
+        print(json.dumps({
+            "found": False,
+            "error": body_proc.stderr.strip() or "git log failed",
+        }, indent=2))
+        return 1
+    head_proc = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True, text=True,
+    )
+    head_sha = head_proc.stdout.strip() if head_proc.returncode == 0 else ""
+
+    parsed = _parse_tests_proof(body_proc.stdout)
+    if parsed is None:
+        print(json.dumps({
+            "found": False,
+            "commit_sha": None,
+            "head_matches": False,
+            "entries": [],
+            "head_sha": head_sha,
+        }, indent=2))
+        return 0
+    head_matches = bool(head_sha) and (
+        parsed["commit_sha"] == head_sha
+        or head_sha.startswith(parsed["commit_sha"])
+        or parsed["commit_sha"].startswith(head_sha[:len(parsed["commit_sha"])])
+    )
+    print(json.dumps({
+        "found": True,
+        "commit_sha": parsed["commit_sha"],
+        "head_matches": head_matches,
+        "entries": parsed["entries"],
+        "head_sha": head_sha,
+    }, indent=2))
+    return 0
+
+
+def cmd_inline_gate_decide(args: argparse.Namespace) -> int:
+    """V10: decide whether the trivial-plan inline-mode applies for a plan.
+
+    Reads the plan text from `--plan-file <path>` (or stdin if `--plan-file -`),
+    derives bullet count + predicted files-touched, and prints the decision
+    payload returned by `_inline_gate_decision`. The orchestrator agent
+    invokes this via Bash before GATE 2 to learn whether it may run the
+    plan-check inline (bug-fix only, <=3 bullets, <=5 files predicted).
+
+    Anti-trigger conditions (dirty worktree, fmt-fail, ambiguous plan) are
+    NOT inferred here; the agent enforces them separately and only consults
+    this CLI for the deterministic count-thresholds.
+    """
+    if args.plan_file == "-":
+        plan_text = sys.stdin.read()
+    else:
+        plan_text = Path(args.plan_file).read_text(encoding="utf-8")
+    decision = _inline_gate_decision(
+        task_kind=args.task_kind,
+        plan_text=plan_text,
+        max_bullets=args.max_bullets,
+        max_files=args.max_files,
+    )
+    print(json.dumps(decision, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="tmux_pair", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -3042,6 +3425,15 @@ def build_parser() -> argparse.ArgumentParser:
                          "mit Flag hält Orch/Master vor jeder Self-Decision "
                          "an und fragt User via AskUserQuestion. Default off "
                          "(unattended-by-default).")
+    pa.add_argument("--no-cache", action="store_true",
+                    help="V6/V9: skip readiness-cache and recon-cache reads/writes "
+                         "for this run. Cache files on disk are left untouched. "
+                         "Default: cache enabled (24h readiness, 1h recon).")
+    pa.add_argument("--no-shared-target", action="store_true",
+                    help="V8: do not set CARGO_TARGET_DIR for spawned panes. "
+                         "Each agent builds into the worktree-local target/. "
+                         "Default: shared ~/.cache/tmux-pair/cargo-target/<slug>/ "
+                         "for Cargo projects; ignored for non-Rust repos.")
     pa.set_defaults(func=cmd_pair)
 
     tr = sub.add_parser("triple",
@@ -3129,6 +3521,15 @@ def build_parser() -> argparse.ArgumentParser:
                          "mit Flag hält Orch/Master vor jeder Self-Decision "
                          "an und fragt User via AskUserQuestion. Default off "
                          "(unattended-by-default).")
+    tr.add_argument("--no-cache", action="store_true",
+                    help="V6/V9: skip readiness-cache and recon-cache reads/writes "
+                         "for this run. Cache files on disk are left untouched. "
+                         "Default: cache enabled (24h readiness, 1h recon).")
+    tr.add_argument("--no-shared-target", action="store_true",
+                    help="V8: do not set CARGO_TARGET_DIR for spawned panes. "
+                         "Each agent builds into the worktree-local target/. "
+                         "Default: shared ~/.cache/tmux-pair/cargo-target/<slug>/ "
+                         "for Cargo projects; ignored for non-Rust repos.")
     tr.set_defaults(func=cmd_triple)
 
     li = sub.add_parser("list", help="list panes in the current session")
@@ -3177,6 +3578,27 @@ def build_parser() -> argparse.ArgumentParser:
     co.add_argument("--timeout", type=int, default=300,
                     help="max seconds to wait for compaction (default: 300)")
     co.set_defaults(func=cmd_compact)
+
+    pt = sub.add_parser("parse-tests-proof",
+                        help="V7: parse TESTS-PROOF marker from a commit body")
+    pt.add_argument("--repo", default=".",
+                    help="repo path (default: cwd)")
+    pt.add_argument("--commit", default="HEAD",
+                    help="commit-ish to inspect (default: HEAD)")
+    pt.set_defaults(func=cmd_parse_tests_proof)
+
+    ig = sub.add_parser("inline-gate-decide",
+                        help="V10: print JSON decision for trivial-plan inline-mode")
+    ig.add_argument("--plan-file", required=True,
+                    help="path to the plan text file, or '-' for stdin")
+    ig.add_argument("--task-kind", required=True,
+                    choices=["bug-fix", "feature", "refactor"],
+                    help="task classification from the orchestrator")
+    ig.add_argument("--max-bullets", type=int, default=3,
+                    help="upper bound for plan bullets (default: 3)")
+    ig.add_argument("--max-files", type=int, default=5,
+                    help="upper bound for predicted files-touched (default: 5)")
+    ig.set_defaults(func=cmd_inline_gate_decide)
 
     return p
 

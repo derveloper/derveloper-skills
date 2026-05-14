@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, PROJECT.md care, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), sender identity prefixes, explicit parallel-plan markers, engineer subagent strategy, bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.13.0
+version: 0.14.0
 ---
 
 # tmux-pair-orchestration
@@ -179,6 +179,71 @@ GATE 3 verdicts use three severities:
 ### V5 Unattended-Default
 
 Default mode is unattended in both pair and triple. Without `--interactive`, V2 self-decisions proceed autonomously and are logged in both `COMPLETE` and `PROJECT.md`. With `--interactive`, the orchestrator or pair master pauses before every self-decision and asks the user via `AskUserQuestion`. The flag changes briefing text only; it does not add a Python runtime branch after spawn.
+
+## Smart workflow (V6-V10)
+
+V6-V10 introduce caching, trust-chains, and inline decisions for trivial plans. All five are additive: every existing spawn continues to work; the smart-features only kick in when caches are present or thresholds are met. Two new spawn flags govern opt-out:
+
+- `--no-cache`: disables readiness-cache (V6) and recon-cache (V9) reads and writes. Cache files on disk are left untouched.
+- `--no-shared-target`: disables CARGO_TARGET_DIR sharing (V8). Each agent builds into the worktree-local `target/`.
+
+### V6 Readiness-Cache (24h TTL)
+
+`reviewer-readiness-check` is the most expensive recurring gate: it scans `.claude/rules/*.md` and scores the 8-item checklist on every spawn even when the rules and commit haven't moved. V6 caches the verdict.
+
+- Cache key: `sha256(.claude/rules/*.md content concatenated, sorted by filename)` + `<commit-sha>`.
+- Storage: `~/.cache/tmux-pair/readiness/<repo-slug>-<rules-hash[:16]>-<commit>.json` with `{verdict, timestamp, missing-items}`.
+- Cache-Hit (file exists + mtime < 24h + verdict=PASS): the orchestrator skips spawning the subagent and logs `readiness cached from <ts>, key <rules-hash[:8]>`.
+- Cache-Miss or STALE (>24h): normal subagent spawn. On PASS the orchestrator writes the cache atomically (same-dir tmp+rename) so the next run sees the hit.
+- `NEEDS-RULES` verdicts are never cached: the rules-bootstrap loop must always run when rules are missing.
+- Cache-Bust: `--no-cache` (also disables V7 marker trust at the agent layer when the agent uses it for a sanity check, plus V9 recon-cache).
+
+### V7 Test-Trust-Chain (TESTS-PROOF marker)
+
+Writer-DONE is extended with a structured marker that the gate-3 verifier can trust without re-running the full suite when HEAD hasn't moved.
+
+```
+TESTS-PROOF:
+  <test-cmd>: PASS (<N> tests)
+  <lint-cmd>: clean
+  <fmt-cmd>: clean
+  COMMIT_SHA: <sha-of-HEAD-at-test-time>
+```
+
+The marker lives in the commit-message body of the bullet commit. `gate-3-verifier` reads it via `git log -1 --format=%B` (or the helper subcommand `python3 scripts/tmux_pair.py parse-tests-proof --commit HEAD`):
+
+- HEAD == `COMMIT_SHA`: trust, skip re-run, log `tests trusted from sha <sha>`.
+- HEAD has new commits since the marker: re-run + `WARNING test-marker stale, re-run needed`.
+- No marker present and the commit is from a 0.14+ run: `BLOCKER missing test-marker`.
+- No marker present and the commit predates 0.14: re-run + `WARNING legacy commit, no marker`. Backward-compat for older sessions.
+
+Reviewer panes inside the pair/triple use the marker for spot-checks and skip clippy/test re-runs by default. Optional spot-checks against touched files stay possible.
+
+### V8 Cargo-Target-Sharing
+
+`tmux_pair.py` prepends `env CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>/` to every boot command in `cmd_pair`/`cmd_triple` when the project is a Cargo workspace and `--no-shared-target` is not set. The target dir is shared across worktrees of the same repo; cargo's own lock-file handles concurrency.
+
+- `<repo-slug>` is `basename(repo-root)` with non-alphanumeric replaced by `_`.
+- Non-Cargo repos skip the env entirely (the helper returns `None` when no `Cargo.toml` or `crates/*/Cargo.toml` is found within two levels).
+- Parallel worktrees racing on the same target may experience short `cargo build` blocks while a peer holds the lock. This is expected and preferable to N independent rebuilds.
+- Opt-out per spawn: `--no-shared-target`.
+
+### V9 Recon-Cache with Delta-Mode (1h TTL)
+
+The orchestrator's recon output (file map, crate list, PROJECT.md snapshot, key-function inventory) is dumped as structured JSON to `/tmp/tmux-pair-recon-<repo-slug>-<commit-sha>.json`.
+
+- Subsequent triple spawns on the same commit within 1h read the cache, then run a delta-recon for files with `mtime > cache-time`.
+- The reviewer-readiness subagent may also consume the recon JSON to skip its own scan of unchanged files.
+- Cache-Bust: `--no-cache`.
+
+### V10 Inline-Gates for Trivial Plans
+
+When `task_kind=bug-fix` AND `plan-bullets <= 3` AND `predicted files-touched <= 5`, the orchestrator runs GATE 2 (Plan-Check) inline in its own pane with the 8-item checklist instead of spawning the subagent.
+
+- `gate-3-verifier` may also run inline when the same trivial-plan condition holds AND the TESTS-PROOF marker is valid for HEAD.
+- `gate-3-code-reviewer` always stays in a subagent: inline adversarial review eats too many tokens and benefits from a fresh context.
+- Anti-Triggers (always force the subagent path): dirty worktree, formatter failures, ambiguous plan text, task_kind in (`feature`, `refactor`).
+- Helper: `python3 scripts/tmux_pair.py inline-gate-decide --plan-file <path> --task-kind bug-fix` returns a JSON decision payload with `inline` plus the count rationale.
 
 ## Pair protocol (the core loop)
 

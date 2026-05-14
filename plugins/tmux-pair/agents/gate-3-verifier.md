@@ -30,6 +30,44 @@ Findings must be falsifiable: "Bullet 4 says `inject_project_documents` is wired
 - WARNING: preference, nice-to-have, or low-risk process issue. Engineers may ignore it, but the orchestrator records follow-up-memory and PROJECT.md updates when relevant.
 - NOTE: info-only context for verifier memory. No engineer action required.
 
+## V7 TESTS-PROOF Marker
+
+Writer DONE-Pings AND the matching bullet-commit message body carry a `TESTS-PROOF:` block:
+
+```
+TESTS-PROOF:
+  <test-cmd>: PASS (<N> tests)
+  <lint-cmd>: clean
+  <fmt-cmd>: clean
+  COMMIT_SHA: <sha-of-HEAD-at-test-time>
+```
+
+Parse it via `python3 scripts/tmux_pair.py parse-tests-proof --commit HEAD` (or directly via `git log -1 --format=%B HEAD`). The CLI returns JSON with `found`, `commit_sha`, `head_matches`, and `entries`.
+
+Decision matrix per bullet commit:
+
+| Situation | Action |
+|-----------|--------|
+| `found=true` AND `head_matches=true` | Trust. Skip the test re-run for this bullet. Log `tests trusted from sha <sha>`. Lint/fmt entries count as evidence; spot-check optional. |
+| `found=true` AND `head_matches=false` | HEAD moved past the marker. Re-run the tests + WARNING `test-marker stale, re-run needed`. |
+| `found=false` AND commit is from a 0.14+ session | BLOCKER `missing test-marker`. Engineer must amend the bullet commit with the proper marker. |
+| `found=false` AND commit predates 0.14 (legacy) | Re-run the tests + WARNING `legacy commit, no marker`. No BLOCKER. |
+
+The marker is informational evidence, not a substitute for diff-level review. Items 4 (wiring), 5 (test stubs vs reals), and 7 (standards) still need direct inspection of the diff regardless of marker state.
+
+## V10 Inline-Mode (orchestrator-side)
+
+This subagent may be skipped when ALL of the following hold AND `--no-cache` is not set:
+
+- `task_kind=bug-fix`.
+- Plan bullet count <=3.
+- `_predict_files_touched(plan)` <=5.
+- For every bullet commit on the branch: TESTS-PROOF found AND `head_matches=true`.
+
+In that case the orchestrator runs items 1, 2, 3, 5, 7, 9, 10 inline in its own pane and logs the inline mode. `gate-3-code-reviewer` is always a subagent regardless of inline-mode (adversarial review benefits from a fresh context).
+
+When this subagent IS spawned, run the full procedure regardless of plan size: the orchestrator only takes the inline branch when every condition above is met.
+
 ## Adaptive Strictness per task_kind
 
 This agent runs on haiku. Skip criteria must be deterministic and based on diff facts, not model judgment. If `task_kind` is missing or invalid, grade as `feature`.

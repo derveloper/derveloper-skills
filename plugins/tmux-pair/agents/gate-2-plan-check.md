@@ -28,6 +28,19 @@ Findings must be falsifiable: "src/auth.rs:42: `User::from_token` swallows expir
 - WARNING: preference, nice-to-have, or low-risk process issue. Engineers may ignore it, but the orchestrator records follow-up-memory and PROJECT.md updates when relevant.
 - NOTE: info-only context for orchestrator memory. No engineer action required.
 
+## V10 Inline-Mode (orchestrator-side)
+
+When `task_kind=bug-fix` AND the plan has at most 3 bullets AND `python3 scripts/tmux_pair.py inline-gate-decide --plan-file <path> --task-kind bug-fix` returns `inline: true` (predicted files-touched <=5), the orchestrator may run this checklist inline in its own pane instead of spawning this subagent.
+
+Anti-Triggers (force the subagent path regardless of count thresholds):
+
+- Dirty worktree at plan-time.
+- Formatter or linter not yet clean on the base ref.
+- Plan text is ambiguous (e.g. no `Files zu ändern:` section, vague bullet bodies).
+- `task_kind` in (`feature`, `refactor`).
+
+When this subagent IS spawned, run the full procedure below regardless of plan size: the orchestrator only takes the inline branch when the deterministic count thresholds are met. The subagent itself never short-circuits.
+
 ## Adaptive Strictness per task_kind
 
 `feature` is the default. If `task_kind` is missing or invalid, grade as `feature`.

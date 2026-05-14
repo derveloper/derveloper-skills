@@ -105,3 +105,37 @@ for cross-pane messaging, compaction, monitoring, and cleanup.
   Quality kommt aus Review-Loop (Reviewer/Orchestrator bleiben claude
   bzw. claude-bridge/claude-opus-4-7 als Top-Gate). Anthropic-Subscription
   weiter via `--pi-provider claude-bridge --pi-model claude-opus-4-7`.
+
+### 0.14.0 (Workflow-Caching: V6-V10, 2026-05-14)
+
+Smart-Workflow-Erweiterungen V6-V10. Backward-Compat-Pflicht: alle alten
+Spawns ohne neue Flags laufen identisch (Cache-Miss = klassischer Flow).
+Plugin-API stabil, keine Breaking-Changes auf Subagent-Inputs oder
+CLI-Flags. Versions-Bump 0.13.2 -> 0.14.0 (Minor, additiv).
+
+- V6 Readiness-Cache (24h TTL): `~/.cache/tmux-pair/readiness/<slug>-<rules-hash[:16]>-<commit>.json`. Orchestrator skipt das `reviewer-readiness-check` Subagent bei Cache-Hit + PASS. `NEEDS-RULES` wird nicht gecached. Cache-Bust per `--no-cache` oder `rm`.
+- V7 Test-Trust-Chain: `TESTS-PROOF:` Block im Commit-Message-Body des Bullet-Commits. `gate-3-verifier` liest via `parse-tests-proof` Subcommand. HEAD == COMMIT_SHA -> trust + skip Re-Run. Legacy ohne Marker -> Re-Run + WARNING (kein BLOCKER, backward-compat).
+- V8 Cargo-Target-Sharing: `env CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>/` als Prefix in jedem Boot-Command. Repo-Slug = basename mit non-alphanumeric -> `_`. Non-Cargo-Repos skippen Env automatisch. Opt-out: `--no-shared-target`.
+- V9 Recon-Cache mit Delta-Mode (1h TTL): `/tmp/tmux-pair-recon-<slug>-<commit>.json`. Folge-Spawns auf gleichem Commit lesen Cache + machen Delta-Recon nur für mtime > cache-time. Cache-Bust per `--no-cache`.
+- V10 Inline-Gates für Trivial-Plans: `task_kind=bug-fix` + bullets <= 3 + predicted files-touched <= 5 -> Orchestrator macht GATE 2 (und ggf. GATE 3 verifier) inline statt Subagent-Spawn. `gate-3-code-reviewer` bleibt immer Subagent. CLI-Helper: `inline-gate-decide --plan-file <path> --task-kind <kind>` liefert JSON-Decision.
+
+Neue CLI-Surface:
+- `tmux_pair.py parse-tests-proof --repo <path> --commit <sha-or-HEAD>` (JSON-Output mit `found`, `commit_sha`, `head_matches`, `entries`).
+- `tmux_pair.py inline-gate-decide --plan-file <path-or-dash> --task-kind <kind>` (JSON-Decision-Payload).
+- `pair` und `triple` akzeptieren `--no-cache` und `--no-shared-target`.
+
+V2 Decision-Log für 0.14.0:
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | CARGO_TARGET_DIR-Pfad = `~/.cache/tmux-pair/cargo-target/<slug>/` | User-Decision GATE 1 Option A; matched V6/V9-Convention (`~/.cache/` user-persistent), shared cross-worktree, cargo lock-file handhabt Concurrency. |
+| D2 | TESTS-PROOF persistiert im Commit-Message-Body | User-Decision GATE 1 Option A; Marker reist mit Code, Verifier liest via `git log --format=%B`, kein zusätzliches Repo-Artefakt. |
+| D3 | Rules-Bootstrap skipped für diesen Run | User-Override ("scheiss auf rules"); Reviewer-Strictness läuft gegen AGENTS.md + Common-Sense statt frisch-gebackener `.claude/rules/`. Risk: Reviewer hat weniger falsifizierbare Hooks, akzeptiert für Frickel-OK-Repo. |
+| D4 | User-Pivot: Solo-Implementation statt Triple-Spawn | User: "mach selbst fertig"; GATE-3-Subagents werden weiterhin ausgeführt für adversarial Diff-Review + Verify-Cycle. |
+| D5 | V8 Injection-Site = `_wrap_with_cargo_env` Helper, jeder Boot-Branch wrappt vor return | GATE-2-BLOCKER B3 verlangte Commitment auf eine Stelle; Helper kapselt Env-Prepend, codex-Branch + claude/pi-Branches teilen Logic, non-Cargo-Path = `None` -> Helper passthrough. |
+| D6 | V7 Caller = neues CLI-Subcommand `parse-tests-proof` | GATE-2-BLOCKER B2 verlangte Call-Site für `_parse_tests_proof`; Subagent ruft Python-Helper via Bash auf statt Regex selbst zu pflegen. |
+| D7 | V10 Caller = neues CLI-Subcommand `inline-gate-decide` | GATE-2-BLOCKER B4 verlangte Eindeutigkeit zwischen Python-CLI- und Agent-Briefing-Pfad; CLI-Helper liefert JSON, Orchestrator-Agent konsumiert via Bash. |
+| D8 | `_cache_repo_slug` als neuer Helper mit `[^A-Za-z0-9]->_`, distinkt von bestehender `slugify` (Hyphen-Variante) | GATE-2-NOTE wies auf Slug-Konvention-Mismatch hin; Cache-Filenames müssen shell-quoting-stabil sein, Hyphens kollidieren mit `-` in optionalen suffixen. |
+| D9 | V8 nur für Cargo-Repos aktivieren (`Cargo.toml` Detection), sonst Env nicht setzen | Self-Decision Repo-Pattern-Match: setzen einer ignorierten Env tut nichts, aber ein leerer Pfad in der Pane-Anzeige wirkt verwirrend; `None`-Return hält Boot-Cmd lesbar. |
+| D10 | SKILL.md frontmatter `version:` mit-bumpen | GATE-2-BLOCKER B5/wiring-gap; PROJECT.md Design-Decision verlangt Versions-Sync zwischen `plugin.json`, `marketplace.json` und Skill-Frontmatter. `check-plugin-versions.py` prüft heute nur 2 von 3 -> Follow-up: Script erweitern (NOTE, kein Hard-Block in 0.14.0). |
+| D11 | TESTS-PROOF-Block in 0.14.0 noch nicht durch Writer-Briefing-Templates erzwungen | Backward-Compat-Phase: alte DONEs ohne Marker werden mit WARNING re-runned, neue Writer-Briefings können den Block in 0.15+ als Pflicht aufnehmen. Schema steht; Migration phasenweise. |
