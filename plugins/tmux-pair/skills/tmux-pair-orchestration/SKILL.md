@@ -1,19 +1,20 @@
 ---
 name: tmux-pair-orchestration
-description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "use the tmux-pair workflow", or otherwise wants to run two or three coding agents collaboratively in tmux panes wired up via git worktrees. Covers the pair protocol, when to choose pair vs. triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, PROJECT.md care, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), sender identity prefixes, explicit parallel-plan markers, engineer subagent strategy, bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.14.0
+description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "spawn a solo with self-review", "send a single agent on a self-contained task", "use the tmux-pair workflow", or otherwise wants to run one, two, or three coding agents in tmux panes wired up via git worktrees. Covers solo (single agent + gated subagent-driven self-review), pair (writer + reviewer), triple (writer + reviewer + orchestrator). Includes the pair protocol, when to choose solo vs pair vs triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, PROJECT.md care, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), sender identity prefixes, explicit parallel-plan markers, engineer subagent strategy with repo-specific subagent detection (`.claude/agents/<repo>-*.md` listed in briefings), bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
+version: 0.15.0
 ---
 
 # tmux-pair-orchestration
 
-Run two or three coding agents collaboratively on a single task. Each agent lives in its own tmux pane, all panes share a fresh `git worktree`, and the agents talk peer-to-peer through a small Python helper.
+Run one, two, or three coding agents on a single task. Each agent lives in its own tmux pane, all panes share a fresh `git worktree`, and the agents talk peer-to-peer through a small Python helper.
 
-This skill applies whenever the user wants to set up such a pair or triple, monitor it, draft briefings, recover from a stuck loop, or decide between the two modes.
+This skill applies whenever the user wants to set up such a solo/pair/triple, monitor it, draft briefings, recover from a stuck loop, or decide between modes.
 
-## The two modes
+## The three modes
 
 | Mode | Agents | Layout | Human role |
 |------|--------|--------|-------------|
+| **solo** | one agent (gated 6-phase, subagent-driven self-review) | single pane in a fresh worktree | hands-off after spawn; sees only DONE / BLOCKER pings |
 | **pair** | Writer + Reviewer | side by side (`main-vertical`) | active relay between the two agents, hands-on |
 | **triple** | Writer + Reviewer + Orchestrator | Orchestrator on top (full width), Writer/Reviewer below (`main-horizontal`) | hands-off after spawn, only sees major-event pings |
 
@@ -47,13 +48,40 @@ Override the second reviewer with `--reviewer-2-agent <agent>`. Without `--dual-
 
 When to opt in: risky refactors, security-sensitive code, blast-radius changes, anything where you want diversity of opinions on the diff. Cost: one extra agent token-burn and one extra review-merge step in the orchestrator.
 
+## Solo (gated, self-driven)
+
+Solo runs ONE agent in a fresh worktree with a 6-phase self-driven workflow:
+
+1. **Recon** — 4-6 parallel subagent spawns, each <300 words with Datei:Zeile pointers.
+2. **Plan + Self-Check** — bullet plan with parallel-markers, adversarial GATE-2 via `tmux-pair:gate-2-plan-check` subagent. Max 2 plan iterations.
+3. **Implementation** — parallel subagents per independent bullet (disjoint files); sequential bullets in the main pane.
+4. **Self-Review** — two subagents in parallel: `tmux-pair:gate-3-code-reviewer` (diff review for bugs/security/anti-patterns) and `tmux-pair:gate-3-verifier` (plan coverage + workspace gates). Max 3 review cycles.
+5. **PROJECT.md + Skill-Persist** — Phase block in PROJECT.md, Decisions, domain knowledge as Skill under `.claude/skills/<repo>-<topic>/SKILL.md` (Persist-Convention; Rules only for cross-cutting always-on items).
+6. **Commit + DONE-Ping** — conventional commit, workspace-gate green, worktree clean, then ping the human.
+
+Default flag set: `--no-gated` for trivial tasks where subagent-driven recon/plan/review is overkill (e.g. doc tweak, single-file rename). Default ON. Worktree default; `--no-worktree` opts out.
+
+### Repo-specific subagents (auto-detected)
+
+When the spawn script sees `.claude/agents/<repo>-*.md` files in the target repo, it lists those subagents in the briefing. The solo (and the pair/triple briefings) instructs the agent to prefer those domain experts over `general-purpose` for Recon/Impl/Review subagent spawns. They know the repo's domain vocabulary, architecture-constraints, and skill files.
+
+Detection logic: filename stem starting with `<project.name>-` (e.g. `example-project-kernel.md` in a `example-project` repo). Falls back to "no repo-subagents listed" if the directory is missing or empty.
+
 ## When to use which mode
+
+Choose **solo** when:
+
+- the task is self-contained and adversarial self-review via subagents is enough
+- the human wants to step away and trust the gates (`gate-2-plan-check`, `gate-3-code-reviewer`, `gate-3-verifier`)
+- a second human-relayed agent (reviewer) costs more than it gives back
+- doc cleanup, rule-to-skill migration, repo-wide rename, plugin-update with workflow consistency check
 
 Choose **pair** when:
 
 - the task is small and well-scoped (one to a few files)
 - the human is willing to be the relay between writer and reviewer
 - recon is shallow or already done
+- continuous human-mediated review beats subagent-only review
 
 Choose **triple** when:
 
@@ -62,7 +90,7 @@ Choose **triple** when:
 - a dedicated agent doing recon and writing briefings will save more time than it costs
 - the feedback "engineers brief themselves and miss the real problem" is plausible
 
-A triple is overhead for trivial tasks. A pair leaks too much into the human's attention for big ones. See `references/triple-vs-pair.md` for a longer decision matrix with worked examples.
+A triple is overhead for trivial tasks. A pair leaks too much into the human's attention for big ones. A solo is the cheapest in panes but trades continuous review for periodic subagent gates. See `references/triple-vs-pair.md` for a longer decision matrix.
 
 ## Durable standards
 

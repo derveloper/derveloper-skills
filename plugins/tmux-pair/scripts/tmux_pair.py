@@ -1114,6 +1114,18 @@ ENGINEER_SUBAGENT_STRATEGY_BLOCK = (
     "  Subagents für klar begrenzte Nebenarbeit, wenn sie parallel laufen kann\n"
     "  oder mehr als drei gezielte Reads/Tests/Fix-Spikes erwarten lässt.\n"
     "\n"
+    "  REPO-SPEZIFISCHE SUBAGENTS ZUERST (PFLICHT):\n"
+    "  - Vor jedem Subagent-Spawn prüfen: hat das Repo eigene Domain-Subagents\n"
+    "    unter `.claude/agents/<repo>-*.md`? Wenn ja, diese NAMENTLICH nutzen\n"
+    "    (z.B. Task(subagent_type='example-project-kernel') statt general-purpose).\n"
+    "  - Repo-Subagents kennen Domain-Vokabular, Architecture-Constraints und\n"
+    "    referenzieren die zugehörigen Skills unter `.claude/skills/<repo>-*`.\n"
+    "  - general-purpose ist Fallback wenn KEIN passender Repo-Subagent\n"
+    "    existiert (z.B. cross-cutting Recherche, Plan-Check ohne Domain-Fokus).\n"
+    "  - Detection beim Spawn: das Briefing listet die Repo-Subagents bereits\n"
+    "    auf (siehe Block oben). Wenn nicht: `ls .claude/agents/` ist die\n"
+    "    Quelle der Wahrheit.\n"
+    "\n"
     "  Geeignete Use-Cases:\n"
     "  - Parallele Recon-Files: getrennte Subagents lesen unabhängige Module\n"
     "    und liefern je <300 Wörter mit Datei:Zeile-Pointern.\n"
@@ -1971,6 +1983,50 @@ def _dual_review_block(role: str, partner_pane: str,
     return ""
 
 
+def _detect_repo_subagents(project: Path) -> list[str]:
+    """List repo-specific subagent names from `.claude/agents/<repo>-*.md`.
+
+    Returns names (filename stems) of agents whose filename starts with the
+    repo basename + '-', e.g. `example-project-kernel` in a `example-project` repo. These are
+    the domain experts engineers should prefer over `general-purpose` for
+    Recon/Impl/Review subagent spawns.
+    """
+    agents_dir = project / ".claude" / "agents"
+    if not agents_dir.is_dir():
+        return []
+    repo_prefix = f"{project.name}-"
+    names: list[str] = []
+    for entry in sorted(agents_dir.iterdir()):
+        if entry.suffix != ".md":
+            continue
+        stem = entry.stem
+        if stem.startswith(repo_prefix):
+            names.append(stem)
+    return names
+
+
+def _repo_subagents_block(project: Path) -> str:
+    """Briefing block listing detected repo-specific subagents.
+
+    Empty string if the repo has no such subagents. When present, the block
+    lists subagent names so engineers and orchestrator pick them by name
+    instead of falling back to `general-purpose` for domain-specific work.
+    """
+    names = _detect_repo_subagents(project)
+    if not names:
+        return ""
+    listing = "\n".join(f"    - {name}" for name in names)
+    return (
+        "REPO-SPEZIFISCHE SUBAGENTS (vor general-purpose nutzen)\n"
+        f"  Das Repo `{project.name}` definiert {len(names)} Domain-Subagents\n"
+        "  unter `.claude/agents/`. Bei Recon/Impl/Review-Subagent-Spawns\n"
+        "  diese namentlich verwenden (Task(subagent_type='<name>')), nicht\n"
+        "  general-purpose. Sie kennen die Skill-Bodies + Architecture-Constraints:\n"
+        f"{listing}\n"
+        "  general-purpose nur wenn KEIN passender Domain-Subagent existiert.\n"
+    )
+
+
 def _briefing_standards_block(
     *, with_standards: bool, with_pre_flight: bool = False
 ) -> str:
@@ -2069,6 +2125,7 @@ def _briefing_pair(
         f"  Peer-Messaging:\n"
         f"    {send_cmd} \"<message>\"\n\n"
         f"{PROJECT_MD_CARE_BLOCK}\n"
+        f"{_repo_subagents_block(Path(project))}"
         f"{ENGINEER_SUBAGENT_STRATEGY_BLOCK}\n"
         f"{_briefing_standards_block(with_standards=with_standards)}"
         f"{_briefing_procedure_block(with_standards=with_standards)}"
@@ -2154,6 +2211,7 @@ def _briefing_triple_engineer(
         f"  Peer-Messaging:\n"
         f"    {send_partner} \"<message>\"\n\n"
         f"{PROJECT_MD_CARE_BLOCK}\n"
+        f"{_repo_subagents_block(Path(project))}"
         f"{ENGINEER_SUBAGENT_STRATEGY_BLOCK}\n"
         f"{_briefing_standards_block(with_standards=with_standards)}"
         f"{_briefing_procedure_block(with_standards=with_standards)}"
@@ -2286,6 +2344,7 @@ def _briefing_orchestrator(
         f"{_briefing_standards_block(with_standards=with_standards, with_pre_flight=with_greenfield)}"
         f"{PROJECT_MD_CARE_BLOCK}\n"
         f"{PLAN_QUALITY_BLOCK}\n"
+        f"{_repo_subagents_block(Path(project))}"
         f"{ENGINEER_SUBAGENT_STRATEGY_BLOCK}\n"
         f"{MID_RUN_PERSISTENCE_BLOCK}\n"
         f"{_briefing_procedure_block(with_standards=with_standards)}"
@@ -2965,6 +3024,171 @@ def cmd_triple(args: argparse.Namespace) -> int:
     return 0
 
 
+def _briefing_solo(
+    *, human_pane: str,
+    wt_path: Path, branch: str, base: str, project: str,
+    feature: str, task: str,
+    with_standards: bool = False,
+    gated: bool = True,
+) -> str:
+    send_human = _send_command(human_pane)
+    repo_block = _repo_subagents_block(Path(project))
+    if not gated:
+        return (
+            f"[ROLE: Solo (ungated, frei)]\n\n"
+            f"WORKTREE: {wt_path}\n"
+            f"BRANCH:   {branch}\n"
+            f"BASE:     {base}\n"
+            f"PROJECT:  {project}\n\n"
+            f"TASK\n{task or '(keine: warte auf Human)'}\n\n"
+            f"Human-Pane: {human_pane}. DONE/BLOCKER-Ping:\n"
+            f"    {send_human} \"DONE solo.{feature}: <commit-sha + kurz>\"\n"
+            f"    {send_human} \"BLOCKER solo.{feature}: <Frage>\"\n\n"
+            f"{repo_block}"
+            f"{ENGINEER_SUBAGENT_STRATEGY_BLOCK}\n"
+            f"{_briefing_standards_block(with_standards=with_standards)}"
+            f"WORKSPACE-GATE PFLICHT vor jedem Commit\n"
+            f"  Build / Test / Lint / Format der relevanten Crates. Kein push.\n"
+        )
+    return (
+        f"[ROLE: Solo (gated, self-driven via Subagents)]\n\n"
+        f"WORKTREE: {wt_path}\n"
+        f"BRANCH:   {branch}\n"
+        f"BASE:     {base}\n"
+        f"PROJECT:  {project}\n\n"
+        f"TASK\n{task or '(keine: warte auf Human)'}\n\n"
+        f"Human-Pane: {human_pane}. KEINE Zwischen-Pings. Nur DONE oder echter BLOCKER:\n"
+        f"    {send_human} \"DONE solo.{feature}: <commit-sha + Phase-Summary>\"\n"
+        f"    {send_human} \"BLOCKER solo.{feature}: <Frage + 2-4 Optionen>\"\n\n"
+        f"SOLO-GATED-WORKFLOW (Subagent-zentrisch)\n"
+        f"  Du bist ein einzelner Agent. Du delegierst maximal an Subagents, dein\n"
+        f"  Haupt-Pane orchestriert. Phasen in fester Reihenfolge:\n"
+        f"\n"
+        f"  Phase 1 - Recon (parallel Subagents):\n"
+        f"    4-6 unabhängige Recon-Fragen. Pro Frage ein Subagent (Domain-passend,\n"
+        f"    siehe REPO-SPEZIFISCHE-SUBAGENTS-Block). Jeder Subagent liefert\n"
+        f"    <300 Wörter Summary mit Datei:Zeile-Pointern. Haupt-Pane sammelt.\n"
+        f"\n"
+        f"  Phase 2 - Plan + Self-Check:\n"
+        f"    Plan-Bullets (B1..Bn) mit DONE-Definition + Parallel-Markers\n"
+        f"    (`B3 || B4 [parallel]` oder `B3 -> B4 [sequenziell: <reason>]`).\n"
+        f"    Adversarial Plan-Check via Subagent (Task(subagent_type='tmux-pair:gate-2-plan-check')\n"
+        f"    falls verfügbar, sonst general-purpose mit 8-Item-Checkliste:\n"
+        f"    style/tests/architecture/anti-patterns/naming/security/build/domain.\n"
+        f"    Bei BLOCKER: Plan v2, nochmal checken. Max 2 Iterationen.\n"
+        f"\n"
+        f"  Phase 3 - Implementation:\n"
+        f"    Parallel-Subagents pro unabhängiges Bullet (disjoint Files, Plan-\n"
+        f"    Markers). Sequenzielle Bullets im Haupt-Pane oder via serielle\n"
+        f"    Subagent-Kette. Pro Bullet: betroffene Tests + clippy + fmt.\n"
+        f"\n"
+        f"  Phase 4 - Self-Review (Subagents):\n"
+        f"    Vor commit zwei Subagents parallel:\n"
+        f"    - Task(subagent_type='tmux-pair:gate-3-code-reviewer'): Diff-Review,\n"
+        f"      bugs/security/anti-patterns/AI-slop, Datei:Zeile+Problem+Fix.\n"
+        f"    - Task(subagent_type='tmux-pair:gate-3-verifier'): Plan-Coverage,\n"
+        f"      Workspace-Gates (test --workspace, clippy --workspace -D warnings,\n"
+        f"      fmt --check), keine pre-existing dirty Files berührt.\n"
+        f"    Bei BLOCKER: fixen, nochmal review-zyklus. Max 3 Iterationen.\n"
+        f"\n"
+        f"  Phase 5 - PROJECT.md + Skill-Persist (PFLICHT):\n"
+        f"    PROJECT.md-Phase-Block + Decisions (D<n>a..f).\n"
+        f"    Persist-Convention: Domain-Erkenntnisse als Skill in\n"
+        f"    `.claude/skills/<repo>-<topic>/SKILL.md` mit paths-Glob.\n"
+        f"    Rule nur cross-cutting always-on. Codex-Bridge\n"
+        f"    `.agents/skills/<repo>-<topic>`-Symlink wenn Bridge existiert.\n"
+        f"\n"
+        f"  Phase 6 - Commit + DONE-Ping:\n"
+        f"    Conventional Commit (kein AI-co-author). KEIN push (Human entscheidet).\n"
+        f"    Workspace-Gate PASS vor Commit. Worktree clean (nur pre-existing\n"
+        f"    Allowlist erlaubt). DONE-Ping an Human.\n"
+        f"\n"
+        f"{repo_block}"
+        f"{ENGINEER_SUBAGENT_STRATEGY_BLOCK}\n"
+        f"{PROJECT_MD_CARE_BLOCK}\n"
+        f"{MID_RUN_PERSISTENCE_BLOCK}\n"
+        f"{_briefing_standards_block(with_standards=with_standards)}"
+        f"ANTI-PATTERNS\n"
+        f"- Phase 2 oder Phase 4 ohne Subagent-Self-Check skippen.\n"
+        f"- general-purpose statt Repo-Subagent nutzen wenn passender Domain-Subagent existiert.\n"
+        f"- Zwischen-Pings an Human (nur DONE/BLOCKER).\n"
+        f"- pre-existing dirty Files anfassen (Allowlist beachten).\n"
+        f"- Push ohne Human-OK.\n"
+    )
+
+
+def cmd_solo(args: argparse.Namespace) -> int:
+    """Single agent in a fresh worktree, gated 6-phase self-driven workflow.
+
+    Phase 1 (Recon) -> Phase 2 (Plan + GATE-2 self-check via subagent) ->
+    Phase 3 (Impl, parallel subagents wo unabhängig) -> Phase 4 (GATE-3
+    self-review via subagent) -> Phase 5 (PROJECT.md + Skill-Persist) ->
+    Phase 6 (Commit + DONE-ping). Each phase uses subagents for parallel
+    work. With --no-gated: minimal briefing, just spawn + task. Default ON.
+
+    Worktree default. With --no-worktree: solo runs on the project's current
+    branch directly (codex AGENTS.md write is skipped, like /pair).
+    """
+    agents = load_agents()
+    if args.agent not in agents:
+        sys.exit(f"error: unknown agent '{args.agent}'")
+    project, wt_path, branch, window_name, human_pane = _common_pair_setup(args)
+    session = current_session()
+    no_shared_target = bool(getattr(args, "no_shared_target", False))
+    cargo_target = _cargo_target_dir(project, no_shared_target)
+    solo_name = f"solo.{window_name}"
+    pi_provider, pi_model, pi_thinking = _pi_overrides_for_role(args, "writer")
+    pane = spawn_pane(
+        session=session, window_name=window_name, cwd=str(wt_path),
+        agent=args.agent,
+        boot_command=_boot_command_with_standards(
+            agent=args.agent, agents_dict=agents,
+            window_name=window_name, role="writer",
+            claude_effort=args.claude_effort,
+            claude_model=args.claude_model,
+            cargo_target_dir=cargo_target,
+            pi_provider=pi_provider,
+            pi_model=pi_model,
+            pi_thinking=pi_thinking,
+            display_name=solo_name,
+        ),
+        split="none", display_name=solo_name,
+    )
+    ready = _wait_panes_ready([(pane, args.agent)], timeout=70)
+    _post_boot_slashes(pane, args.agent, solo_name,
+                       claude_model=args.claude_model)
+    with_standards, _ = _briefing_flags(
+        args,
+        no_worktree=bool(getattr(args, "no_worktree", False)),
+        role_agents=[args.agent],
+    )
+    gated = not bool(getattr(args, "no_gated", False))
+    brief = _briefing_solo(
+        human_pane=human_pane,
+        wt_path=wt_path, branch=branch, base=args.base, project=str(project),
+        feature=args.feature, task=args.task or "",
+        with_standards=with_standards,
+        gated=gated,
+    )
+    _send_briefing_sync(pane, brief)
+    output = {
+        "mode": "solo",
+        "gated": gated,
+        "worktree": str(wt_path),
+        "branch": branch,
+        "base": args.base,
+        "window": window_name,
+        "solo_pane": pane,
+        "solo_agent": args.agent,
+        "solo_name": solo_name,
+        "solo_ready": ready.get(pane, False),
+        "human_pane": human_pane,
+        "briefing_dispatch": "sent (post-ready)",
+    }
+    print(json.dumps(output, indent=2))
+    return 0
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     session = args.session or current_session()
     rc, out, err = tmux_safe(
@@ -3568,6 +3792,70 @@ def build_parser() -> argparse.ArgumentParser:
                          "Default: shared ~/.cache/tmux-pair/cargo-target/<slug>/ "
                          "for Cargo projects; ignored for non-Rust repos.")
     tr.set_defaults(func=cmd_triple)
+
+    so = sub.add_parser("solo",
+                        help="single agent in a fresh worktree, gated "
+                             "6-phase self-driven workflow")
+    so.add_argument("--project", required=True,
+                    help="path to the git repo to base the worktree on")
+    so.add_argument("--feature", required=True,
+                    help="short feature name, used in branch + window")
+    so.add_argument("--base", default="origin/main",
+                    help="base ref (default: origin/main)")
+    so.add_argument("--task", default="",
+                    help="task description sent to the solo agent")
+    so.add_argument("--agent", default="claude",
+                    help="agent for the solo pane (default: claude). "
+                         "Choices depend on ~/.config/tmux-pair/agents.json: "
+                         "typically claude, codex, pi.")
+    so.add_argument("--no-worktree", action="store_true",
+                    help="skip git worktree add, run on the project's "
+                         "current branch directly. AGENTS.md write to "
+                         "project is skipped to avoid pollution.")
+    so.add_argument("--no-gated", action="store_true",
+                    help="bypass the 6-phase workflow briefing. Minimal "
+                         "spawn + task only. Use for trivial tasks where "
+                         "subagent-driven recon/plan/review is overkill.")
+    so.add_argument("--interactive", action="store_true",
+                    help="Decision-pause-points in solo briefing (rare for "
+                         "solo; default: autonom). Currently a passthrough "
+                         "to keep flag-parity with pair/triple.")
+    so.add_argument("--with-standards", action="store_true",
+                    help="append the durable standards bundle (STANDARDS, "
+                         "RECALL_DISCIPLINE, BULLET_START_RITUAL, "
+                         "PAIR_PROTOCOL) to the briefing. Default off "
+                         "(slim briefing).")
+    so.add_argument("--greenfield", action="store_true",
+                    help="enable --with-standards plus greenfield "
+                         "pre-flight block. For a first-session repo "
+                         "without .claude/rules/ seed.")
+    so.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
+                    help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}). "
+                         "Only applied when --agent claude.")
+    so.add_argument("--claude-effort", default=DEFAULT_CLAUDE_EFFORT,
+                    help=f"claude effort level (default: {DEFAULT_CLAUDE_EFFORT}). "
+                         "Choices: low|medium|high|xhigh|max. Empty string "
+                         "skips the flag.")
+    so.add_argument("--pi-provider", default=DEFAULT_PI_PROVIDER,
+                    help=f"pi provider (default: {DEFAULT_PI_PROVIDER}). "
+                         "Only applied when --agent pi.")
+    so.add_argument("--pi-model", default=DEFAULT_PI_MODEL,
+                    help=f"pi model slug (default: {DEFAULT_PI_MODEL}). "
+                         "Only applied when --agent pi.")
+    so.add_argument("--pi-thinking", default=DEFAULT_PI_THINKING,
+                    help=f"pi thinking level (default: {DEFAULT_PI_THINKING}). "
+                         "Choices: off|minimal|low|medium|high|xhigh.")
+    so.add_argument("--pi-writer-provider", default=None,
+                    help="pi provider override for the solo pane (uses the "
+                         "'writer' role internally).")
+    so.add_argument("--pi-writer-model", default=None,
+                    help="pi model override for the solo pane.")
+    so.add_argument("--pi-writer-thinking", default=None,
+                    help="pi thinking override for the solo pane.")
+    so.add_argument("--no-shared-target", action="store_true",
+                    help="do not set CARGO_TARGET_DIR. Solo builds into the "
+                         "worktree-local target/. Default: shared cache.")
+    so.set_defaults(func=cmd_solo)
 
     li = sub.add_parser("list", help="list panes in the current session")
     li.add_argument("--session")
