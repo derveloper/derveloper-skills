@@ -1505,6 +1505,31 @@ DECISION_THRESHOLD_BLOCK = (
     "als nicht abgeschlossen.\n"
 )
 
+ASKUSER_DISCIPLINE_BLOCK = (
+    "ASKUSER-DISCIPLINE\n"
+    "Wenn du AskUserQuestion verwendest:\n"
+    "  1. EMPFOHLENE OPTION IMMER AUF POSITION 1. Label endet auf\n"
+    "     ' (Recommended)'. Niemals woanders, auch nicht aus Vielfalts-\n"
+    "     Gründen. Description sagt warum es die Empfehlung ist.\n"
+    "  2. KEINE PSEUDO-FRAGEN. Wenn .claude/rules/, SPIRIT.md, Project-\n"
+    "     Konventionen oder klare Vorarbeit aus der Recon nur EINE\n"
+    "     sinnvolle Option erlauben: nicht fragen, direkt umsetzen + im\n"
+    "     COMPLETE-Ping als Self-Decision dokumentieren ('Regel X gilt,\n"
+    "     daher Y gewählt'). Die 2-4-Optionen-Pflicht des Tools rechtfertigt\n"
+    "     KEINE erfundenen Optionen.\n"
+    "  3. META-FRAGE BEI PATTERN-VERDACHT. Wenn die gestellte Frage in\n"
+    "     jedem Run wieder kommen würde ODER nach der Antwort offensichtlich\n"
+    "     ist dass eine Grundsatz-Entscheidung sie hätte vermeiden können:\n"
+    "     ZUSÄTZLICH (max. 1 extra Frage im selben Call) fragen ob diese\n"
+    "     Klasse von Fragen durch eine persistente Regel weggesetzt werden\n"
+    "     soll. Wenn ja: Rule-Vorschlag (Spirit-Punkt, .claude/rules/<x>.md,\n"
+    "     PROJECT.md-Eintrag, Plugin-Default) direkt formulieren und im\n"
+    "     selben Run einbauen.\n"
+    "  4. Description-Pflicht pro Option (Trade-off, Konsequenz). Header\n"
+    "     max 12 Zeichen, knackig.\n"
+    "Gilt für Orchestrator UND Engineers wenn sie selbst AskUser-fähig sind.\n"
+)
+
 INLINE_FIX_SPEC_BLOCK = (
     "V1 REVIEWER-TRIVIAL-FIX-INLINE\n"
     "Trigger für INLINE-FIX im Review-Output: <20 LOC und klar isoliert,\n"
@@ -2196,6 +2221,7 @@ def _briefing_orchestrator(
         f"SMART-WORKFLOW V1-V5\n"
         f"{_unattended_default_block(interactive=interactive, owner_label='Orchestrator', self_owned=True)}\n"
         f"{DECISION_THRESHOLD_BLOCK}\n"
+        f"{ASKUSER_DISCIPLINE_BLOCK}\n"
         f"{TASK_KIND_BLOCK}\n"
         f"{WARNING_SCHEMA_BLOCK}\n"
         f"{INLINE_FIX_SPEC_BLOCK}\n"
