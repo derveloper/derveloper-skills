@@ -1,7 +1,7 @@
 {
   "name": "tmux-pair",
-  "version": "0.15.1",
-  "description": "Spawn solo (single agent + gated subagent-driven self-review), pair (writer/reviewer), or triple (writer/reviewer/orchestrator) agent runs in fresh git worktrees, wired up via tmux. Each agent runs in its own pane and talks to its peer through a small Python helper with automatic [FROM: <pane-name>] identity prefixes. Includes a 5-gate workflow (Clarify, Reviewer-Readiness with rules-bootstrap loop, Plan-Check, Implementation Loop, Final-Verify) with mandatory PROJECT.md care for feature and refactor bullets, explicit parallel markers in plans, scoped plugin-agents for the gates (reviewer-readiness-check + rules-bootstrap on Sonnet, gate-2-plan-check on Sonnet, gate-3-verifier on Haiku, gate-3-code-reviewer on Sonnet, RECON via built-in Explore on Haiku), documented engineer subagent strategy for parallel recon/tests/fix branches, shipped rules templates for 7 stacks (Rust, TypeScript, Python, Go, JavaScript, Java, generic), bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), durable standards via claude --append-system-prompt-file + codex AGENTS.md, --effort flag in boot-command, model-aware compact-watcher with /compact [focus] support, and an opt-in --dual-review for a second reviewer (claude + codex cross-checking with Orchestrator-consolidated final report). Default model claude-opus-4-7 (1M context, override per spawn via --claude-model + --claude-effort). Built-in pi support as third coding agent (the users Custom-CLI at ~/.pi/agent/, default cortecs/qwen3-coder-next (EU Pay-per-Use, 256k ctx, coder-spec) with --thinking high; Anthropic-Subscription via pi-claude-bridge weiter via --pi-provider claude-bridge --pi-model claude-opus-4-7; override per Spawn via --pi-provider + --pi-model + --pi-thinking); pi panes run in Writer/Reviewer/Orchestrator roles but skip the compact-watcher because pi has no /compact equivalent.",
+  "version": "0.16.0",
+  "description": "Coordinate one or more coding agents on a task via tmux + git worktrees. /run is the auto-entry: it inspects the repo + task and recommends the right mode (solo for self-contained work; spawn for bigger features). /solo runs a single agent with a gated 6-phase self-review. /spawn runs a coordinated team of orchestrator + writers + reviewers, sized via --size 3..5 (3 = 1W/1R/1O default; 4 = 1W/2R/1O dual-review; 4 + --parallel-writers = 2W/1R/1O; 5 = 2W/2R/1O). Includes a 5-gate workflow (Clarify, Reviewer-Readiness with rules-bootstrap loop, Plan-Check, Implementation Loop, Final-Verify), mandatory PROJECT.md care, explicit parallel markers in plans, scoped plugin-agents for the gates (reviewer-readiness-check + rules-bootstrap on Sonnet, gate-2-plan-check on Sonnet, gate-3-verifier on Haiku, gate-3-code-reviewer on Sonnet, RECON via built-in Explore on Haiku), documented engineer subagent strategy for parallel recon/tests/fix branches, shipped rules templates for 7 stacks (Rust, TypeScript, Python, Go, JavaScript, Java, generic), bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), durable standards via claude --append-system-prompt-file + codex AGENTS.md, --effort flag in boot-command, model-aware compact-watcher with /compact [focus] support, dual-review consolidation when reviewers >= 2, and parallel-writers split with disjoint-bullet partitioning when writers >= 2. Default model claude-opus-4-7 (1M context, override per spawn via --claude-model + --claude-effort). Built-in pi support as third coding agent (the users Custom-CLI at ~/.pi/agent/, default cortecs/qwen3-coder-next; Anthropic-Subscription via pi-claude-bridge with --pi-provider claude-bridge --pi-model claude-opus-4-7).",
   "author": {
     "name": "derveloper",
     "url": "https://github.com/derveloper"
@@ -13,8 +13,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "tmux-pair",
-    "shortDescription": "Spawn tmux solos, writer/reviewer pairs, and gated triples",
-    "longDescription": "Run solo (single agent + gated 6-phase self-review), writer/reviewer pair, or writer/reviewer/orchestrator triple agent workflows in tmux with fresh git worktrees, review gates, PROJECT.md care, sender identity prefixes, parallel-plan markers, bundled skills, and helper scripts. Defaults stay slim, with standard/greenfield briefing extras available via --with-standards and --greenfield.",
+    "shortDescription": "Spawn tmux solos and coordinated agent teams (size 3..5) with gated reviews",
+    "longDescription": "Run solo (single agent + gated 6-phase self-review) or spawn (coordinated team of orchestrator + writers + reviewers, sized 3..5 via --size + --parallel-writers) agent workflows in tmux with fresh git worktrees, review gates, PROJECT.md care, sender identity prefixes, parallel-plan markers, bundled skills, and helper scripts. /run auto-recommends solo vs spawn from a short repo + task recon. Defaults stay slim, with standard/greenfield briefing extras available via --with-standards and --greenfield.",
     "developerName": "derveloper",
     "category": "Coding",
     "capabilities": ["Interactive", "Read", "Write"],
@@ -22,9 +22,9 @@
     "privacyPolicyURL": "https://github.com/derveloper/derveloper-skills",
     "termsOfServiceURL": "https://github.com/derveloper/derveloper-skills",
     "defaultPrompt": [
+      "Use /run to pick solo vs spawn for this task.",
       "Spawn a solo agent with gated self-review on this task.",
-      "Start a writer/reviewer pair for this change.",
-      "Run a gated triple workflow for this feature.",
+      "Spawn a coordinated team for this feature (size 3 default, 4-5 for parallel-friendly bullets).",
       "Use tmux-pair orchestration for this repo."
     ],
     "brandColor": "#111111",

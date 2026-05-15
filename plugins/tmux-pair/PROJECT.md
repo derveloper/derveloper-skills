@@ -2,18 +2,21 @@
 
 ## Project Overview
 
-`tmux-pair` is a Claude Code plugin for running writer/reviewer pairs and
-writer/reviewer/orchestrator triples in tmux panes. It creates isolated git
-worktrees, starts agent CLIs, sends role briefings, and provides helper commands
-for cross-pane messaging, compaction, monitoring, and cleanup.
+`tmux-pair` is a Claude Code plugin for running coding-agent solos or
+coordinated spawn-teams (orchestrator + 1-2 writers + 1-2 reviewers, sized 3..5)
+in tmux panes. It creates isolated git worktrees, starts agent CLIs, sends role
+briefings, and provides helper commands for cross-pane messaging, compaction,
+monitoring, and cleanup. The `/run` slash-command auto-recommends solo vs spawn
+from a short repo + task recon.
 
 ## Architecture
 
 - `scripts/tmux_pair.py`: main runtime. Owns tmux pane spawning, worktree
   creation, generated briefings, durable standards, send/compact/status/monitor
   subcommands, and pane identity handling.
-- `commands/pair.md` and `commands/triple.md`: Claude slash command wrappers
-  that parse user arguments and invoke the script.
+- `commands/solo.md`, `commands/spawn.md`, `commands/run.md`: Claude slash
+  command wrappers that parse user arguments and invoke the script (`run`
+  delegates to `/solo` or `/spawn` after a recon-driven recommendation).
 - `agents/*.md`: scoped subagent definitions for reviewer-readiness,
   rules-bootstrap, plan-check, final verifier, and final code-reviewer gates.
 - `skills/tmux-pair-orchestration/`: long-form workflow documentation,
@@ -24,19 +27,30 @@ for cross-pane messaging, compaction, monitoring, and cleanup.
 
 ## Feature Surface
 
-- Pair mode: writer + reviewer in a fresh worktree, with the human as
-  orchestrator.
-- Triple mode: orchestrator + writer + reviewer in a fresh worktree, with the
-  orchestrator handling recon, user clarification, plan-check, loop supervision,
-  and final verification.
-- Dual-review mode: optional second reviewer with independent review,
-  findings-swap, and orchestrator consolidation.
+- Solo mode: single agent in a fresh worktree, gated 6-phase self-driven
+  workflow (recon, plan + GATE-2, impl, GATE-3 self-review, PROJECT.md + skill
+  persist, commit). Adversarial gates run as subagents.
+- Spawn mode: orchestrator + 1-2 writers + 1-2 reviewers in a fresh worktree,
+  with the orchestrator handling recon, user clarification, plan-check, loop
+  supervision, and final verification. Sized via `--size 3..5`:
+  - size 3 (default): 1 writer + 1 reviewer + 1 orchestrator.
+  - size 4: 1 writer + 2 reviewers + 1 orchestrator (dual-review preset).
+  - size 4 + `--parallel-writers`: 2 writers + 1 reviewer + 1 orchestrator
+    (disjoint-bullet partitioning).
+  - size 5: 2 writers + 2 reviewers + 1 orchestrator (both presets).
+- Run mode (`/run` slash-command): repo + task recon, recommends solo vs spawn
+  (and recommended `--size`), delegates to `/solo` or `/spawn`. Explicit
+  user-mode overrides the recommendation.
+- Dual-review (reviewers >= 2): independent review, findings-swap, orchestrator
+  consolidation into one APPROVE/BLOCK.
+- Parallel-writers (writers >= 2): orchestrator partitions plan-bullets into
+  disjoint sub-sets per writer; no direct sync between writers.
 - Gated workflow: Clarify, Reviewer-Readiness, Plan-Check, Implementation Loop,
   Final-Verify.
 - Adaptive GATE-Strictness: Orch klassifiziert task_kind
   (bug-fix/feature/refactor) im Recon; gate-2-plan-check, gate-3-verifier und
   gate-3-code-reviewer lockern/schärfen Checklist-Items per Klasse.
-- --interactive Flag (Pair + Triple): opt-in Decision-Pause-Points. Default off
+- --interactive Flag (Spawn): opt-in Decision-Pause-Points. Default off
   (unattended-by-default mit V2-Threshold-Self-Decisions, alle geloggt im
   COMPLETE-Ping).
 - Inline-Fix-Spec: Reviewer darf <20-LOC-Findings als INLINE-FIX im
@@ -58,8 +72,8 @@ for cross-pane messaging, compaction, monitoring, and cleanup.
 
 ## Design Decisions
 
-- `tmux_pair.py send` is the only supported pair communication path because it
-  handles multi-line pastes and Enter retries for agent TUIs.
+- `tmux_pair.py send` is the only supported spawn-mode communication path
+  because it handles multi-line pastes and Enter retries for agent TUIs.
 - Sender names are stored in `@tmux-pair-sender` at spawn time. `pane_title` is
   only a fallback because agent TUIs can overwrite it with spinner or working
   directory status.
@@ -208,3 +222,59 @@ V2 Decision-Log für 0.15.1:
 | D1 | Marker-Trust statt Re-Run als Default | User-Feedback "das nochmal die workspace tests komplett laufen im gate 3 ist doch unnötig, das haben doch die engineers schon gemacht". TESTS-PROOF-Schema steht seit 0.14.0 (V7), enforcement war fehlend. |
 | D2 | Narrow-Scope per Bullet, workspace-gate nur pre-DONE | User-Feedback "möglichst viel parallel, pläne auf optimal, schnelle test ausführung optimiert". `cargo test --workspace` 10x in 10 Bullets ist Token+Wall-Clock-Waste. |
 | D3 | BLOCKER auf 0.14+ commits ohne Marker | 0.14.0 Migrations-Pflicht abgeschlossen, neue Spawns müssen den Block setzen. Legacy-Commits bleiben WARNING (Backward-Compat). |
+
+### 0.16.0 (BREAKING: /pair raus, /triple zu /spawn, dynamic team-size, /run auto-entry, 2026-05-15)
+
+Major-Bump mit Breaking-Changes auf Slash-Command-Surface + Python-CLI. Pair-
+Mode (writer + reviewer ohne Orchestrator, Human-als-Orchestrator) wird hart
+entfernt: das Konzept "Human-als-Orchestrator" hat in der Praxis nicht
+zuverlässig funktioniert (Human ist meist nicht da oder beschäftigt; Engineers
+warteten auf Decisions ohne Flow-Control). Triple-Mode wird zu `/spawn` mit
+dynamischer Größenwahl umbenannt und um `--size 3..5` plus `--parallel-writers`
+erweitert. Neue `/run` Auto-Entry: kurze Recon, empfiehlt solo oder spawn (mit
+recommended `--size`), delegiert.
+
+- BREAKING: `/pair` slash-command entfernt. `commands/pair.md` gelöscht. Kein
+  Deprecation-Alias.
+- BREAKING: `/triple` -> `/spawn`. `commands/triple.md` umbenannt zu
+  `commands/spawn.md` mit überarbeitetem Content.
+- BREAKING: `--dual-review` Flag entfernt. Stattdessen `--size 4` (default
+  dual-review preset) oder `--size 4 --parallel-writers` (2-writer preset).
+- NEW: `commands/run.md` Auto-Entry. Skill-Logik: clarify intent, repo-recon,
+  recommend solo vs spawn (mit `--size`), invoke `/solo` oder `/spawn`.
+  Explicit user-mode overrides recommendation.
+- NEW: `/spawn --size N` (default 3, choices 3/4/5). Mapping: 3 = 1W/1R/1O.
+  4 = 1W/2R/1O (dual-review). 4 + `--parallel-writers` = 2W/1R/1O. 5 = 2W/2R/1O.
+- NEW: `--parallel-writers` flag mit argparse-Validation (`--size 3 +
+  --parallel-writers` -> argparse-error).
+- NEW: `--writer-2-agent` flag analog `--reviewer-2-agent`.
+- NEW: Python-Helper `_spawn_layout(size, parallel_writers) -> {writers,
+  reviewers, orchestrator}` als Single-Source-of-Truth für Team-Size-Logik.
+- BREAKING: Primitive single-pane subcommand umbenannt `spawn` -> `pane`. Der
+  `spawn`-Slot ist jetzt der Team-Spawn (vorher `triple`); der primitive
+  Single-Pane-Spawner heißt jetzt `pane`.
+- NEW: `_peer_writer_block` Helper in Engineer-Briefings; Writer-Briefing bei
+  parallel-writers bekommt disjoint-bullets-Directive, Reviewer-Briefing
+  bekommt two-stream-tracking-Directive.
+- NEW: Orchestrator-Briefing PARALLEL-WRITERS-Direktive (analog DUAL-REVIEW)
+  mit Plan-Partition-Anleitung und Datei-Kollision-Protokoll.
+- JSON Output: `mode: "triple"` + `dual_review: bool` -> `mode: "spawn"` +
+  `size: int` + `writers: int` + `reviewers: int` + `parallel_writers: bool` +
+  `dual_review: bool`.
+- Versions-Sync: `plugin.json`, `.claude-plugin/marketplace.json`, und
+  `skills/tmux-pair-orchestration/SKILL.md` frontmatter alle auf 0.16.0.
+
+V2 Decision-Log für 0.16.0:
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Slash-Command-Name: `/spawn` (nicht `/team`, `/agents`) | User-Decision: "spawn" passt zur bestehenden Vokabular-Linie (tmux_pair.py spawn als Subcommand-Synonym für Worktree+Pane+Brief; neuer pane-Subcommand löst die Kollision). |
+| D2 | Slash-Command für Auto-Entry: zusätzlich `/run` neben Skill-Trigger | User-Decision: explicit slash-command ist diskoverable für User die nicht via Skill-Phrase einsteigen; Skill-Trigger bleibt parallel für natural-language Aufruf. |
+| D3 | Team-Size dynamisch ab 3, Skill recommends nach Recon, `--size` als explicit Override | User-Decision: 3 als kleinstes sinnvolles Team (orchestrator + 1W + 1R), Recon kann größer empfehlen wenn parallel-bullets oder dual-review nötig; User kann recommendation überstimmen. |
+| D4 | Hard removal `/pair`, kein Deprecation-Alias | User-Decision: Pair-Mode mit Human-als-Orchestrator hat strukturell nicht funktioniert; clean break ohne Alias-Confusion. Major-Bump rechtfertigt Breaking-Change. |
+| D5 | Plugin-Name bleibt "tmux-pair" trotz Removal von /pair | User-Decision: Etablierter Name, "pair protocol" bleibt als Konzept-Begriff für Writer+Reviewer-Loop innerhalb eines Spawns; Rename des Plugins würde Marketplace-URL und User-Memory brechen. |
+| D6 | `--dual-review` Flag hart entfernen, durch `--size` ersetzen | Cleanest API: --size ist die einzige Quelle für Team-Layout, dual-review folgt aus `reviewers >= 2`. Backward-Compat-Alias wäre Verwirrungs-Quelle. |
+| D7 | `cmd_spawn` (primitive) -> `cmd_pane`; `cmd_triple` -> `cmd_spawn` | Naming-Kollision-Auflösung: alter primitiver Single-Pane-Spawner kollidiert mit neuem Team-Spawn-Namen. `pane` beschreibt den primitiven Slot präziser. |
+| D8 | argparse-error für `--parallel-writers --size 3` statt silent-ignore | Plan-Check-Subagent-Finding: silent-ignore wäre Failure-Klasse; argparse-time-error scheitert früh und falsifizierbar. |
+| D9 | Writer-2 partner_pane = reviewer (gleich wie Writer-1), peer_writer_pane = Writer-1 als Cross-Awareness | Plan-Check-Finding: writer-2 muss disambig sein. Disjoint-bullets bedeutet kein direkter Sync zwischen Writern; Coordination via Orchestrator. peer_writer_pane nur als Awareness-Hint für Datei-Kollisions-Detection. |
+| D10 | PROJECT.md frontmatter SKILL.md version-Bump weiterhin manuell (kein automatischer Check) | check-plugin-versions.py prüft heute nur plugin.json + marketplace.json. SKILL.md frontmatter-Validation bleibt Follow-up (siehe 0.14.0 D10). 0.16.0 dokumentiert das im Acceptance-Block, fixt es aber nicht (Scope-Begrenzung). |

@@ -1,6 +1,6 @@
 # Failure modes
 
-Common ways pair and triple runs go wrong, with diagnostics, recovery, and prevention.
+Common ways spawn runs go wrong, with diagnostics, recovery, and prevention.
 
 ## 1. Send didn't submit
 
@@ -16,13 +16,13 @@ python3 <plugin>/scripts/tmux_pair.py capture <pane-id> --lines 50
 
 Look at the last few lines. If you see the message text but no agent response below it, the submit didn't happen.
 
-**Recovery:** Re-run `send` against the same pane with no payload (just the Enter helper) by repeating the same command — or send Enter manually:
+**Recovery:** Re-run `send` against the same pane with no payload (just the Enter helper) by repeating the same command. Or send Enter manually:
 
 ```
 tmux send-keys -t <pane-id> C-m
 ```
 
-**Prevention:** The bundled helper sends Enter three times with small gaps to work around the in-flight-tool case. For multi-line text it uses `load-buffer` + `paste-buffer -d` so the agent sees the whole block as one input. Don't bypass the helper with raw `tmux send-keys` for cross-pane messages — you'll re-introduce the bug.
+**Prevention:** The bundled helper sends Enter three times with small gaps to work around the in-flight-tool case. For multi-line text it uses `load-buffer` + `paste-buffer -d` so the agent sees the whole block as one input. Don't bypass the helper with raw `tmux send-keys` for cross-pane messages; you'll re-introduce the bug.
 
 ## 2. Briefing landed before the agent booted
 
@@ -40,7 +40,7 @@ If the tempfile is gone, regenerate the briefing manually using the templates in
 
 **Prevention:** If you know the agents are slow to boot on a cold machine, add a wrapper that calls the spawn and sleeps longer before the first send. The 14 seconds is a heuristic that works for warm systems.
 
-## 3. Engineers ping human directly in triple mode
+## 3. Engineers ping human directly instead of orchestrator
 
 **Symptom:** The human pane gets `REVIEW-READY`, `BLOCKER`, or other engineer-level events directly. Orchestrator sees nothing.
 
@@ -74,10 +74,10 @@ python3 <plugin>/scripts/tmux_pair.py send <engineer-pane> "PROCESS-NEEDS-FIX: A
    tmux new-window -t <session>: -n <window-name> -c <worktree-path>
    ```
 3. Add panes for the missing roles (writer/reviewer/orchestrator) using the orchestrator script's `spawn` subcommand or raw `tmux split-window`.
-4. Force the layout (`main-vertical` for pair, `main-horizontal` for triple).
+4. Force the layout (`main-horizontal` for spawn).
 5. Send recovery briefings that include a snapshot of the pre-crash state (uncommitted changes summary, last commit, last review event) so the agents pick up where they left off rather than starting over.
 
-**Prevention:** None — this is rare. Recovery is the design.
+**Prevention:** None. This is rare; recovery is the design.
 
 ## 5. Writer pushed without human OK
 
@@ -108,9 +108,9 @@ PROCESS-NEEDS-FIX: Drop style nits. Findings must be falsifiable bugs, missed re
 
 ## 7. Subagent leak
 
-**Symptom (triple mode):** The writer or reviewer used a sub-agent (their own delegate) to do recon, and the sub-agent's output is being used as the basis for `REVIEW-READY` or `REVIEW`.
+**Symptom (spawn mode):** The writer or reviewer used a sub-agent (their own delegate) to do recon, and the sub-agent's output is being used as the basis for `REVIEW-READY` or `REVIEW`.
 
-**Cause:** The pair's value comes from direct file reads, greps, and git inspection — first-hand information. A sub-agent inserts a layer of summarization that hides things.
+**Cause:** The spawn's value comes from direct file reads, greps, and git inspection (first-hand information). A sub-agent inserts a layer of summarization that hides things.
 
 **Recovery (orchestrator):** Block the current event, demand a redo:
 

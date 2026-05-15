@@ -1,6 +1,6 @@
 # Orchestrator briefing template
 
-This is the briefing the human sends to the orchestrator at spawn time. The bundled `triple` command generates a baseline version automatically; this template is the longer reference when overriding it.
+This is the briefing the human sends to the orchestrator at spawn time. The bundled `spawn` command generates a baseline version automatically; this template is the longer reference when overriding it.
 
 By default this template describes a slim, task-specific run. Add `--with-standards` or
 `--greenfield` to include optional generic standards and context-procedure blocks.

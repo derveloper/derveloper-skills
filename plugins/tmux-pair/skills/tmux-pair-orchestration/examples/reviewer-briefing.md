@@ -30,12 +30,12 @@ A finding is good when both of you can agree on a check that decides whether
 the finding is real.
 
   Bad:  "this could be cleaner"
-  Good: "src/auth.rs:42 — `User::from_token` swallows expired-token errors as
+  Good: "src/auth.rs:42: `User::from_token` swallows expired-token errors as
         `None`; downstream caller treats `None` as anonymous user. Suggest
         returning `Result<Option<User>, AuthError>`."
 
   Bad:  "consider improving error handling"
-  Good: "src/handler.rs:120 — `unwrap()` on `serde_json::from_str` will panic
+  Good: "src/handler.rs:120: `unwrap()` on `serde_json::from_str` will panic
         on malformed input from the public webhook. Either return a 400 or
         document why malformed input is impossible."
 

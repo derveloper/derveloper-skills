@@ -16,8 +16,8 @@ TASK
 functions, line numbers when known.>
 
 POINTERS (from recon)
-- <file:line> — <what's there, why it matters>
-- <file:line> — <what's there, why it matters>
+- <file:line>: <what's there, why it matters>
+- <file:line>: <what's there, why it matters>
 - Existing analogue: <file>::<function> does <thing>; the new code should follow this shape.
 
 DELIVERABLES
@@ -38,8 +38,7 @@ PAIR PROTOCOL
 - If APPROVE: commit (Conventional Commits, no --no-verify, no AI co-author trailer).
   Then ping: ... send <REVIEWER-PANE-ID> "DONE: <commit-sha> <branch state>"
 - If findings: fix, gates again, REVIEW-READY again. Loop.
-- BLOCKER: ping reviewer (and orchestrator if triple mode) with what is blocked
-  and what was tried.
+- BLOCKER: ping the orchestrator with what is blocked and what was tried.
 
 PUSH GATE
 Do NOT run `git push` until human replies `PUSH-OK`. Commits are fine; pushes

@@ -1,27 +1,26 @@
 # Gated Workflow
 
-Both `/pair` and `/triple` run through four forced quality gates before code lands on the branch:
+`/spawn` (in all sizes) runs through four forced quality gates before code lands on the branch:
 
 ```
 Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges
 ```
 
-Gates exist because pair-loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 1.5, 2, and 3; the user enforces gate 1 via `AskUserQuestion`.
+Gates exist because writer+reviewer loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 1.5, 2, and 3; the user enforces gate 1 via `AskUserQuestion`.
 
 This file is the long version. The bundled briefings already encode the workflow: read this when adapting briefings, debugging a stuck gate, or deciding when to force a `BLOCKER`.
 
 ## Who runs which gate
 
-| Mode | Gate 1 (Clarify) | Gate 1.5 (Reviewer-Readiness) | Gate 2 (Plan-Check) | Gate 3 (Final-Verify) |
-|------|-------------------|-------------------------------|---------------------|------------------------|
-| **triple** | Orchestrator asks user directly via `AskUserQuestion` (in its own pane) | Orchestrator spawns readiness-check subagent; if NEEDS-RULES, runs bootstrap loop with `AskUserQuestion` per gap | Orchestrator spawns subagent | Orchestrator spawns two subagents (verifier + code-reviewer) |
-| **pair** | Human asks user directly via `AskUserQuestion` | Human spawns readiness-check subagent; bootstrap loop owned by human | Human spawns subagent from their own context | Human spawns two subagents from their own context |
+| Gate 1 (Clarify) | Gate 1.5 (Reviewer-Readiness) | Gate 2 (Plan-Check) | Gate 3 (Final-Verify) |
+|-------------------|-------------------------------|---------------------|------------------------|
+| Orchestrator asks user directly via `AskUserQuestion` (in its own pane) | Orchestrator spawns readiness-check subagent; if NEEDS-RULES, runs bootstrap loop with `AskUserQuestion` per gap | Orchestrator spawns subagent | Orchestrator spawns two subagents (verifier + code-reviewer) |
 
-In a triple the orchestrator owns the `AskUserQuestion` call so the human stays unblocked. The human only sees major events (`MAJOR-STEP`, `BLOCKER`, `DONE`, `ABORT`, gate-3 verdicts, plus rare `GATE-1-ESCALATE` if the orchestrator hits a question outside its decision authority). In a pair the human IS the orchestrator and asks directly.
+The orchestrator owns the `AskUserQuestion` call so the human stays unblocked. The human only sees major events (`MAJOR-STEP`, `BLOCKER`, `DONE`, `ABORT`, gate-3 verdicts, plus rare `GATE-1-ESCALATE` if the orchestrator hits a question outside its decision authority). Solo mode runs the same gate logic with the solo agent itself as the decider (no separate orchestrator pane).
 
 ## Smart workflow (V1-V5)
 
-The smart workflow makes the gated run adaptive by `task_kind` while keeping the audit trail explicit. The orchestrator or pair master classifies every task during recon as `bug-fix`, `feature`, or `refactor`, passes that value to GATE 2 and GATE 3 subagents, includes all self-decisions in the final `COMPLETE` ping, AND persists every self-decision as a `PROJECT.md` Implementation-History row before the triple is considered complete.
+The smart workflow makes the gated run adaptive by `task_kind` while keeping the audit trail explicit. The orchestrator (or, in solo mode, the agent itself) classifies every task during recon as `bug-fix`, `feature`, or `refactor`, passes that value to GATE 2 and GATE 3 subagents, includes all self-decisions in the final `COMPLETE` ping, AND persists every self-decision as a `PROJECT.md` Implementation-History row before the spawn run is considered complete.
 
 ### V1 Reviewer-Trivial-Fix-Inline
 
@@ -106,13 +105,13 @@ Failure modes:
 
 ### V5 Unattended-Default
 
-Default mode is unattended in both pair and triple. Without `--interactive`, V2 self-decisions are made autonomously and recorded in both `COMPLETE` and `PROJECT.md`. With `--interactive`, the orchestrator or pair master pauses before every self-decision and asks the user via `AskUserQuestion`.
+Default mode is unattended in both solo and spawn. Without `--interactive`, V2 self-decisions are made autonomously and recorded in both `COMPLETE` and `PROJECT.md`. With `--interactive`, the orchestrator (or solo agent) pauses before every self-decision and asks the user via `AskUserQuestion`.
 
 This is briefing-text behavior. The Python runtime only carries the flag into generated briefings; it does not manage decision pauses after spawn.
 
 Failure modes:
 - Default run pauses for self-decidable choices: violates unattended default.
-- `--interactive` affects triple but not pair, or pair but not triple: command docs and briefing wiring are inconsistent.
+- `--interactive` flagged for one mode but not honoured in briefing wiring: command docs and runtime become inconsistent.
 - Decision is made in interactive mode without asking: missing pause point, re-brief the owner and log the incident.
 
 ## Smart workflow (V6-V10)
@@ -143,7 +142,7 @@ Reviewer panes inside the loop trust the marker for spot-checks too. They may st
 
 ### V8 Cargo-Target-Sharing
 
-`cmd_pair`/`cmd_triple` compute `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>/` (slug = basename, non-alphanumeric replaced by `_`) and prepend `env CARGO_TARGET_DIR=<path>` to every spawned boot command. Non-Cargo repos skip the env entirely. `--no-shared-target` disables sharing per spawn.
+`cmd_spawn` computes `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>/` (slug = basename, non-alphanumeric replaced by `_`) and prepends `env CARGO_TARGET_DIR=<path>` to every spawned boot command. Non-Cargo repos skip the env entirely. `--no-shared-target` disables sharing per spawn.
 
 Parallel worktrees on the same repo share the build cache. Cargo's own lock-file handles concurrency; occasional short blocks are normal.
 
@@ -173,7 +172,7 @@ Failure modes:
 
 **Goal:** validate assumptions and resolve open points BEFORE planning. Empty user input on day one is the most expensive failure mode in a long pair-run.
 
-**Trigger:** orchestrator (triple) or human (pair) finished initial recon and has a list of assumptions plus open questions.
+**Trigger:** orchestrator finished initial recon and has a list of assumptions plus open questions.
 
 **Mechanism:**
 
@@ -230,7 +229,7 @@ Output: `VERDICT: READY | NEEDS-RULES` plus `LANGUAGES`, `COVERAGE` per topic, `
 - `NEEDS-RULES` -> bootstrap loop:
   1. Per gap, orchestrator/human calls `AskUserQuestion` with 2-4 concrete options ("Welcher Linter blockiert Merges?", "Welcher Test-Runner ist Pflicht?", etc.). Recommended option first, suffix `(Recommended)`.
   2. Spawn `tmux-pair:rules-bootstrap` subagent (Sonnet 4.6, `Read+Grep+Glob+Bash+Edit+Write`). Inputs: GAPS list, user-answer block, detected languages, plugin templates path (`${CLAUDE_PLUGIN_ROOT}/templates/rules/`). Subagent bakes `.claude/rules/<topic>.md` from templates + repo recon + user answers.
-  3. Re-run readiness-check. If `READY` -> proceed. If `NEEDS-RULES` after a third iteration: `AskUserQuestion` "abort, manually amend, or accept partial coverage?". No master ping; the orchestrator owns the loop.
+  3. Re-run readiness-check. If `READY` -> proceed. If `NEEDS-RULES` after a third iteration: `AskUserQuestion` "abort, manually amend, or accept partial coverage?". The orchestrator owns the loop; the human is only pinged on `COMPLETE` or `ABORT`.
 - `READY` after a fresh bootstrap (rules just generated): orchestrator may ask the user via `AskUserQuestion` whether to run a `/tmux-pair:gepa` optimization pass on the new rules. Default: skip. GEPA is shipped as a plugin skill (`skills/gepa/`, Genetic-Pareto algorithm, paper arXiv:2507.19457). The orchestrator does NOT call GEPA autonomously because it requires user-supplied test diffs (3-5 known-bug diffs in `.gepa/test-diffs/`) for the eval script. If the user opts in and has those inputs, the orchestrator points them at `/tmux-pair:gepa init` and the user runs the loop in their own pane. Without test diffs the optimization score is wishful thinking; the orchestrator skips rather than fake it.
 
 **Why a separate gate, not part of GATE 2:** the rules state SHAPES the plan (which test runner, which architecture boundary, which security check). The plan-check then verifies the plan against those rules. Doing both in GATE 2 confuses two different judgements (intent vs craft).
@@ -267,7 +266,7 @@ Output is `VERDICT: PASS | WARNING | BLOCKER` plus `BLOCKERS:`, `WARNINGS:`, `NO
 
 **Verdict handling:**
 
-- `PASS` or `WARNING` -> brief engineers with `PLAN-LOCKED:` (plan + GATE-1 answers + recon pointers + pair protocol + escalation pane id).
+- `PASS` or `WARNING` -> brief engineers with `PLAN-LOCKED:` (plan + GATE-1 answers + recon pointers + pair protocol from `references/pair-protocol.md` + escalation pane id).
 - `BLOCKER` -> orchestrator pings `GATE-2-BLOCKER: <reason>` to human and waits. **No auto-retry.** Human decides: re-ask the user, revise the plan manually, or abort. Pair-mode human decides directly.
 
 **Why no auto-retry:** an auto-retry burns subagent tokens on the same wrong assumption. Human-in-the-loop is cheaper. If the planner gets it wrong twice, the planner's mental model is broken, not the plan.
@@ -305,14 +304,14 @@ Source: this rule was synthesised from real BLOCKERs in past pair runs (a fronte
 
 ## Implementation Loop
 
-Standard pair protocol (`references/pair-protocol.md`). Engineers wait for `PLAN-LOCKED:` before touching code. Once briefed:
+Standard pair protocol (`references/pair-protocol.md`). Engineers wait for `PLAN-LOCKED:` from the orchestrator before touching code. Once briefed:
 
 1. Writer codes a logical step.
 2. Writer runs the **smart test subset** (see below): only tests touching the diff, not the full suite.
 3. Writer or Reviewer uses subagents for complex side work when it keeps the main pane lean: parallel recon files, parallel test suites, or independent fix branches with disjoint files.
 4. Writer pings reviewer with `REVIEW-READY: <summary>`.
 5. Reviewer responds `REVIEW: APPROVE` or `REVIEW: <findings>`.
-6. Loop until `APPROVE`. Writer commits and pings `DONE: <sha>` to orchestrator (triple) or human (pair).
+6. Loop until `APPROVE`. Writer commits and pings `DONE: <sha>` to the orchestrator.
 7. Engineers can ping `BLOCKER` upstream at any time.
 
 The standards block in every briefing forbids `--no-verify`, AI co-author trailers, `ae/oe/ue/ss` substitutes, anti-AI-slop vocabulary, and a pile of other slop sources. Reviewers check standards as part of their review.
@@ -320,7 +319,7 @@ The standards block in every briefing forbids `--no-verify`, AI co-author traile
 ### Sender Identity
 
 Every ping sent through `tmux_pair.py send` carries an identity prefix so
-parallel pairs and triples can share a receiver without ambiguity. The send CLI
+parallel spawns can share a receiver without ambiguity. The send CLI
 adds `[FROM: <pane-name>] ` automatically when the message does not already
 start with `[FROM:`. Existing prefixes are left unchanged, so manual prefixes
 are idempotent. Example: `REVIEW-READY: B2 ...` from a writer pane named
@@ -342,7 +341,7 @@ Use-cases:
   in separate subagents when the suites do not share mutable state.
 - **Parallel fix branches:** for independent plan bullets with disjoint files,
   the orchestrator may propose multiple worktrees inside the triple worktree or
-  additional pair spawns. The plan must show this with markers like
+  additional spawn invocations. The plan must show this with markers like
   `B3 || B4 [parallel]`.
 
 Codex policy: for Codex subagent spawns with `codex apps` or the
@@ -396,7 +395,7 @@ that bullet.
 Two patterns the briefings enforce so memory and rules don't get ignored mid-run:
 
 - **Recall-discipline:** before every sensitive action (commit, push, external API, Jira post, kubectl on prod, DB mutation), the engineer cites the relevant rule file plus memory entry in their own output. Format: `Pre-Flight commit: anti-regression.md (REVIEW-READY-Format), feedback-workspace-tests.md (workspace-gate pflicht).` Trivia (local edits, read-only calls, test runs) skip the ritual.
-- **Bullet-start ritual:** before the first code edit on a new plan-bullet, the engineer posts a short block with the bullet's class (UI / Backend / Migration / Tooling / Doc), relevant rules, relevant memory, and the common BLOCKER-classes for that class. Repo's own `pre-flight-checklists.md` (if present) supplies the class-specific lists. If the class is unclear: ping orchestrator/master, don't guess.
+- **Bullet-start ritual:** before the first code edit on a new plan-bullet, the engineer posts a short block with the bullet's class (UI / Backend / Migration / Tooling / Doc), relevant rules, relevant memory, and the common BLOCKER-classes for that class. Repo's own `pre-flight-checklists.md` (if present) supplies the class-specific lists. If the class is unclear: ping the orchestrator, don't guess.
 
 Both rituals exist because in pair-runs prior to the rules-from-sessions changes, established rules were ignored 3-4 times per cycle: workspace-tests skipped, the wrong MCP tool reached for, an inappropriate remote agent invoked for a local task. The fix wasn't more rules; it was forcing the engineer to put the rule in their pane-context at the moment of risk.
 
@@ -418,7 +417,7 @@ If the engineer hits a question that requires a user decision (scope change, beh
 CLARIFY-NEEDED: <question + 2-4 options>
 ```
 
-In a pair, the master receives this and forwards via `AskUserQuestion`. In a triple, the orchestrator receives this and uses its own `AskUserQuestion` in its pane (the triple already has the orchestrator owning the user dialog so the human stays unblocked).
+The orchestrator receives this and uses its own `AskUserQuestion` in its pane; the human stays unblocked. In solo mode the agent calls `AskUserQuestion` directly.
 
 Engineers do NOT decide user-facing questions on their own. "I'll just pick option A" with no recall is the failure mode this exists to prevent.
 
@@ -474,24 +473,6 @@ Each agent (orchestrator, writer, reviewer) keeps its main pane lean. Heavy read
 - Diff-first: `git diff base..HEAD` is the entry point. Read full files only where the diff genuinely needs context.
 - Falsifiable findings ("`src/auth.rs:42` swallows expired-token errors as `None`") instead of "re-read the whole module".
 
-## Pair-Master duties (when there's no orchestrator)
-
-In pair mode the human IS the orchestrator. The plugin spawns engineers and prints a JSON receipt with pane IDs; everything beyond that is the master's job. The master's duties echo the orchestrator-briefing block from `_briefing_orchestrator` in `scripts/tmux_pair.py`, but live in the master's conversation context (the human's own `claude` session) instead of a kodifizierten briefing block. If you maintain a long-running master (e.g. a daily session), keep these duties in the master's system context (`~/.claude/CLAUDE.md`, project `CLAUDE.md`, or a memory file).
-
-The duties:
-
-1. **Recon**: read upstream docs, grep the codebase, identify pointers. Heavy reads via `Task(subagent_type='Explore')` (Haiku, read-only) with a concrete question and "report in <300 words". External docs / web go to a `general-purpose` subagent.
-2. **GATE 1 (Clarify)**: call `AskUserQuestion` directly. The master is its own user-decision layer. Empty user input on day one is the most expensive failure mode in a long pair-run.
-3. **Plan**: max ~5 large bullets, each with concrete files+lines, edit strategy, test coverage, parallelisability marker, measurable done-definition.
-4. **GATE 2 (Plan-Check)**: spawn one `tmux-pair:gate-2-plan-check` subagent (Sonnet 4.6, scoped, no Edit/Write). `BLOCKER` → revise the plan or escalate to user (don't auto-retry).
-5. **Brief engineers**: send `PLAN-LOCKED:` with the writer-briefing and reviewer-briefing as separate messages.
-6. **Watch loop**: engineers ping `REVIEW-READY` / `BLOCKER` / `CLARIFY-NEEDED`. Master forwards `CLARIFY-NEEDED` via `AskUserQuestion`, escalates `BLOCKER` to user when out of decision authority, otherwise nudges and waits.
-7. **GATE 3 (Final-Verify)**: spawn TWO scoped subagents in parallel after writer's `DONE` ping: `tmux-pair:gate-3-verifier` (Haiku 4.5) + `tmux-pair:gate-3-code-reviewer` (Sonnet 4.6).
-8. **COMPLETE**: only after `GATE 3 PASS`, with `gate-3=PASS via <verifier-name + code-reviewer-name>` mandatory in the ping.
-9. **Cleanup**: merge, push, kill window, remove worktree, delete branch. Strictly the master's call, never the engineers'.
-
-The master does NOT code, does NOT review, does NOT commit on behalf of the engineers, does NOT decide user-facing questions on its own. The triple orchestrator does the same job but in a dedicated pane; if you find yourself in pair-mode running a task that needs all of duties 1-9, switch to triple next time.
-
 ## Commit and merge strategy
 
 Few commits with thorough messages. Engineer commits during the loop are kept in their natural granularity (one logical step per commit, conventional-commits format), and the human squashes before merge to `main`. That means engineer commits must be **descriptive enough** that a meaningful squash message can be distilled from N of them. A commit message of "fix" or "wip" is a `REVIEW: <findings>`-grade problem, not a stylistic nit.
@@ -500,14 +481,14 @@ Push happens only after human OK. The squash is the human's job, not the orchest
 
 ### COMPLETE-Ping format (NACH GATE-3, never before)
 
-The orchestrator/master sends `COMPLETE` to the user only AFTER GATE 3 returned PASS. Required format:
+The orchestrator sends `COMPLETE` to the user only AFTER GATE 3 returned PASS. Required format:
 
 ```
 COMPLETE: <Phase>. gate-3=PASS via <verifier-name + code-reviewer-name>.
 <diff-stat or commit list>. Bezug: <plan goals all met>.
 ```
 
-If the master skips GATE 3, the reviewer is allowed to start a verify run on its own and mark the COMPLETE as premature. Master does not commit against a GATE-3 FAIL without explicit user escalation.
+If the orchestrator skips GATE 3, the reviewer is allowed to start a verify run on its own and mark the COMPLETE as premature. The orchestrator does not commit against a GATE-3 FAIL without explicit user escalation.
 
 Source: a recent run sent COMPLETE before GATE 3, then ~30 minutes later came back with three real bugs in the last bullet. Trust erodes faster than the time GATE 3 would have cost.
 
@@ -576,8 +557,8 @@ For projects with thin or partial rules, GATE 1.5 fills only the missing topics 
 
 | Event | From | To | Payload |
 |-------|------|-----|---------|
-| `GATE-1-ESCALATE <window>` | orchestrator | human | Triple only. Reason + question(s) outside the orchestrator's decision authority |
-| `GATE-1-DECISION` | human | orchestrator | Triple only. Human's answer to the escalated question(s) |
+| `GATE-1-ESCALATE <window>` | orchestrator | human | Rare. Reason + question(s) outside the orchestrator's decision authority |
+| `GATE-1-DECISION` | human | orchestrator | Human's answer to the escalated question(s) |
 | `GATE-1.5-NEEDS-RULES` | orchestrator-internal | orchestrator-internal | readiness-check output; not crossed pane boundary, drives bootstrap loop |
 | `GATE-1.5-READY` | orchestrator-internal | orchestrator-internal | readiness-check pass; orchestrator proceeds to plan |
 | `GATE-2-BLOCKER` | orchestrator/human | human/user | subagent's BLOCKER findings |
@@ -585,9 +566,9 @@ For projects with thin or partial rules, GATE 1.5 fills only the missing topics 
 | `GATE-3-PASS <window>` | orchestrator/human | human/user | diff-stat, commit list |
 | `GATE-3-BLOCKER` | orchestrator/human | human/user | subagent BLOCKERS, suggested next move |
 
-`GATE-1-ESCALATE`/`GATE-1-DECISION` are the ONLY gate-1 events crossing pane boundaries in normal triples. The orchestrator's regular `AskUserQuestion`/answer cycle stays inside its own pane and never reaches the human.
+`GATE-1-ESCALATE`/`GATE-1-DECISION` are the ONLY gate-1 events crossing pane boundaries in normal spawns. The orchestrator's regular `AskUserQuestion`/answer cycle stays inside its own pane and never reaches the human.
 
-These extend the base pair-protocol vocabulary (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`, etc., see `references/pair-protocol.md`). Engineers send those; gate events go between orchestrator and human.
+These extend the base pair-protocol vocabulary (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`; see `references/pair-protocol.md`). Engineers send those; gate events go between orchestrator and human.
 
 ## Failure modes specific to gated runs
 

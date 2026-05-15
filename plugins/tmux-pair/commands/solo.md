@@ -34,16 +34,17 @@ agent picks domain-experts over `general-purpose` for parallel work.
 - `/solo ~/code/myapp main small-doc --claude-model claude-opus-4-6` (200k context)
 - `/solo ~/code/myapp main bulk-rename --agent pi` (pi as solo, default cortecs/qwen3-coder-next)
 
-## When solo vs pair vs triple
+## When solo vs spawn
 
 | Scenario | Recommended |
 |----------|-------------|
 | Self-contained refactor with adversarial self-review enough | **solo (gated)** |
 | Doc cleanup, rule-to-skill migration, repo-wide rename | **solo (gated)** or **solo --no-gated** |
 | Plugin update with workflow consistency check | **solo (gated)** |
-| Risky feature, want second pair of eyes throughout | **pair** |
-| Multi-file feature with upfront recon need | **triple** |
-| Security-sensitive, dual review wanted | **pair --dual-review** or **triple --dual-review** |
+| Risky feature, want a dedicated reviewer pane throughout | **spawn --size 3** |
+| Multi-file feature with upfront recon need + dedicated orchestrator | **spawn --size 3** (or 4 for dual-review) |
+| Security-sensitive, two reviewers consolidating | **spawn --size 4** (dual-review preset) |
+| Parallel-friendly feature with disjoint plan-bullets | **spawn --size 4 --parallel-writers** (or **--size 5**) |
 
 Solo trades a second pane (reviewer) for subagent-driven self-review. Cheaper
 in panes, but less continuous oversight. Good for cleanups and trivial-but-large
@@ -54,7 +55,7 @@ and `gate-3-*` subagents.
 
 - `--no-gated`: bypass the 6-phase workflow briefing. Minimal spawn + task. Use for trivial tasks where subagent-driven recon/plan/review is overkill.
 - `--no-worktree`: skip `git worktree add`, run on the project's current branch directly. Codex `AGENTS.md` write to project is skipped to avoid pollution.
-- `--interactive`: decision-pause-points in solo briefing (rare; default autonom). Flag-parity with pair/triple.
+- `--interactive`: decision-pause-points in solo briefing (rare; default autonom). Flag-parity with spawn.
 - `--with-standards`: append the durable standards bundle (STANDARDS, RECALL_DISCIPLINE, BULLET_START_RITUAL, PAIR_PROTOCOL) to the briefing.
 - `--greenfield`: enables `--with-standards` plus the greenfield pre-flight block. For first-session repos without `.claude/rules/` seed.
 - `--agent <name>`: agent for the solo pane (default `claude`). Other choices per `~/.config/tmux-pair/agents.json`: `codex`, `pi`.
