@@ -4,7 +4,7 @@ Personal Claude Code plugin marketplace.
 
 ## Plugins
 
-- **[tmux-pair](plugins/tmux-pair/)** (v0.14.0) — Spawn writer/reviewer agent pairs (or writer/reviewer/orchestrator triples) in fresh git worktrees, wired up via tmux. Features: 5-gate workflow, V1-V5 smart-workflow primitives (inline-fix, decision-threshold, adaptive strictness, BLOCKER/WARNING/NOTE, unattended default), V6-V10 caching + trust-chains (readiness-cache, TESTS-PROOF marker, cargo-target sharing, recon-cache with delta, inline-gates for trivial plans), PROJECT.md care, durable standards, parallel-plan markers, dual-review.
+- **[tmux-pair](plugins/tmux-pair/)** (v0.15.1) — Spawn solo (single agent + gated 6-phase subagent-driven self-review), pair (writer/reviewer), or triple (writer/reviewer/orchestrator) agent runs in fresh git worktrees, wired up via tmux. Features: 5-gate workflow for pair/triple plus 6-phase workflow for solo, V1-V5 smart-workflow primitives (inline-fix, decision-threshold, adaptive strictness, BLOCKER/WARNING/NOTE, unattended default), V6-V10 caching + trust-chains (readiness-cache, TESTS-PROOF marker enforced as trust-source for gate-3 verifier, cargo-target sharing, recon-cache with delta, inline-gates for trivial plans), PROJECT.md care, repo-specific subagent auto-detection (`.claude/agents/<repo>-*.md`), durable standards, parallel-plan markers, dual-review, pi as third coding-agent alongside claude + codex.
 
 ## Install
 
