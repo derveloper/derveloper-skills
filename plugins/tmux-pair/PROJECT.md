@@ -139,3 +139,72 @@ V2 Decision-Log für 0.14.0:
 | D9 | V8 nur für Cargo-Repos aktivieren (`Cargo.toml` Detection), sonst Env nicht setzen | Self-Decision Repo-Pattern-Match: setzen einer ignorierten Env tut nichts, aber ein leerer Pfad in der Pane-Anzeige wirkt verwirrend; `None`-Return hält Boot-Cmd lesbar. |
 | D10 | SKILL.md frontmatter `version:` mit-bumpen | GATE-2-BLOCKER B5/wiring-gap; PROJECT.md Design-Decision verlangt Versions-Sync zwischen `plugin.json`, `marketplace.json` und Skill-Frontmatter. `check-plugin-versions.py` prüft heute nur 2 von 3 -> Follow-up: Script erweitern (NOTE, kein Hard-Block in 0.14.0). |
 | D11 | TESTS-PROOF-Block in 0.14.0 noch nicht durch Writer-Briefing-Templates erzwungen | Backward-Compat-Phase: alte DONEs ohne Marker werden mit WARNING re-runned, neue Writer-Briefings können den Block in 0.15+ als Pflicht aufnehmen. Schema steht; Migration phasenweise. |
+
+### 0.15.0 (Solo-Mode + Repo-Subagent-Detection, 2026-05-14)
+
+Drittes Spawn-Mode neben pair/triple: solo. Ein Agent, gated 6-Phase
+Self-Driven-Workflow, Subagent-gestützte adversariale Reviews. Plus
+automatische Erkennung repo-spezifischer Subagents in jedem Briefing.
+
+- Solo-Mode: `/solo <project> <base> <feature> [task]` spawnt einen
+  Agent in frischem Worktree. Default gated (6 Phasen: Recon -> Plan +
+  GATE-2 -> Impl -> GATE-3 Self-Review -> PROJECT.md + Skill-Persist ->
+  Commit + DONE-Ping). Recon, Plan-Check, Code-Review und Verifier laufen
+  als Subagents (`tmux-pair:gate-2-plan-check`, `tmux-pair:gate-3-verifier`,
+  `tmux-pair:gate-3-code-reviewer`). `--no-gated` schaltet auf Minimal-Spawn.
+- Repo-Subagent-Detection: `_detect_repo_subagents(project)` scannt
+  `.claude/agents/<project-name>-*.md` und listet alle Treffer im Briefing.
+  Solo (und pair/triple) instruieren den Agent diese Domain-Experten
+  gegenüber `general-purpose` zu bevorzugen. Detection-Logik: filename-stem
+  beginnt mit `<project.name>-`.
+- Companion-Files: `commands/solo.md` (Slash-Command), Solo-Block in
+  SKILL.md, `cmd_solo` + `_briefing_solo` in `scripts/tmux_pair.py`,
+  `solo` argparse-Subcommand mit allen Flags (--no-gated, --no-worktree,
+  --interactive, --with-standards, --greenfield, --agent, --claude-*,
+  --pi-*, --no-shared-target).
+- Feedback-Memory: `feedback_repo_specific_subagents_first.md` als
+  durable User-Regel zementiert: "Repo mit `.claude/agents/<repo>-*` ->
+  IMMER diese im Briefing nennen, niemals general-purpose als Default".
+
+V2 Decision-Log für 0.15.0:
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Solo-Default gated ON | User-Decision GATE 1: Solo-Workflow soll standardmäßig die Gates durchlaufen, weil der ganze Wert in adversarialer Selbst-Review liegt. `--no-gated` als Opt-out für triviale Tasks. |
+| D2 | Solo-Default Worktree ON | User-Decision GATE 1: Solo soll wie pair/triple in frischem Worktree spawnen, sonst zerstören Agents-Edits lokale Working-Dir-States. `--no-worktree` als Opt-out für Fortsetzung bestehender Branches. |
+| D3 | Repo-Detection-Pattern: filename-stem-prefix `<project.name>-` | Konvention-Match mit existierendem `.claude/agents/`-Layout. Detection arbeitet sprachunabhängig und ohne YAML-Parsing. |
+| D4 | Detection-Hint in Briefing UND Skill | User-Decision GATE 1 Both: Skill-Hint hilft Agent auch nach `/compact`, Briefing-Hint greift sofort beim Boot. Doppelt hält besser. |
+| D5 | Skill-Persist (Phase 5) statt Rules-Persist | Path-scoped Skills (`.claude/skills/<repo>-<topic>/SKILL.md`) sind die neue Default-Konvention seit ebca198. Rules nur für Cross-Cutting-Always-On-Items. |
+
+### 0.15.1 (No-Double-Work + TESTS-PROOF-Trust + Parallel-Default, 2026-05-15)
+
+Patch-Bump: gate-3-verifier vertraut TESTS-PROOF-Markern und re-runned
+NIEMALS workspace-weite Gates die Engineers bereits zertifiziert haben.
+Plus harte PARALLEL-BY-DEFAULT-Regel in allen Briefings.
+
+- `gate-3-verifier.md` Item 6 verschärft: Decision-Matrix per
+  Bullet-Commit (`found=true + head_matches=true` -> trust + skip Re-Run;
+  `head_matches=false` -> narrow Re-Run + WARNING; missing 0.14+ ->
+  BLOCKER; missing legacy -> narrow Re-Run + WARNING). NIEMALS
+  workspace-weiter "to be safe" Run wenn Marker valid.
+- `gate-2-plan-check.md` Item 10: NARROW SCOPE Pflicht (cargo nextest -p
+  <crate>, pytest <path>, pnpm test <glob>); Plan ohne TESTS-PROOF-Anchor
+  in DONE-Definition jedes Bullets -> BLOCKER; Plan mit
+  `cargo test --workspace` pro Bullet -> WARNING.
+- `tmux_pair.py` ENGINEER_SUBAGENT_STRATEGY_BLOCK: PARALLEL BY DEFAULT +
+  NO DOUBLE WORK Pflicht-Sektionen. Independent bullets serial =
+  Anti-Pattern.
+- `tmux_pair.py` TEST_STRATEGY_BLOCK: TESTS-PROOF-Marker Pflicht in
+  jedem Bullet-Commit + DONE-Ping (Migration von "Schema steht" auf
+  "Schema enforced").
+- GATE-3-Orchestrator-Template (`_briefing_gate_prompts`): explizite
+  Marker-Anweisung "Trusts engineers' TESTS-PROOF marker; runs tests
+  ONLY if marker missing or stale, and only the narrowest scope".
+
+V2 Decision-Log für 0.15.1:
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Marker-Trust statt Re-Run als Default | User-Feedback "das nochmal die workspace tests komplett laufen im gate 3 ist doch unnötig, das haben doch die engineers schon gemacht". TESTS-PROOF-Schema steht seit 0.14.0 (V7), enforcement war fehlend. |
+| D2 | Narrow-Scope per Bullet, workspace-gate nur pre-DONE | User-Feedback "möglichst viel parallel, pläne auf optimal, schnelle test ausführung optimiert". `cargo test --workspace` 10x in 10 Bullets ist Token+Wall-Clock-Waste. |
+| D3 | BLOCKER auf 0.14+ commits ohne Marker | 0.14.0 Migrations-Pflicht abgeschlossen, neue Spawns müssen den Block setzen. Legacy-Commits bleiben WARNING (Backward-Compat). |

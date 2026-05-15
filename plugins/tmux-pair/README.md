@@ -1,17 +1,18 @@
 # tmux-pair
 
-Spawn coding-agent pairs or triples in tmux panes, each pinned to its own fresh `git worktree`.
+Spawn coding-agent solos, pairs, or triples in tmux panes, each pinned to its own fresh `git worktree`.
 
 ## What it does
 
-Two modes, both create a sibling worktree and a tmux window with one pane per agent:
+Three modes, all create a sibling worktree and a tmux window with one pane per agent:
 
 | Mode | Panes | Layout | Use when |
 |------|-------|--------|----------|
+| **solo** | one agent (gated 6-phase, subagent-driven self-review) | single pane | self-contained refactor/cleanup where adversarial gate-subagents are enough; human is hands-off after spawn |
 | **pair** | Writer + Reviewer | side by side | tasks small enough that the human directly relays between the two |
 | **triple** | Writer + Reviewer + Orchestrator | Orchestrator on top, Writer/Reviewer below | tasks large enough that you want a dedicated agent doing recon, briefing the engineers, and filtering noise upward |
 
-In both modes the agents talk peer-to-peer by running:
+In pair and triple, the agents talk peer-to-peer by running:
 
 ```
 python3 <plugin>/scripts/tmux_pair.py send <pane-id> "<message>"
@@ -31,33 +32,38 @@ The helper handles the multi-line submit quirks of common agent TUIs (paste-buff
 Inside an existing tmux session:
 
 ```
-/pair <project-path> <base-ref> <feature-name> <task description>
-```
-
-or for a triple:
-
-```
+/solo   <project-path> <base-ref> <feature-name> <task description>
+/pair   <project-path> <base-ref> <feature-name> <task description>
 /triple <project-path> <base-ref> <feature-name> <task description>
 ```
 
-Both create a worktree at `<project-parent>/<project-basename>-wt-<feature>`, branch `feature/<feature>` from `<base-ref>`, and brief the agents.
+All three create a worktree at `<project-parent>/<project-basename>-wt-<feature>`, branch `feature/<feature>` from `<base-ref>`, and brief the agent(s).
+
+Solo runs a single agent through a 6-phase gated workflow (recon, plan+GATE-2, impl, GATE-3 self-review, PROJECT.md + skill persist, commit). Subagents drive the parallel recon, the adversarial plan-check (`tmux-pair:gate-2-plan-check`), and the final review (`tmux-pair:gate-3-verifier` + `tmux-pair:gate-3-code-reviewer`). Switch off the gates with `--no-gated`.
 
 ## Configuration
 
-Spawn-time flags (both modes unless noted):
+Spawn-time flags (all modes unless noted):
 
 ```
---writer-agent codex            # default: codex
---reviewer-agent claude         # default: claude (reviewer-1 in dual-review)
+--writer-agent codex            # pair/triple, default: codex
+--reviewer-agent claude         # pair/triple, default: claude (reviewer-1 in dual-review)
 --orchestrator-agent claude     # triple only, default: claude
---with-standards               # include durable standards bundle in briefings
+--agent claude                  # solo only, default: claude (choices: claude|codex|pi)
+--no-gated                      # solo only, bypass the 6-phase gated workflow briefing
+--with-standards                # include durable standards bundle in briefings
 --greenfield                    # include standards plus greenfield pre-flight
---dual-review                   # opt-in second reviewer (off by default)
+--dual-review                   # pair/triple, opt-in second reviewer (off by default)
 --reviewer-2-agent codex        # second reviewer when --dual-review (default: codex)
 --no-worktree                   # skip git worktree, run on the project's current branch
 --interactive                   # opt-in Decision-Pause-Points for V2 decisions
 --claude-model claude-opus-4-7  # default model for any claude pane
 --claude-effort max             # default --effort level for any claude pane
+--pi-provider cortecs           # pi default provider (claude-bridge for Subscription)
+--pi-model qwen3-coder-next     # pi default model (claude-opus-4-7 via bridge)
+--pi-thinking high              # pi default reasoning level
+--no-cache                      # disable V6 readiness-cache + V9 recon-cache (pair/triple)
+--no-shared-target              # disable V8 CARGO_TARGET_DIR sharing (all modes)
 ```
 
 Add or replace agent commands in `~/.config/tmux-pair/agents.json`:
@@ -79,9 +85,11 @@ In triple, this lean default is useful for resume flows. For full orchestrator b
 The default claude model is `claude-opus-4-7` (1M context). Override per spawn:
 
 ```
-/pair  ~/code/myapp main session-tokens --claude-model claude-opus-4-6
+/solo   ~/code/myapp main rule-migration --no-gated
+/solo   ~/code/myapp main repo-rename --claude-model claude-opus-4-6
+/pair   ~/code/myapp main session-tokens --claude-model claude-opus-4-6
 /triple ~/code/myapp main session-tokens --claude-model claude-opus-4-6
-/pair  ~/code/myapp main full-review --with-standards
+/pair   ~/code/myapp main full-review --with-standards
 /triple ~/code/myapp main greenfield-session --greenfield
 ```
 
@@ -128,7 +136,7 @@ The orchestrator's gate-checks and recon are routed to plugin-namespaced subagen
 
 Net effect: ~60-70 percent token savings vs all-Opus subagents, no quality loss on gate-tasks. The agent files live in `agents/` and ship with the plugin; per-spawn customisation goes in those files, not in the orchestrator briefing.
 
-## Smart workflow (V1-V5)
+## Smart workflow (V1-V10)
 
 - V1 Reviewer-Trivial-Fix-Inline: reviewers can send isolated <20 LOC cosmetic,
   typo, or missing-doc patches as `INLINE-FIX`; writers apply and ACK with
@@ -142,8 +150,30 @@ Net effect: ~60-70 percent token savings vs all-Opus subagents, no quality loss 
   per class.
 - V4 Engineer-Auto-Resolve WARNINGs: BLOCKER enters the fix-loop, WARNING goes
   to follow-up memory plus PROJECT.md when relevant, NOTE is log-only.
-- V5 Unattended-Default: `/pair` and `/triple` run unattended by default;
+- V5 Unattended-Default: `/solo`, `/pair`, `/triple` run unattended by default;
   `--interactive` turns V2 self-decisions into `AskUserQuestion` pause points.
+- V6 Readiness-Cache (24h TTL): `reviewer-readiness-check` results cached at
+  `~/.cache/tmux-pair/readiness/<repo>-<rules-hash>-<commit>.json`. Cache-Hit +
+  PASS skips the subagent spawn. `NEEDS-RULES` is never cached. Bust via
+  `--no-cache`.
+- V7 Test-Trust-Chain (TESTS-PROOF marker): writer DONE-Pings and bullet
+  commit messages carry a `TESTS-PROOF:` block (test/lint/fmt commands + PASS
+  counts + `COMMIT_SHA`). `gate-3-verifier` parses via
+  `tmux_pair.py parse-tests-proof` and trusts when `HEAD == COMMIT_SHA`. Stale
+  markers WARNING + narrow re-run; missing on 0.14+ runs BLOCKER. No
+  workspace-wide re-runs when the engineers already certified the suite.
+- V8 Cargo-Target-Sharing: shared `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo>/`
+  prefix on every boot command for Cargo repos. Cross-worktree cache; cargo's
+  lock-file handles concurrency. Non-Rust repos skip automatically. Bust via
+  `--no-shared-target`.
+- V9 Recon-Cache with Delta-Mode (1h TTL): orchestrator recon JSON cached at
+  `/tmp/tmux-pair-recon-<repo>-<commit>.json`; follow-up spawns read the cache
+  + delta-recon for files with `mtime > cache-time`. Bust via `--no-cache`.
+- V10 Inline-Gates for trivial plans: when `task_kind=bug-fix` AND
+  `bullets <= 3` AND `predicted files-touched <= 5`, the orchestrator runs
+  GATE 2 inline in its own pane; `gate-3-verifier` may also inline when
+  TESTS-PROOF is valid. `gate-3-code-reviewer` always stays as subagent.
+  Helper: `tmux_pair.py inline-gate-decide --plan-file <path> --task-kind <kind>`.
 
 ### Engineer subagents and parallel plans
 
@@ -208,7 +238,7 @@ To compact both engineers in a triple in parallel, run two `compact` calls with 
 
 The plugin ships three skills:
 
-- **`tmux-pair-orchestration`**: documents the pair protocol (`REVIEW-READY` → `REVIEW` → loop), when to choose pair vs. triple, briefing templates for each role, and failure modes. Triggers when the user asks for things like "spin up a writer/reviewer pair", "run two agents on this", "set up an orchestrator + pair", or names the workflow directly.
+- **`tmux-pair-orchestration`**: documents the pair protocol (`REVIEW-READY` → `REVIEW` → loop), when to choose solo vs. pair vs. triple, briefing templates for each role, the 6-phase solo workflow, the 5-gate pair/triple workflow with V1-V10 smartness, and failure modes. Triggers when the user asks for things like "spawn a solo with self-review", "spin up a writer/reviewer pair", "run two agents on this", "set up an orchestrator + pair", or names the workflow directly.
 - **`/tmux-pair:gepa`**: Genetic-Pareto prompt/text-artifact optimization (paper arXiv:2507.19457). Used opt-in after rules-bootstrap to optimize freshly generated `.claude/rules/*.md` against user-supplied test diffs. Plugin-namespaced so it does not collide with a user-local `/gepa` install. Skill files: `skills/gepa/`.
 - **`/tmux-pair:dg`**: Dinesh-vs-Gilfoyle adversarial code review. Two AI personas (attacker + defender) debate a diff or file until convergence. Useful as an optional pre-GATE-3 step on security/concurrency/auth/crypto/migration bullets. Skill files: `skills/dg/`.
 

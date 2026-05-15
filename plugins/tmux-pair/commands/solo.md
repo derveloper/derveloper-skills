@@ -1,3 +1,8 @@
+---
+description: Spawn a single agent in a fresh git worktree, gated by a 6-phase self-driven workflow (recon, plan-check, impl, self-review, PROJECT.md/skill-persist, commit) with subagent-driven adversarial gates
+argument-hint: <project-path> <base> <feature> [task...] [--no-gated] [--no-worktree] [--interactive] [--with-standards] [--greenfield] [--agent claude|codex|pi] [--claude-model SLUG] [--claude-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL] [--pi-provider NAME] [--no-shared-target]
+---
+
 # solo
 
 Spawn a single agent in a fresh `git worktree`, gated by a 6-phase self-driven
@@ -64,7 +69,7 @@ and `gate-3-*` subagents.
 Parse arguments. If unambiguous, run:
 
 ```bash
-python3 /Users/user/Projects/derveloper-skills/plugins/tmux-pair/scripts/tmux_pair.py solo \
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py solo \
   --project <project-path> \
   --base <base> \
   --feature <feature> \
@@ -72,7 +77,8 @@ python3 /Users/user/Projects/derveloper-skills/plugins/tmux-pair/scripts/tmux_pa
   [--no-gated] [--no-worktree] [--interactive] [--with-standards] [--greenfield] \
   [--agent <claude|codex|pi>] \
   [--claude-model <slug>] [--claude-effort <level>] \
-  [--pi-model <slug>] [--pi-thinking <level>] [--pi-provider <name>]
+  [--pi-model <slug>] [--pi-thinking <level>] [--pi-provider <name>] \
+  [--no-shared-target]
 ```
 
 If the feature description is missing or ambiguous, ask the user before spawning.

@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spin up a writer/reviewer pair", "run two agents on this", "pair these agents", "set up an orchestrator + pair", "launch a triple", "spawn a solo with self-review", "send a single agent on a self-contained task", "use the tmux-pair workflow", or otherwise wants to run one, two, or three coding agents in tmux panes wired up via git worktrees. Covers solo (single agent + gated subagent-driven self-review), pair (writer + reviewer), triple (writer + reviewer + orchestrator). Includes the pair protocol, when to choose solo vs pair vs triple, durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify → Reviewer-Readiness → Plan-Check → Loop → Final-Verify with rules-bootstrap loop, PROJECT.md care, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), sender identity prefixes, explicit parallel-plan markers, engineer subagent strategy with repo-specific subagent detection (`.claude/agents/<repo>-*.md` listed in briefings), bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.15.0
+version: 0.15.1
 ---
 
 # tmux-pair-orchestration
@@ -109,7 +109,7 @@ The standards block covers: real Umlaute (no ASCII substitutes), Conventional Co
 
 ## Gated workflow (default)
 
-Both `/pair` and `/triple` enforce five quality gates before code lands on the branch. The bundled briefings encode the gates plus the task-specific flow; optional standards/gate procedure blocks are included with `--with-standards` or `--greenfield`; this is the high-level shape:
+`/pair` and `/triple` enforce five quality gates before code lands on the branch; `/solo` enforces the 6-phase self-driven variant (Recon -> Plan+GATE-2 -> Impl -> GATE-3-self-review -> PROJECT.md+Skill-Persist -> Commit). The bundled briefings encode the gates plus the task-specific flow; optional standards/gate procedure blocks are included with `--with-standards` or `--greenfield`. This is the high-level shape for pair/triple:
 
 ```
 Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges
@@ -340,10 +340,11 @@ Both layouts are forced via `select-layout` after spawning, so pane order matter
 
 ## Quick start
 
-Both commands assume the human is already inside a tmux session.
+All three commands assume the human is already inside a tmux session.
 
 ```
-/pair <project-path> <base> <feature> [task...]
+/solo   <project-path> <base> <feature> [task...]
+/pair   <project-path> <base> <feature> [task...]
 /triple <project-path> <base> <feature> [task...]
 ```
 

@@ -1,22 +1,36 @@
-# Triple vs. pair — choosing the mode
+# Solo vs. pair vs. triple — choosing the mode
 
-Both modes solve the same shape of problem (two coding agents collaborating in a worktree) but trade off the human's attention against per-task overhead.
+All three modes solve the same shape of problem (coding agents collaborating in a worktree) but trade off the human's attention, per-task overhead, and continuous-review-vs-self-review against each other.
 
 ## Decision matrix
 
-| Signal | Pair | Triple |
-|--------|------|--------|
-| Task scope | one to a few files | many files, multiple subsystems |
-| Recon needed | shallow or already done | non-trivial: docs to read, code to grep, tests to map |
-| Human availability | will sit at terminal and relay | wants to step away, only see major events |
-| Expected duration | minutes | hours |
-| Failure mode "engineers brief themselves and miss the real problem" | unlikely | plausible |
-| Number of pair loops | one or two | several |
-| External docs to read | none or one quick page | multiple specs/RFCs/internal docs |
+| Signal | Solo | Pair | Triple |
+|--------|------|------|--------|
+| Task scope | self-contained, one logical change | one to a few files | many files, multiple subsystems |
+| Recon needed | shallow or done via parallel subagents | shallow or already done | non-trivial: docs to read, code to grep, tests to map |
+| Human availability | wants to step away after spawn | will sit at terminal and relay | wants to step away, only see major events |
+| Review style | adversarial gate-subagents only (`gate-2-plan-check`, `gate-3-verifier`, `gate-3-code-reviewer`) | continuous human-mediated reviewer | continuous orchestrator-mediated reviewer |
+| Expected duration | minutes to ~30 min | minutes | hours |
+| Failure mode "engineer briefs itself and misses the real problem" | medium (subagent gates catch a lot, not all) | unlikely (reviewer reads every change) | plausible without orchestrator (orchestrator briefs) |
+| Number of review cycles | one to a few subagent passes | one or two pair loops | several pair loops |
+| External docs to read | none or one quick page | none or one quick page | multiple specs/RFCs/internal docs |
+| Cost in panes/tokens | cheapest (1 main pane + ephemeral subagents) | medium (2 panes) | highest (3 panes + dual-review optional) |
 
-If the matrix says `pair` for most rows, use pair. If it says `triple` for several including the recon row, use triple.
+If the matrix says `solo` for most rows (esp. self-contained scope + subagent-review is enough), use solo. If it says `pair` for most rows, use pair. If it says `triple` for several including the recon row, use triple.
 
 ## Worked examples
+
+### Example 0 — solo fits
+
+> "Migrate the `.claude/rules/*.md` to path-scoped skills under `.claude/skills/<topic>/SKILL.md`."
+
+- Scope: repo-wide doc move, mechanical
+- Recon: trivial (one directory, known structure)
+- Duration: minutes
+- Review: adversarial gate-subagents on diff are enough; no continuous human relay needed
+- Human attention: zero after spawn
+
+Use solo. Agent runs the 6-phase workflow, gate-3 subagents review the diff, agent commits and pings DONE.
 
 ### Example 1 — pair fits
 
