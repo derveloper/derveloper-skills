@@ -508,18 +508,52 @@ The full list with diagnostics and recovery steps lives in `references/failure-m
 - **tmux session crashed mid-run.** Symptom: panes gone, worktree intact. Recovery: re-spawn the panes manually, point them at the existing worktree, and re-send the briefings with the current state attached.
 - **Writer pushed without human OK.** Symptom: `git push` happened despite the brief saying "wait for human". Cause: briefing missing or weakly worded. Fix: spell out the push gate explicitly in the briefing template.
 
-## Cleanup
+## Post-Merge Retro (Pflicht)
 
-After `DONE`:
+Default-Workflow nach `COMPLETE`-Ping vom Orchestrator/Solo-Agent:
+
+1. **Squash-Merge auf `main`**: `git merge --squash` aus dem Worktree-Branch, dann ein commit auf `main` mit zusammengefasstem Body. Squash ist die Default-Strategie in jedem Fall: lineare main-History, eine commit pro Feature, Plan-Amendments und Reactive-Fixes verschwinden aus der main-Sicht. (Fast-forward oder `--no-ff` nur wenn der User explizit den Review-Trail behalten will.)
+
+2. **KEEP wt + panes**: nach dem Squash NICHT sofort cleanen. Worktree, Branch und tmux-Panes (orchestrator + writer + reviewers) bleiben für den Retro-Step intakt.
+
+3. **Retro mit team**: Master schickt per `tmux_pair.py send <pane>` an JEDEN aktiven Pane eine tailored Retro-Frage. Erwartet 200-500 Wörter Faktenanalyse pro Agent (kein Lob, Schwächen direkt). Konkret:
+
+   - **Orchestrator**: Phase-Wallclock (RECON/GATE-1/GATE-1.5/GATE-2/IMPL/GATE-3), GATE-2-Iterationen, welche Mid-Run-SDs hätten beim ersten Plan-Schreiben verhindert werden können, drive-by/reactive-Commit-Anteil, strukturelle Plan-Fehler, mode-choice-Retro.
+   - **Writer**: Compile-vs-Test-Time pro Bullet, Public-API-Touch-Impact, reactive-fix-Trigger pro Commit, schwierigstes Test-Pattern, fmt-drift-Ursache, Pre-Flight-Lücken die Zeit gekostet haben.
+   - **Reviewer 1+2** (bei dual-review): konkrete BLOCKER/WARNING pro file:line, Review-Round-Count, Divergenz-vs-Peer-Findings, dual-review-Wert (was nur durch Zweiten gefangen), Issue-Klasse die in zukünftigen Tasks vermeidbar wäre.
+
+4. **Pattern-Synthese + Persist**: Master sammelt die Retros, identifiziert recurring issue classes (z.B. decorator-swallow, cancellation-root-mismatch, fmt-drift), und persistiert die Learnings in:
+   - tmux-pair-skill (diese Datei): wenn das Pattern workflow-cross-cutting ist (Pre-Flight-Klasse, Mode-Choice-Heuristik, dual-review-Wert).
+   - Konsument-Repo-Rules (`.claude/rules/*.md` oder `.claude/skills/<repo>-<topic>/SKILL.md`): wenn das Pattern repo-spezifisch ist (z.B. example-project decorator-chain-recon, trait-param-honor-check).
+
+5. **Cleanup**: erst nach Pattern-Persist:
 
 ```bash
 cd <project-path>
 git worktree remove ../<project-name>-wt-<feature>
-git branch -d feature/<feature>      # after merge
+git branch -D feature/<feature>      # -D weil Squash-Merge git-perspektivisch "unmerged" ist
 tmux kill-window -t <window-name>
 ```
 
-Cleanup is the human's call. Neither the orchestrator nor the engineers should remove worktrees, kill windows, or delete branches during a run.
+Retro-Step ist Pflicht, nicht Optional. Ein Spawn-Run ohne Retro persistiert nicht die teuersten Learnings des Runs.
+
+## Recurring Pre-Flight Checks (aus Retros aggregiert)
+
+Diese Checks gehören in `--with-standards` Briefings UND in Konsument-Repo `.claude/rules/pre-flight-checklists.md`. Aggregiert aus mehreren Spawn-Retros, falsifizierbar:
+
+- **Decorator-Sweep vor Trait-Default-Add**: Bei Hinzufügen einer Default-Body Trait-Methode (insbesondere lifecycle wie `shutdown`/`close`/`flush`): vor REVIEW-READY `rg "impl <Trait> for" --type rust` ausführen, alle Implementoren auflisten, jeden mit ≥2 forward-Methoden als Decorator markieren und explizit zwingend forward-Override hinzufügen ODER explizit no-op rationale in Plan-Amendment dokumentieren. Anti-Pattern: trait-default no-op wird von Decorator silent geswallowed.
+
+- **Trait-Param-Honor-Check**: Wenn Trait-Method-Param `_`-prefixed (`_grace`, `_token`, etc.) obwohl die Trait-Doc den Param als wirksam beschreibt: silent-discard footgun. Pre-Flight: `rg '_[a-z]+: ' <trait-file>` gegen Trait-Doc cross-checken. Default-Body soll Param entweder ehrlich ignorieren (Doc anpassen) oder honor + Test.
+
+- **Method-Resolution-Collision-Check**: Neue Trait-Methode mit gleichem Namen wie bestehende inherent-impl auf einem Implementor: pre-flight `cargo check -p <crate>` decked die ambiguity-warning. Anti-Pattern: trait-method wird stillschweigend von inherent-method geschattet.
+
+- **Format-Gate-Disziplin**: Writer-Claim "fmt clean" verlangt `cargo fmt -p <crate> --check` (NICHT `cargo fmt -p <crate>` ohne `--check`). Per-crate fmt ohne `--check` brushe neighbor-files silent und produziert drive-by-drift. Falsifizierbar: REVIEW-READY mit "fmt clean" + `--check`-Output, exit 0.
+
+- **Memory-Recon als RECON-Pflicht-Schritt**: Vor Plan-Schreiben `MEMORY.md` plus die 3-5 relevantesten memory-files am `~/.claude/projects/<repo>/memory/` lesen. Mid-Run-SDs die durch Memory-Recon antizipierbar gewesen wären sind ein Drift-Indikator.
+
+## Cleanup (manuell, NACH Retro)
+
+Cleanup ist der human's call und passiert erst nach Retro + Pattern-Persist. Neither the orchestrator nor the engineers should remove worktrees, kill windows, or delete branches during a run.
 
 ## Companion skills (bundled)
 
