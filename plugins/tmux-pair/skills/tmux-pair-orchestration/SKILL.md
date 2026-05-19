@@ -21,11 +21,13 @@ A third top-level entry-point, `/run`, performs a quick repo + task recon and di
 
 Default agent assignments (overridable):
 
-- writer: `codex` (terminal-driven, sharp on implementation, fast turnaround)
-- writer-2 (when `--parallel-writers`): `codex`
-- reviewer: `claude` (strong at adversarial review, follows checklists, gives falsifiable findings)
+- writer: `claude` (recon-strong, follows briefings, integrates plan + subagent feedback cleanly)
+- writer-2 (when `--parallel-writers`): `claude`
+- reviewer: `codex` (terminal-driven, sharp on adversarial review with high reasoning effort, produces falsifiable findings)
 - reviewer-2 (when reviewers >= 2): `codex`
 - orchestrator: `claude` (recon + briefing + filtering)
+
+Reviewer panes always boot at the harness top reasoning tier regardless of writer/orchestrator budget (claude-reviewer `xhigh`, codex-reviewer `high`). Effort defaults section below has the override flags.
 
 These are defaults baked into the bundled script. Different agent CLIs work fine: point `--writer-agent`, `--writer-2-agent`, `--reviewer-agent`, `--reviewer-2-agent`, `--orchestrator-agent` at any name registered in `~/.config/tmux-pair/agents.json`. Built-in: `claude`, `codex`, `pi` (the users Custom-CLI). pi unterstützt alle Rollen, bringt aber zwei Einschränkungen: kein mid-session Model-Switch (kein `/model` Slash-Command, nur Pane-Restart) und kein `/compact`-Equivalent (Compact-Watcher pingt pi-Panes nicht; bei langen Runs Pane-Restart einplanen).
 
@@ -447,7 +449,7 @@ Normal messages get a sender identity prefix automatically. Example: a writer pa
 
 The default claude model is `claude-opus-4-7` (1M context). For 200k-context runs (cheaper, faster turn-around), use `--claude-model claude-opus-4-6` on `/spawn`. The compact-watcher threshold scales automatically: 1M to 700k threshold (70%), 200k to 140k threshold. Override per-call with `python3 <plugin>/scripts/tmux_pair.py monitor --threshold-k <N>`.
 
-The default claude reasoning effort is `max`, set as `--effort max` directly in the claude boot-command (race-free vs. the `/effort` slash, which can fail with "unknown or future model" right after a `/model` switch). Override per spawn with `--claude-effort <low|medium|high|xhigh|max>`; pass an empty string to skip the flag entirely so `claude` uses its own default or the `CLAUDE_CODE_EFFORT_LEVEL` env-var. Codex pane boot follows the user's configured CLI default; Codex engineer subagents use the documented Spark-first policy in the workflow briefing.
+The default reasoning effort for non-reviewer panes is `low` on both harnesses: claude panes start with `--effort low` (race-free vs. the `/effort` slash, which can fail with "unknown or future model" right after a `/model` switch), codex panes with `-c model_reasoning_effort=low`. Reviewer panes override this regardless of harness and run on the top tier so review quality stays high while writer/orchestrator budget stays modest: claude-reviewers default to `xhigh`, codex-reviewers default to `high` (codex top tier). Override per spawn with `--claude-effort`, `--codex-effort`, `--reviewer-claude-effort`, `--reviewer-codex-effort`; pass an empty string to skip the flag entirely so the harness uses its own default or the `CLAUDE_CODE_EFFORT_LEVEL` env-var. Codex engineer subagents still follow the documented Spark-first policy in the workflow briefing.
 
 Long-running spawns drift past the model-specific sweet spot where the agent still reasons cleanly. Three helper subcommands let any layer refresh the layer below:
 

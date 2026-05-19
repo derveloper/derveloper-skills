@@ -58,7 +58,20 @@ DEFAULT_CLAUDE_MODEL = "claude-opus-4-7"
 # Der CLI-Flag ist race-free. Override per Spawn via --claude-effort. Leer ("")
 # = flag NICHT setzen, claude default oder CLAUDE_CODE_EFFORT_LEVEL env-var
 # greift.
-DEFAULT_CLAUDE_EFFORT = "max"
+DEFAULT_CLAUDE_EFFORT = "low"
+
+# Default Codex reasoning effort. Wird als `-c model_reasoning_effort=<level>`
+# im Boot-Command gesetzt. codex CLI hat keinen dedizierten --effort Flag,
+# nur generisches `-c key=value` als Override-Mechanismus. Skala:
+# minimal|low|medium|high. Override per Spawn via --codex-effort. Leer ("")
+# = flag NICHT setzen, codex CLI Default oder ~/.codex/config.toml greift.
+DEFAULT_CODEX_EFFORT = "low"
+
+# Reviewer-Rollen laufen IMMER auf höchster Reasoning-Stufe, egal welcher
+# Harness. claude-Reviewer: xhigh. codex-Reviewer: high (codex Top-Stufe).
+# Override per Spawn via --reviewer-claude-effort / --reviewer-codex-effort.
+DEFAULT_REVIEWER_CLAUDE_EFFORT = "xhigh"
+DEFAULT_REVIEWER_CODEX_EFFORT = "high"
 
 # pi (custom CLI) Model + Thinking-Level. cortecs/qwen3-coder-next ist
 # the users aktueller Pi-Default (EU-Pay-per-Use, ~0.15/0.80 EUR pro 1M Tokens,
@@ -805,11 +818,13 @@ def cmd_pane(args: argparse.Namespace) -> int:
         agent=args.agent, agents_dict=agents,
         window_name=window_name, role=args.name or "agent",
         claude_effort=args.claude_effort,
+        codex_effort=args.codex_effort,
         claude_model=args.claude_model,
         pi_provider=getattr(args, "pi_provider", DEFAULT_PI_PROVIDER),
         pi_model=getattr(args, "pi_model", DEFAULT_PI_MODEL),
         pi_thinking=getattr(args, "pi_thinking", DEFAULT_PI_THINKING),
         display_name=args.name or "",
+        project_dir=Path(cwd),
     )
     if args.task:
         boot = f"{boot} {shlex.quote(args.task)}"
@@ -1711,10 +1726,12 @@ def _boot_command_with_standards(
     *, agent: str, agents_dict: dict[str, str], window_name: str, role: str,
     claude_effort: str = DEFAULT_CLAUDE_EFFORT,
     claude_model: str = DEFAULT_CLAUDE_MODEL,
+    codex_effort: str = DEFAULT_CODEX_EFFORT,
     pi_provider: str = DEFAULT_PI_PROVIDER,
     pi_model: str = DEFAULT_PI_MODEL,
     pi_thinking: str = DEFAULT_PI_THINKING,
     display_name: str = "",
+    project_dir: Path | None = None,
     cargo_target_dir: Path | None = None,
 ) -> str:
     """Build the boot command for an agent.
@@ -1724,7 +1741,9 @@ def _boot_command_with_standards(
     Slash-Commands post-boot).
 
     codex: Standards landen als AGENTS.md im Worktree-Root (siehe
-    _write_codex_standards_to_worktree). Boot bleibt clean.
+    _write_codex_standards_to_worktree). Boot bekommt `-c
+    model_reasoning_effort=<level>` als Override-Flag wenn codex_effort
+    gesetzt; codex CLI hat keinen dedizierten --effort Flag.
 
     pi: --append-system-prompt akzeptiert File-Pfade direkt (pi-help:
     "Append text or file contents to the system prompt"). Plus --model
@@ -1740,7 +1759,10 @@ def _boot_command_with_standards(
     boot = agents_dict[agent]
     boot_tokens = shlex.split(boot)
     if not boot_tokens:
-        return _wrap_with_cargo_env(boot, cargo_target_dir)
+        return _wrap_boot_env(
+            boot, agent=agent, project_dir=project_dir,
+            cargo_target_dir=cargo_target_dir,
+        )
     if agent == "claude" and boot_tokens[0] == "claude":
         standards_path = _write_durable_standards_file(window_name, role)
         parts = [boot]
@@ -1753,7 +1775,20 @@ def _boot_command_with_standards(
         parts.append(
             f"--append-system-prompt-file {shlex.quote(str(standards_path))}"
         )
-        return _wrap_with_cargo_env(" ".join(parts), cargo_target_dir)
+        return _wrap_boot_env(
+            " ".join(parts), agent=agent, project_dir=project_dir,
+            cargo_target_dir=cargo_target_dir,
+        )
+    if agent == "codex" and boot_tokens[0] == "codex":
+        parts = [boot]
+        if codex_effort:
+            parts.append(
+                f"-c model_reasoning_effort={shlex.quote(codex_effort)}"
+            )
+        return _wrap_boot_env(
+            " ".join(parts), agent=agent, project_dir=project_dir,
+            cargo_target_dir=cargo_target_dir,
+        )
     if agent == "pi" and boot_tokens[0] == "pi":
         standards_path = _write_durable_standards_file(window_name, role)
         # Engineer-Pi-Panes booten per Default minimal: baseline / memory /
@@ -1776,22 +1811,46 @@ def _boot_command_with_standards(
         parts.append(
             f"--append-system-prompt {shlex.quote(str(standards_path))}"
         )
-        return _wrap_with_cargo_env(" ".join(parts), cargo_target_dir)
-    return _wrap_with_cargo_env(boot, cargo_target_dir)
+        return _wrap_boot_env(
+            " ".join(parts), agent=agent, project_dir=project_dir,
+            cargo_target_dir=cargo_target_dir,
+        )
+    return _wrap_boot_env(
+        boot, agent=agent, project_dir=project_dir,
+        cargo_target_dir=cargo_target_dir,
+    )
 
 
-def _wrap_with_cargo_env(boot_cmd: str, cargo_target_dir: Path | None) -> str:
-    """Prepend `env CARGO_TARGET_DIR=<path>` to a boot command when V8 is on.
+def _wrap_boot_env(
+    boot_cmd: str,
+    *,
+    agent: str,
+    project_dir: Path | None,
+    cargo_target_dir: Path | None,
+) -> str:
+    """Prepend per-pane environment to an agent boot command.
 
-    When `cargo_target_dir` is None (e.g. --no-shared-target or non-Cargo
-    project) the boot command is returned unchanged. The prefix uses
-    `env KEY=VALUE -- ...` form so existing `env PI_*=1` prefixes still work
-    (the outer `env` augments the environment for the inner `env`).
+    The context-mode vars pin each spawned MCP server to its own worktree.
+    That is required when several tmux-pair agents run in parallel worktrees.
+    The outer `env` also composes with existing `env PI_*=1` boot prefixes.
     """
-    if cargo_target_dir is None:
+    env_parts: list[str] = []
+    if cargo_target_dir is not None:
+        cargo_target_dir.mkdir(parents=True, exist_ok=True)
+        env_parts.append(
+            f"CARGO_TARGET_DIR={shlex.quote(str(cargo_target_dir))}"
+        )
+    if project_dir is not None:
+        project = str(project_dir.resolve())
+        if agent == "claude":
+            env_parts.append(f"CLAUDE_PROJECT_DIR={shlex.quote(project)}")
+        env_parts.extend([
+            f"CONTEXT_MODE_PROJECT_DIR={shlex.quote(project)}",
+            f"PWD={shlex.quote(project)}",
+        ])
+    if not env_parts:
         return boot_cmd
-    cargo_target_dir.mkdir(parents=True, exist_ok=True)
-    return f"env CARGO_TARGET_DIR={shlex.quote(str(cargo_target_dir))} {boot_cmd}"
+    return f"env {' '.join(env_parts)} {boot_cmd}"
 
 
 def _worktree_gitdir(wt_path: Path) -> Path | None:
@@ -2717,12 +2776,14 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             agent=args.orchestrator_agent, agents_dict=agents,
             window_name=window_name, role="orchestrator",
             claude_effort=args.claude_effort,
+            codex_effort=args.codex_effort,
             claude_model=args.claude_model,
             cargo_target_dir=cargo_target,
             pi_provider=pi_orchestrator_provider,
             pi_model=pi_orchestrator_model,
             pi_thinking=pi_orchestrator_thinking,
             display_name=orchestrator_name,
+            project_dir=wt_path,
         ),
         split="none",
         display_name=orchestrator_name,
@@ -2734,12 +2795,14 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             agent=args.writer_agent, agents_dict=agents,
             window_name=window_name, role="writer",
             claude_effort=args.claude_effort,
+            codex_effort=args.codex_effort,
             claude_model=args.claude_model,
             cargo_target_dir=cargo_target,
             pi_provider=pi_writer_provider,
             pi_model=pi_writer_model,
             pi_thinking=pi_writer_thinking,
             display_name=writer_name,
+            project_dir=wt_path,
         ),
         split="v", display_name=writer_name,
     )
@@ -2754,12 +2817,14 @@ def cmd_spawn(args: argparse.Namespace) -> int:
                 agent=args.writer_2_agent, agents_dict=agents,
                 window_name=window_name, role="writer",
                 claude_effort=args.claude_effort,
+                codex_effort=args.codex_effort,
                 claude_model=args.claude_model,
                 cargo_target_dir=cargo_target,
                 pi_provider=pi_writer_2_provider,
                 pi_model=pi_writer_2_model,
                 pi_thinking=pi_writer_2_thinking,
                 display_name=writer_2_name,
+                project_dir=wt_path,
             ),
             split="v", display_name=writer_2_name,
         )
@@ -2769,13 +2834,15 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         boot_command=_boot_command_with_standards(
             agent=args.reviewer_agent, agents_dict=agents,
             window_name=window_name, role="reviewer",
-            claude_effort=args.claude_effort,
+            claude_effort=args.reviewer_claude_effort,
+            codex_effort=args.reviewer_codex_effort,
             claude_model=args.claude_model,
             cargo_target_dir=cargo_target,
             pi_provider=pi_reviewer_provider,
             pi_model=pi_reviewer_model,
             pi_thinking=pi_reviewer_thinking,
             display_name=reviewer_name,
+            project_dir=wt_path,
         ),
         split="h", display_name=reviewer_name,
     )
@@ -2789,13 +2856,15 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             boot_command=_boot_command_with_standards(
                 agent=args.reviewer_2_agent, agents_dict=agents,
                 window_name=window_name, role="reviewer",
-                claude_effort=args.claude_effort,
+                claude_effort=args.reviewer_claude_effort,
+                codex_effort=args.reviewer_codex_effort,
                 claude_model=args.claude_model,
                 cargo_target_dir=cargo_target,
                 pi_provider=pi_reviewer_2_provider,
                 pi_model=pi_reviewer_2_model,
                 pi_thinking=pi_reviewer_2_thinking,
                 display_name=reviewer_2_name,
+                project_dir=wt_path,
             ),
             split="v", display_name=reviewer_2_name,
         )
@@ -3066,12 +3135,14 @@ def cmd_solo(args: argparse.Namespace) -> int:
             agent=args.agent, agents_dict=agents,
             window_name=window_name, role="writer",
             claude_effort=args.claude_effort,
+            codex_effort=args.codex_effort,
             claude_model=args.claude_model,
             cargo_target_dir=cargo_target,
             pi_provider=pi_provider,
             pi_model=pi_model,
             pi_thinking=pi_thinking,
             display_name=solo_name,
+            project_dir=wt_path,
         ),
         split="none", display_name=solo_name,
     )
@@ -3508,6 +3579,18 @@ def build_parser() -> argparse.ArgumentParser:
                          "Choices: low|medium|high|xhigh|max. Set as --effort "
                          "<level> in boot command (race-free vs /effort slash). "
                          "Empty string skips the flag (claude default applies).")
+
+    sp.add_argument("--codex-effort", default=DEFAULT_CODEX_EFFORT,
+
+                    help=f"codex reasoning effort (default: {DEFAULT_CODEX_EFFORT}). "
+
+                         "Choices: minimal|low|medium|high. Set as -c "
+
+                         "model_reasoning_effort=<level> in boot command "
+
+                         "(codex CLI has no dedicated --effort flag). "
+
+                         "Empty string skips the flag (codex CLI default applies).")
     sp.add_argument("--pi-provider", default=DEFAULT_PI_PROVIDER,
                     help=f"pi provider (default: {DEFAULT_PI_PROVIDER}). Only "
                          "applied when --agent pi.")
@@ -3541,11 +3624,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="use two writers on disjoint plan-bullets instead of "
                          "a second reviewer. Requires --size 4 or 5. Implicit "
                          "for --size 5.")
-    tr.add_argument("--writer-agent", default="codex")
-    tr.add_argument("--writer-2-agent", default="codex",
+    tr.add_argument("--writer-agent", default="claude")
+    tr.add_argument("--writer-2-agent", default="claude",
                     help="second writer agent when parallel-writers active "
                          "(--size 4 with --parallel-writers, or --size 5).")
-    tr.add_argument("--reviewer-agent", default="claude")
+    tr.add_argument("--reviewer-agent", default="codex")
     tr.add_argument("--reviewer-2-agent", default="codex",
                     help="second reviewer agent when dual-review active "
                          "(--size 4 default, or --size 5).")
@@ -3557,6 +3640,18 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--claude-effort", default=DEFAULT_CLAUDE_EFFORT,
                     help=f"claude effort level (default: {DEFAULT_CLAUDE_EFFORT}). "
                          "Choices: low|medium|high|xhigh|max. Empty string skips.")
+    tr.add_argument("--codex-effort", default=DEFAULT_CODEX_EFFORT,
+                    help=f"codex reasoning effort (default: {DEFAULT_CODEX_EFFORT}). "
+                         "Choices: minimal|low|medium|high. Set as "
+                         "-c model_reasoning_effort=<level>. Empty string skips.")
+    tr.add_argument("--reviewer-claude-effort", default=DEFAULT_REVIEWER_CLAUDE_EFFORT,
+                    help=f"effort level used for claude-reviewer panes "
+                         f"(default: {DEFAULT_REVIEWER_CLAUDE_EFFORT}). "
+                         "Overrides --claude-effort only for the reviewer role.")
+    tr.add_argument("--reviewer-codex-effort", default=DEFAULT_REVIEWER_CODEX_EFFORT,
+                    help=f"effort level used for codex-reviewer panes "
+                         f"(default: {DEFAULT_REVIEWER_CODEX_EFFORT}). "
+                         "Overrides --codex-effort only for the reviewer role.")
     tr.add_argument("--pi-model", default=DEFAULT_PI_MODEL,
                     help=f"pi model slug (default: {DEFAULT_PI_MODEL}). Applied "
                          "to every pi-Pane. Empty string lässt pi-Default greifen.")
@@ -3652,6 +3747,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"claude effort level (default: {DEFAULT_CLAUDE_EFFORT}). "
                          "Choices: low|medium|high|xhigh|max. Empty string "
                          "skips the flag.")
+    so.add_argument("--codex-effort", default=DEFAULT_CODEX_EFFORT,
+                    help=f"codex reasoning effort (default: {DEFAULT_CODEX_EFFORT}). "
+                         "Choices: minimal|low|medium|high. Set as "
+                         "-c model_reasoning_effort=<level>. Only applied when "
+                         "--agent codex. Empty string skips.")
     so.add_argument("--pi-provider", default=DEFAULT_PI_PROVIDER,
                     help=f"pi provider (default: {DEFAULT_PI_PROVIDER}). "
                          "Only applied when --agent pi.")

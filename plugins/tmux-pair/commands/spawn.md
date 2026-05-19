@@ -1,6 +1,6 @@
 ---
 description: Spawn a coordinated agent team (orchestrator + writers + reviewers, size 3..5) in a fresh git worktree, with PROJECT.md care in the gated workflow
-argument-hint: <project-path> <base> <feature> [task...] [--size 3|4|5] [--parallel-writers] [--interactive] [--with-standards] [--greenfield] [--no-worktree] [--writer-agent NAME] [--writer-2-agent NAME] [--reviewer-agent NAME] [--reviewer-2-agent NAME] [--orchestrator-agent NAME] [--claude-model SLUG] [--claude-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL]
+argument-hint: <project-path> <base> <feature> [task...] [--size 3|4|5] [--parallel-writers] [--interactive] [--with-standards] [--greenfield] [--no-worktree] [--writer-agent NAME] [--writer-2-agent NAME] [--reviewer-agent NAME] [--reviewer-2-agent NAME] [--orchestrator-agent NAME] [--claude-model SLUG] [--claude-effort LEVEL] [--codex-effort LEVEL] [--reviewer-claude-effort LEVEL] [--reviewer-codex-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL]
 ---
 
 # spawn
@@ -61,8 +61,11 @@ Plans must include explicit parallel markers per bullet: `B3 || B4 [parallel]` w
 - `--no-shared-target` (default off): disables V8 `CARGO_TARGET_DIR` sharing across worktrees. Each agent builds into the worktree-local `target/`. Default behavior is to share `~/.cache/tmux-pair/cargo-target/<repo-slug>/` for Cargo projects; non-Rust repos always skip the env regardless of the flag.
 - `--interactive` (default off): aktiviert Decision-Pause-Points im Orch-Briefing. Ohne Flag laufen alle V2-Self-Decisions autonom mit Log im COMPLETE-Ping. Mit Flag hält Orch vor jeder Self-Decision an und fragt den User via AskUserQuestion.
 - `--claude-model <slug>`: claude model to switch into post-boot for any claude pane (default `claude-opus-4-7`, 1M context). Switch to `claude-opus-4-6` for 200k context; the compact-watcher threshold rescales automatically (700k to 140k). Codex pane boot follows the user's configured CLI default; engineer subagent defaults are documented in the workflow briefing.
-- `--claude-effort <level>`: claude reasoning effort, set as `--effort <level>` in the claude boot-command (default `max`). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies).
-- `--writer-agent <name>` / `--writer-2-agent <name>` / `--reviewer-agent <name>` / `--reviewer-2-agent <name>` / `--orchestrator-agent <name>`: Agent-Wahl pro Rolle. Erlaubt: `claude` (Default Reviewer + Orchestrator), `codex` (Default Writer + Reviewer-2), `pi` (Custom CLI mit Cortecs als Default-Backend für günstige Bulk-Work).
+- `--claude-effort <level>`: claude reasoning effort, set as `--effort <level>` in the claude boot-command (default `low`, applies to non-reviewer claude panes). Choices: `low|medium|high|xhigh|max`. Pass an empty string to skip the flag (claude default or `CLAUDE_CODE_EFFORT_LEVEL` env-var applies).
+- `--codex-effort <level>`: codex reasoning effort, set as `-c model_reasoning_effort=<level>` in the codex boot-command (default `low`, applies to non-reviewer codex panes). Choices: `minimal|low|medium|high`. Empty string skips the flag.
+- `--reviewer-claude-effort <level>`: effort override applied only to claude-reviewer panes (default `xhigh`). Reviewer quality stays decoupled from writer/orchestrator budget. Choices: `low|medium|high|xhigh|max`.
+- `--reviewer-codex-effort <level>`: effort override applied only to codex-reviewer panes (default `high`, codex top tier). Choices: `minimal|low|medium|high`.
+- `--writer-agent <name>` / `--writer-2-agent <name>` / `--reviewer-agent <name>` / `--reviewer-2-agent <name>` / `--orchestrator-agent <name>`: Agent-Wahl pro Rolle. Erlaubt: `claude` (Default Writer + Writer-2 + Orchestrator), `codex` (Default Reviewer + Reviewer-2), `pi` (Custom CLI mit Cortecs als Default-Backend für günstige Bulk-Work).
 - `--pi-model <slug>`: pi-Model-Slug für jedes pi-Pane (default `qwen3-coder-next` via Default-Provider `cortecs`). Wird als `--model <slug>` im pi-Boot gesetzt. Alternative Slugs: `glm-4.6` (mid), `glm-4.7` (planner), `glm-5.1` (top), `kimi-k2.6` (code), `deepseek-v4-pro` (reasoning), oder via `--pi-provider claude-bridge` mit `claude-opus-4-7` / `claude-sonnet-4-6` / `claude-haiku-4-5`. Beachte: pi kann das Model NICHT mid-session wechseln (kein `/model` Slash-Command), nur Restart der Pane.
 - `--pi-provider <name>`: pi-Provider (default `cortecs`). Alternativen: `claude-bridge`, `openai-codex`, `anthropic`.
 - `--pi-thinking <level>`: pi-Reasoning-Level (default `high`). Choices: `off|minimal|low|medium|high|xhigh`.
@@ -97,7 +100,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py spawn \
   [--writer-agent <claude|codex|pi>] [--writer-2-agent <name>] \
   [--reviewer-agent <claude|codex|pi>] [--reviewer-2-agent <name>] \
   [--orchestrator-agent <claude|codex|pi>] \
-  [--claude-model <slug>] [--claude-effort <level>] \
+  [--claude-model <slug>] [--claude-effort <level>] [--codex-effort <level>] \
+  [--reviewer-claude-effort <level>] [--reviewer-codex-effort <level>] \
   [--pi-model <slug>] [--pi-thinking <level>]
 ```
 

@@ -56,9 +56,9 @@ Spawn-time flags:
 # spawn only
 --size 3                        # team size: 3..5 (default 3 = 1W/1R/1O)
 --parallel-writers              # 2 writers on disjoint bullets (requires --size 4 or 5)
---writer-agent codex            # default: codex
---writer-2-agent codex          # second writer when parallel-writers active
---reviewer-agent claude         # default: claude (reviewer-1 in dual-review)
+--writer-agent claude           # default: claude
+--writer-2-agent claude         # second writer when parallel-writers active
+--reviewer-agent codex          # default: codex (reviewer-1 in dual-review)
 --reviewer-2-agent codex        # second reviewer when dual-review active (size 4 default or size 5)
 --orchestrator-agent claude     # default: claude
 
@@ -68,7 +68,10 @@ Spawn-time flags:
 --no-worktree                   # skip git worktree, run on the project's current branch
 --interactive                   # opt-in Decision-Pause-Points for V2 decisions
 --claude-model claude-opus-4-7  # default model for any claude pane
---claude-effort max             # default --effort level for any claude pane
+--claude-effort low             # default --effort level for non-reviewer claude panes
+--codex-effort low              # default model_reasoning_effort for non-reviewer codex panes
+--reviewer-claude-effort xhigh  # effort override applied to claude-reviewer panes
+--reviewer-codex-effort high    # effort override applied to codex-reviewer panes
 --pi-provider cortecs           # pi default provider (claude-bridge for Subscription)
 --pi-model qwen3-coder-next     # pi default model (claude-opus-4-7 via bridge)
 --pi-thinking high              # pi default reasoning level
@@ -105,7 +108,7 @@ The default claude model is `claude-opus-4-7` (1M context). Override per spawn:
 
 The compact-watcher threshold scales with the context window automatically: 1M to 700k threshold (70%), 200k to 140k threshold. Override with `monitor --threshold-k <N>` if needed. Codex pane boot follows the user's configured CLI default; Codex engineer subagents use the Spark-first policy below.
 
-The default reasoning effort for any claude pane is `--effort max`, set directly in the boot-command (race-free vs. the `/effort` slash). Override per spawn with `--claude-effort <low|medium|high|xhigh|max>`; pass an empty string to skip the flag entirely so `claude` uses its own default or the `CLAUDE_CODE_EFFORT_LEVEL` env-var.
+The default reasoning effort for non-reviewer panes is `low` on both harnesses: claude panes start with `--effort low`, codex panes with `-c model_reasoning_effort=low`. Reviewer panes override this and always run on the harness top tier so review quality stays high regardless of writer/orchestrator budget: `--reviewer-claude-effort xhigh` for claude-reviewers, `--reviewer-codex-effort high` for codex-reviewers (codex tops out at `high`). Override per spawn with `--claude-effort`, `--codex-effort`, `--reviewer-claude-effort`, `--reviewer-codex-effort`; pass an empty string to skip the flag entirely so the harness uses its own default or the `CLAUDE_CODE_EFFORT_LEVEL` env-var.
 
 ## Dynamic team sizing
 
