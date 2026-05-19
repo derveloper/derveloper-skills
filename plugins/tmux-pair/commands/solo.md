@@ -60,7 +60,8 @@ and `gate-3-*` subagents.
 - `--greenfield`: enables `--with-standards` plus the greenfield pre-flight block. For first-session repos without `.claude/rules/` seed.
 - `--agent <name>`: agent for the solo pane (default `claude`). Other choices per `~/.config/tmux-pair/agents.json`: `codex`, `pi`.
 - `--claude-model <slug>`: claude model slug (default `claude-opus-4-7`). Only applied when `--agent claude`.
-- `--claude-effort <level>`: claude effort level (default `low`).
+- `--claude-effort <level>`: claude effort level (default `medium`). Choices: `low|medium|high|xhigh|max`.
+- `--codex-effort <level>`: codex reasoning effort, set as `-c model_reasoning_effort=<level>` (default `medium`). Choices: `minimal|low|medium|high`.
 - `--pi-provider <name>` / `--pi-model <slug>` / `--pi-thinking <level>`: pi-specific overrides. Only applied when `--agent pi`.
 - `--pi-writer-provider` / `--pi-writer-model` / `--pi-writer-thinking`: pi role-specific overrides (solo internally uses the `writer` role for cargo/AGENTS.md handling).
 - `--no-shared-target`: do not set `CARGO_TARGET_DIR`. Default: shared cache `~/.cache/tmux-pair/cargo-target/<repo>/`.

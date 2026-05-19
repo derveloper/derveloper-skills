@@ -58,14 +58,14 @@ DEFAULT_CLAUDE_MODEL = "claude-opus-4-7"
 # Der CLI-Flag ist race-free. Override per Spawn via --claude-effort. Leer ("")
 # = flag NICHT setzen, claude default oder CLAUDE_CODE_EFFORT_LEVEL env-var
 # greift.
-DEFAULT_CLAUDE_EFFORT = "low"
+DEFAULT_CLAUDE_EFFORT = "medium"
 
 # Default Codex reasoning effort. Wird als `-c model_reasoning_effort=<level>`
 # im Boot-Command gesetzt. codex CLI hat keinen dedizierten --effort Flag,
 # nur generisches `-c key=value` als Override-Mechanismus. Skala:
 # minimal|low|medium|high. Override per Spawn via --codex-effort. Leer ("")
 # = flag NICHT setzen, codex CLI Default oder ~/.codex/config.toml greift.
-DEFAULT_CODEX_EFFORT = "low"
+DEFAULT_CODEX_EFFORT = "medium"
 
 # Reviewer-Rollen laufen IMMER auf höchster Reasoning-Stufe, egal welcher
 # Harness. claude-Reviewer: xhigh. codex-Reviewer: high (codex Top-Stufe).
