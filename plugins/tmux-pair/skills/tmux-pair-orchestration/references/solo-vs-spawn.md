@@ -20,16 +20,15 @@ If the matrix says `solo` for most rows (esp. self-contained scope + subagent-re
 
 ## Spawn size sub-matrix
 
-| Signal | `--size 3` | `--size 4` (default) | `--size 4 --parallel-writers` | `--size 5` |
-|--------|-----------|----------------------|-------------------------------|-----------|
-| Composition | 1W + 1R + 1O | 1W + 2R + 1O | 2W + 1R + 1O | 2W + 2R + 1O |
-| Use when | standard task, one reviewer is enough | security-sensitive, want cross-checking | parallel-friendly plan-bullets with disjoint files | big feature with both signals |
-| Plan structure | sequential or mixed | sequential or mixed | bullets must be partitionable into disjoint sub-sets | mixed |
-| Risk of false-APPROVE | base | reduced (consolidation) | base | reduced |
-| Risk of writer-collision | n/a | n/a | medium (orchestrator must re-partition on file overlap) | medium |
-| Cost in panes/tokens | base | +1 reviewer | +1 writer | +2 |
+| Signal | `--size 3` | `--size 4` |
+|--------|-----------|------------|
+| Composition | 1W + 1R + 1O | 1W + 2R + 1O |
+| Use when | standard task, one reviewer is enough | security-sensitive, want cross-checking |
+| Plan structure | sequential, mixed, or with subagent-worktree fan-out | same |
+| Risk of false-APPROVE | base | reduced (consolidation) |
+| Cost in panes/tokens | base | +1 reviewer |
 
-`--parallel-writers` requires `--size 4` or `--size 5` (argparse-enforced).
+Parallel work on disjoint plan-bullets does NOT need a separate `--size` knob anymore. The single writer fans out via subagent-worktrees per parallel bullet (FF-merge back, squash-merge feature -> main at GATE-3-PASS). See "Parallel work via subagent-worktrees" in the spawn docs.
 
 ## Worked examples
 
@@ -77,23 +76,24 @@ Use spawn --size 3. Orchestrator does the log triage and writes a focused briefi
 
 Use spawn --size 4. Two reviewers cross-check the diff: one focuses on flow correctness (sequencing of refresh + revoke), the other on security boundary cases (replay, exfil, downgrade). Orchestrator consolidates.
 
-### Example 4: spawn --size 4 --parallel-writers
+### Example 4: spawn --size 3 with subagent-worktree fan-out
 
 > "Split the storage module into three pluggable backends (filesystem, S3, GCS). Each backend in its own file, common interface unchanged."
 
 - Plan-bullets disjoint: each backend in its own file
-- Two writers can split: writer-1 = filesystem + interface, writer-2 = S3 + GCS
-- One reviewer reads both streams sequentially
+- Single writer; per parallel bullet a sub-worktree + Task subagent
+- One reviewer sees the FF-merged result in the feature-worktree
 
-Use spawn --size 4 --parallel-writers. Orchestrator partitions plan-bullets and briefs each writer separately with their bullet-subset. Reviewer trackt both REVIEW-READY streams.
+Use spawn --size 3 (or --size 4 if review risk is high). Writer creates `../feature-sub-fs`, `../feature-sub-s3`, `../feature-sub-gcs`, spawns one Task-subagent per sub-worktree, then FF-merges each back when DONE. Reviewer reviews the merged state per backend.
 
-### Example 5: spawn --size 5
+### Example 5: spawn --size 4 + subagent-worktrees
 
 > "Migrate the persistence layer to a new ORM AND swap the auth provider in the same release. Plan-bullets cover both areas and the project is security-sensitive."
 
-- Both parallel-writers (disjoint persistence vs auth files) AND dual-review (auth = security-sensitive) warranted.
+- Disjoint persistence vs auth files = subagent-worktree fan-out
+- auth = security-sensitive = dual-review
 
-Use spawn --size 5. Writer-1 takes persistence bullets, writer-2 takes auth bullets. Reviewers 1 + 2 cross-check both streams with consolidation.
+Use spawn --size 4. Single writer creates two sub-worktrees (persistence, auth), spawns Task-subagents in each, FF-merges back. Both reviewers cross-check the merged result with consolidation.
 
 ### Example 6: neither fits cleanly
 
@@ -108,9 +108,9 @@ This is a research task. There is no commit at the end of it. Don't spawn a work
 - Trivial / single-file / mechanical -> solo
 - Non-trivial scope but one reviewer suffices -> spawn --size 3
 - Security/auth/crypto/migrations keywords detected -> spawn --size 4 (dual-review)
-- Task language implies disjoint sub-tasks ("split", "for each", "across N backends") -> spawn --size 4 --parallel-writers (or 5 if also security-flagged)
+- Task language implies disjoint sub-tasks ("split", "for each", "across N backends") -> spawn --size 3 (or 4 if security-flagged); writer fans out via subagent-worktrees per parallel bullet.
 
-The user can always override with explicit `--solo` / `--spawn --size N --parallel-writers` flags.
+The user can always override with explicit `--solo` / `--spawn --size N` flags.
 
 ## Hybrid: solo started, spawn needed
 

@@ -12,8 +12,8 @@
     {
       "name": "tmux-pair",
       "source": "./plugins/tmux-pair",
-      "description": "Coordinate one or more coding agents on a task via tmux + git worktrees. /run auto-recommends solo vs spawn from a quick repo + task recon. /solo runs a single agent with gated 6-phase self-review; /spawn runs a coordinated team of orchestrator + writers + reviewers (size 3..5 via --size, --parallel-writers for disjoint-bullet teams). Includes the orchestration script, the tmux-pair-orchestration skill, PROJECT.md care, scoped subagents for the gates, sender identity prefixes, explicit parallel-plan markers, auto-detection of repo-specific subagents (`.claude/agents/<repo>-*.md`) listed in every briefing, shipped rules templates for 7 stacks, bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), and pi as third coding agent alongside claude + codex.",
-      "version": "0.17.0",
+      "description": "Coordinate one or more coding agents on a task via tmux + git worktrees. /run auto-recommends solo vs spawn from a quick repo + task recon. /solo runs a single agent with gated 6-phase self-review; /spawn runs a coordinated team of orchestrator + ONE writer + reviewers (size 3..4 via --size). Parallel work fans out via subagent-worktrees the writer spawns from its Task tool (FF-merge back per sub-bullet, squash-merge feature->main at GATE-3-PASS). Includes the orchestration script, the tmux-pair-orchestration skill, PROJECT.md care, scoped subagents for the gates, sender identity prefixes, explicit parallel-plan markers, auto-detection of repo-specific subagents (`.claude/agents/<repo>-*.md`) listed in every briefing, shipped rules templates for 7 stacks, bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), and pi as third coding agent alongside claude + codex.",
+      "version": "0.18.0",
       "category": "workflow",
       "tags": ["tmux", "git-worktree", "pair-programming", "orchestration"]
     }

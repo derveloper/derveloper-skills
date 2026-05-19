@@ -3,10 +3,12 @@
 ## Project Overview
 
 `tmux-pair` is a Claude Code plugin for running coding-agent solos or
-coordinated spawn-teams (orchestrator + 1-2 writers + 1-2 reviewers, sized 3..5)
+coordinated spawn-teams (orchestrator + ONE writer + 1-2 reviewers, sized 3..4)
 in tmux panes. It creates isolated git worktrees, starts agent CLIs, sends role
 briefings, and provides helper commands for cross-pane messaging, compaction,
-monitoring, and cleanup. The `/run` slash-command auto-recommends solo vs spawn
+monitoring, and cleanup. Parallel work happens via subagent-worktrees the
+writer spawns from its Task tool (FF-merge per sub-bullet, squash-merge feature
+-> main at GATE-3-PASS). The `/run` slash-command auto-recommends solo vs spawn
 from a short repo + task recon.
 
 ## Architecture
@@ -30,14 +32,14 @@ from a short repo + task recon.
 - Solo mode: single agent in a fresh worktree, gated 6-phase self-driven
   workflow (recon, plan + GATE-2, impl, GATE-3 self-review, PROJECT.md + skill
   persist, commit). Adversarial gates run as subagents.
-- Spawn mode: orchestrator + 1-2 writers + 1-2 reviewers in a fresh worktree,
+- Spawn mode: orchestrator + ONE writer + 1-2 reviewers in a fresh worktree,
   with the orchestrator handling recon, user clarification, plan-check, loop
-  supervision, and final verification. Sized via `--size 3..5`:
+  supervision, and final verification. Sized via `--size 3..4`:
   - size 3 (default): 1 writer + 1 reviewer + 1 orchestrator.
   - size 4: 1 writer + 2 reviewers + 1 orchestrator (dual-review preset).
-  - size 4 + `--parallel-writers`: 2 writers + 1 reviewer + 1 orchestrator
-    (disjoint-bullet partitioning).
-  - size 5: 2 writers + 2 reviewers + 1 orchestrator (both presets).
+- Parallel work via subagent-worktrees (single writer fans out): one sub-WT
+  per parallel plan-bullet, FF-merge back to the feature-WT per subagent,
+  squash-merge feature -> main at GATE-3-PASS done by the master.
 - Run mode (`/run` slash-command): repo + task recon, recommends solo vs spawn
   (and recommended `--size`), delegates to `/solo` or `/spawn`. Explicit
   user-mode overrides the recommendation.
@@ -278,3 +280,46 @@ V2 Decision-Log für 0.16.0:
 | D8 | argparse-error für `--parallel-writers --size 3` statt silent-ignore | Plan-Check-Subagent-Finding: silent-ignore wäre Failure-Klasse; argparse-time-error scheitert früh und falsifizierbar. |
 | D9 | Writer-2 partner_pane = reviewer (gleich wie Writer-1), peer_writer_pane = Writer-1 als Cross-Awareness | Plan-Check-Finding: writer-2 muss disambig sein. Disjoint-bullets bedeutet kein direkter Sync zwischen Writern; Coordination via Orchestrator. peer_writer_pane nur als Awareness-Hint für Datei-Kollisions-Detection. |
 | D10 | PROJECT.md frontmatter SKILL.md version-Bump weiterhin manuell (kein automatischer Check) | check-plugin-versions.py prüft heute nur plugin.json + marketplace.json. SKILL.md frontmatter-Validation bleibt Follow-up (siehe 0.14.0 D10). 0.16.0 dokumentiert das im Acceptance-Block, fixt es aber nicht (Scope-Begrenzung). |
+
+### 0.18.0 (BREAKING: Multi-Writer raus, Subagent-Worktree-Pattern, 2026-05-19)
+
+the user-Anweisung: "multiwriter fliegen komplett raus, die machen probleme und
+overhead. wenn mehrere subagents in einem writer arbeiten können (so sollen ja
+plände gebaut sein), dann müssen die jeweils in eigenen worktrees arbeiten,
+damit die nicht konflikten, es gibt dann also einen baum von worktrees, der vom
+feature/aufgabe selbst und dann ggf. die der subagents, die dann gemerged
+werden, fast-forward wenns geht, squash nur für den abschließenden merge auf
+main".
+
+- BREAKING: `--parallel-writers` Flag komplett entfernt.
+- BREAKING: `--writer-2-agent` Flag komplett entfernt.
+- BREAKING: `--pi-writer-2-*` Flags komplett entfernt.
+- BREAKING: `--size 5` entfernt (war 2W/2R, nicht mehr komponierbar).
+  Valid sizes jetzt nur noch 3 (1W/1R/1O) und 4 (1W/2R/1O dual-review).
+- BREAKING: Output-JSON-Felder `parallel_writers`, `writer_2_pane`,
+  `writer_2_agent`, `writer_2_name`, `writer_2_ready` entfernt.
+- REMOVED: `_peer_writer_block` Helper (war Engineer-Briefing-Inject für
+  Writer-2-Awareness). Ersetzt durch `_subagent_worktree_block`.
+- REMOVED: PARALLEL-WRITERS-Direktive im Orchestrator-Briefing.
+- NEW: Orchestrator-Briefing SUBAGENT-WORKTREE-Direktive: Writer fan-out via
+  `git worktree add ../<feature>-sub-<bullet-id>`, ein Task-Subagent pro
+  Sub-WT, FF-merge zurück in Feature-WT, Cleanup pro Sub-Bullet.
+- NEW: Writer-Briefing SUBAGENT-WORKTREE-Block (`_subagent_worktree_block`):
+  exakte Git-Befehle für Add/Merge/Remove, Fallback-Pfad (FF-Failure ->
+  CLARIFY-NEEDED an Orch, kein automatischer Merge-Commit), explizite
+  Trennung sequenzielle vs parallele Bullets.
+- NEW: README, spawn.md, SKILL.md, solo-vs-spawn.md, pair-protocol.md
+  Sektionen zur Subagent-Worktree-Pattern + Squash-Final-Merge-Discipline.
+- Versions-Sync: `plugin.json`, `.claude-plugin/marketplace.json`, und
+  `skills/tmux-pair-orchestration/SKILL.md` frontmatter alle auf 0.18.0.
+
+V2 Decision-Log für 0.18.0:
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Multi-Writer-Pane hart entfernen statt deprecaten | User-Anweisung "komplett raus", 0.16.0 hatte Multi-Writer ohnehin als opt-in eingeführt; clean break passt zu Plugin-Major-Cadence. |
+| D2 | Subagent-Worktree-Pattern auf Briefing-Ebene, nicht im Plugin-Code automatisiert | Sub-Worktree-Erzeugung ist LLM-/Plan-driven, nicht statisch. Plugin gibt Pattern + Git-Snippets vor; Writer entscheidet pro Plan welche Bullets fan-out wert sind. Keine extra CLI-Subcommands nötig. |
+| D3 | FF-Merge per Sub-Bullet, Squash nur für Feature->main | User-Anweisung. FF behält Sub-Branch-History für Audit ohne main zu polluten; Squash am Ende ergibt einen sauberen Conventional-Commit pro Feature. |
+| D4 | Bei FF-Failure: CLARIFY-NEEDED an Orchestrator, kein automatischer Merge-Commit | Sicherheitsnetz: automatische Merge-Commits können Conflict-Resolution-Bugs maskieren. Orchestrator entscheidet rebase|merge-commit|abort. |
+| D5 | `--size 5` mit-entfernen statt nur deprecaten | Mit 1-Writer-Constraint ist 2W/2R nicht mehr möglich; weiteres Size hätte keine andere Semantik mehr. Reduktion auf 3+4 hält API klar. |
+| D6 | Plan-Marker bleiben: `B3 || B4 [parallel]` triggert Sub-Worktree-Fan-Out statt Writer-2-Briefing | Plan-Vokabular ist gleich, nur der Mechanismus dahinter wechselt. Writer ersetzt Orchestrator-Bullet-Partitionierung durch eigene Subagent-Spawns. |

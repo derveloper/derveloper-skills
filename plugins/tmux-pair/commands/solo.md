@@ -44,7 +44,7 @@ agent picks domain-experts over `general-purpose` for parallel work.
 | Risky feature, want a dedicated reviewer pane throughout | **spawn --size 3** |
 | Multi-file feature with upfront recon need + dedicated orchestrator | **spawn --size 3** (or 4 for dual-review) |
 | Security-sensitive, two reviewers consolidating | **spawn --size 4** (dual-review preset) |
-| Parallel-friendly feature with disjoint plan-bullets | **spawn --size 4 --parallel-writers** (or **--size 5**) |
+| Parallel-friendly feature with disjoint plan-bullets | **spawn** (single writer fans out via subagent-worktrees) |
 
 Solo trades a second pane (reviewer) for subagent-driven self-review. Cheaper
 in panes, but less continuous oversight. Good for cleanups and trivial-but-large

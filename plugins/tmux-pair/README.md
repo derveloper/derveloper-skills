@@ -1,6 +1,6 @@
 # tmux-pair
 
-Spawn coding-agent solos or coordinated spawn-teams (orchestrator + writers + reviewers, size 3..5) in tmux panes, each pinned to its own fresh `git worktree`.
+Spawn coding-agent solos or coordinated spawn-teams (orchestrator + ONE writer + reviewers, size 3..4) in tmux panes, each pinned to its own fresh `git worktree`. Parallel work fans out via subagent-worktrees the writer spawns from its Task tool.
 
 ## What it does
 
@@ -9,7 +9,7 @@ Two modes, both create a sibling worktree and a tmux window with one pane per ag
 | Mode | Panes | Layout | Use when |
 |------|-------|--------|----------|
 | **solo** | one agent (gated 6-phase, subagent-driven self-review) | single pane | self-contained refactor/cleanup where adversarial gate-subagents are enough; human is hands-off after spawn |
-| **spawn** | orchestrator + 1-2 writers + 1-2 reviewers, sized via `--size 3..5` (default 3 = 1W/1R/1O; 4 = 1W/2R/1O dual-review; 4 + `--parallel-writers` = 2W/1R/1O; 5 = 2W/2R/1O) | orchestrator on top, engineers below; dual-review and parallel-writer panes stack vertically under their primary | bigger task, recon-heavy, want a dedicated agent to brief engineers, filter noise, and consolidate reviews |
+| **spawn** | orchestrator + 1 writer + 1-2 reviewers, sized via `--size 3..4` (default 3 = 1W/1R/1O; 4 = 1W/2R/1O dual-review) | orchestrator on top, writer + reviewer(s) below; second reviewer stacks vertically under reviewer-1 | bigger task, recon-heavy, want a dedicated agent to brief the writer, filter noise, and consolidate reviews. Parallel plan-bullets fan out via subagent-worktrees the writer creates from its Task tool. |
 
 A third top-level entry-point, `/run`, performs a short repo + task recon and recommends solo or spawn (with a recommended `--size`) based on task complexity. Explicit mode-flags from the user override the recommendation.
 
@@ -42,7 +42,7 @@ Inside an existing tmux session:
 
 Solo runs a single agent through a 6-phase gated workflow (recon, plan+GATE-2, impl, GATE-3 self-review, PROJECT.md + skill persist, commit). Subagents drive the parallel recon, the adversarial plan-check (`tmux-pair:gate-2-plan-check`), and the final review (`tmux-pair:gate-3-verifier` + `tmux-pair:gate-3-code-reviewer`). Switch off the gates with `--no-gated`.
 
-Spawn runs the 5-gate workflow (Clarify, Reviewer-Readiness with rules-bootstrap loop, Plan-Check, Implementation Loop, Final-Verify). Team size is set with `--size` (default 3) and the optional `--parallel-writers` flag for disjoint-bullet writer splits.
+Spawn runs the 5-gate workflow (Clarify, Reviewer-Readiness with rules-bootstrap loop, Plan-Check, Implementation Loop, Final-Verify). Team size is set with `--size` (default 3, max 4). Parallel plan-bullets fan out via subagent-worktrees the writer spawns.
 
 ## Configuration
 
@@ -54,10 +54,8 @@ Spawn-time flags:
 --no-gated                      # bypass the 6-phase gated workflow briefing
 
 # spawn only
---size 3                        # team size: 3..5 (default 3 = 1W/1R/1O)
---parallel-writers              # 2 writers on disjoint bullets (requires --size 4 or 5)
+--size 3                        # team size: 3..4 (default 3 = 1W/1R/1O, 4 = 1W/2R/1O dual-review)
 --writer-agent claude           # default: claude
---writer-2-agent claude         # second writer when parallel-writers active
 --reviewer-agent codex          # default: codex (reviewer-1 in dual-review)
 --reviewer-2-agent codex        # second reviewer when dual-review active (size 4 default or size 5)
 --orchestrator-agent claude     # default: claude
@@ -102,7 +100,6 @@ The default claude model is `claude-opus-4-7` (1M context). Override per spawn:
 /solo  ~/code/myapp main repo-rename --claude-model claude-opus-4-6
 /spawn ~/code/myapp main session-tokens --claude-model claude-opus-4-6
 /spawn ~/code/myapp main session-tokens --size 4
-/spawn ~/code/myapp main feature-split --size 5
 /spawn ~/code/myapp main greenfield-session --greenfield
 ```
 
@@ -112,20 +109,26 @@ The default reasoning effort for non-reviewer panes is `medium` on both harnesse
 
 ## Dynamic team sizing
 
-`/spawn --size N` picks one of four presets. The flag maps directly to the writer + reviewer count; dual-review and parallel-writer behaviour follow from the resulting pane count.
+`/spawn --size N` picks one of two presets. The flag maps directly to the reviewer count; the writer count is always 1.
 
-| `--size` | `--parallel-writers` | Writers | Reviewers | Orchestrator | Layout |
-|----------|----------------------|---------|-----------|--------------|--------|
-| 3 (default) | n/a | 1 | 1 | 1 | orchestrator top, writer bottom-left, reviewer bottom-right |
-| 4 | off (default) | 1 | 2 | 1 | dual-review preset: reviewer-2 stacked under reviewer-1 |
-| 4 | on | 2 | 1 | 1 | parallel-writers preset: writer-2 stacked under writer-1 |
-| 5 | n/a | 2 | 2 | 1 | both presets active: writer-2 + reviewer-2 stacked under their primaries |
+| `--size` | Writers | Reviewers | Orchestrator | Layout |
+|----------|---------|-----------|--------------|--------|
+| 3 (default) | 1 | 1 | 1 | orchestrator top, writer bottom-left, reviewer bottom-right |
+| 4 | 1 | 2 | 1 | dual-review preset: reviewer-2 stacked under reviewer-1 |
 
 Per dual-review cycle: writer pings `REVIEW-READY` to BOTH reviewers in parallel, both review independently (no crosstalk), then swap findings via `REVIEWER-FINDINGS:` + `PEER-REVIEW:`, finally each sends a `REVIEW-FINAL (Reviewer):` to the orchestrator for consolidation. The orchestrator merges both reports (keep all unique BLOCKERs, dedupe overlaps, surface contradictions with context) and sends ONE `REVIEW-CONSOLIDATED:` to the writer. Reviewers never speak directly to the writer.
 
-Per parallel-writers cycle: orchestrator partitions plan-bullets into disjoint sub-sets (`B3 -> wr1`, `B4 -> wr2`), briefs both writers separately, each writer pings REVIEW-READY independently to the reviewer. No direct sync between writers; collisions on shared files go back to the orchestrator via `CLARIFY-NEEDED` for re-partitioning.
+## Parallel work via subagent-worktrees
 
-`--parallel-writers` requires `--size 4` or `--size 5`. Passing it with `--size 3` errors out at argparse time.
+There is no second writer pane. When the plan contains parallel-friendly bullets (`B3 || B4 [parallel]`), the writer fans out via its Task tool into per-bullet sub-worktrees:
+
+1. `git worktree add ../<feature>-sub-<bullet-id> -b <feature>/sub-<bullet-id>` per parallel bullet.
+2. One `Task(general-purpose)` subagent per sub-worktree, working there with isolated files.
+3. After subagent-DONE: `git -C <feature-wt> merge --ff-only <feature>/sub-<bullet-id>`. FF failure means the feature-WT moved on; writer pings `CLARIFY-NEEDED` to the orchestrator instead of forcing a merge-commit.
+4. `git worktree remove ../<feature>-sub-<bullet-id>` + `git branch -D <feature>/sub-<bullet-id>` to clean up.
+5. The final feature -> main merge is a **squash**, done by the master after GATE-3-PASS. The feature branch keeps its sub-merge history while main stays linear.
+
+Sequential bullets (`B5 -> B6 [sequenziell: ...]`) stay in the main writer pane.
 
 ## Durable standards
 

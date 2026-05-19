@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
-description: This skill should be used when the user asks to "spawn a solo with self-review", "spawn a coordinated agent team", "run multiple agents on this", "set up an orchestrator + writers + reviewers", "use the tmux-pair workflow", "/run for this task", or otherwise wants to run a single agent or a coordinated 3-to-5-pane spawn-team (orchestrator + writers + reviewers) in tmux panes wired up via git worktrees. Covers solo (single agent + gated subagent-driven self-review) and spawn (coordinated team sized 3..5 via --size and --parallel-writers), plus the /run auto-entry that recommends solo vs spawn from a short repo + task recon. Includes the pair protocol (REVIEW-READY -> REVIEW loop inside a spawn), when to choose solo vs spawn (and which --size), durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify -> Reviewer-Readiness -> Plan-Check -> Loop -> Final-Verify with rules-bootstrap loop, PROJECT.md care, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), sender identity prefixes, explicit parallel-plan markers, engineer subagent strategy with repo-specific subagent detection (`.claude/agents/<repo>-*.md` listed in briefings), bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.17.0
+description: This skill should be used when the user asks to "spawn a solo with self-review", "spawn a coordinated agent team", "run multiple agents on this", "set up an orchestrator + writer + reviewers", "use the tmux-pair workflow", "/run for this task", or otherwise wants to run a single agent or a coordinated 3-to-4-pane spawn-team (orchestrator + ONE writer + reviewers) in tmux panes wired up via git worktrees. Covers solo (single agent + gated subagent-driven self-review) and spawn (coordinated team sized 3..4 via --size, with parallel work fanning out via subagent-worktrees the writer spawns), plus the /run auto-entry that recommends solo vs spawn from a short repo + task recon. Includes the pair protocol (REVIEW-READY -> REVIEW loop inside a spawn), when to choose solo vs spawn (and which --size), durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify -> Reviewer-Readiness -> Plan-Check -> Loop -> Final-Verify with rules-bootstrap loop, PROJECT.md care, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), sender identity prefixes, explicit parallel-plan markers + subagent-worktree fan-out (FF-merge per sub, squash-merge feature->main), engineer subagent strategy with repo-specific subagent detection (`.claude/agents/<repo>-*.md` listed in briefings), bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
+version: 0.18.0
 ---
 
 # tmux-pair-orchestration
@@ -15,34 +15,29 @@ This skill applies whenever the user wants to set up such a solo/spawn, monitor 
 | Mode | Agents | Layout | Human role |
 |------|--------|--------|-------------|
 | **solo** | one agent (gated 6-phase, subagent-driven self-review) | single pane in a fresh worktree | hands-off after spawn; sees only DONE / BLOCKER pings |
-| **spawn** | orchestrator + 1-2 writers + 1-2 reviewers, sized via `--size 3..5` | orchestrator on top (full width), engineers below; second writer / reviewer stacked vertically under their primary | hands-off after spawn, only sees major-event pings via the orchestrator |
+| **spawn** | orchestrator + 1 writer + 1-2 reviewers, sized via `--size 3..4` | orchestrator on top (full width), writer + reviewer(s) below; second reviewer stacked vertically under reviewer-1 | hands-off after spawn, only sees major-event pings via the orchestrator |
 
 A third top-level entry-point, `/run`, performs a quick repo + task recon and dispatches to solo or spawn with a recommended `--size`. Explicit user-mode flags (`--solo`, `--spawn`) override the recommendation.
 
 Default agent assignments (overridable):
 
-- writer: `claude` (recon-strong, follows briefings, integrates plan + subagent feedback cleanly)
-- writer-2 (when `--parallel-writers`): `claude`
+- writer: `claude` (recon-strong, follows briefings, integrates plan + subagent feedback cleanly). EINER, immer.
 - reviewer: `codex` (terminal-driven, sharp on adversarial review with high reasoning effort, produces falsifiable findings)
 - reviewer-2 (when reviewers >= 2): `codex`
 - orchestrator: `claude` (recon + briefing + filtering)
 
 Reviewer panes always boot at the harness top reasoning tier regardless of writer/orchestrator budget (claude-reviewer `xhigh`, codex-reviewer `high`). Effort defaults section below has the override flags.
 
-These are defaults baked into the bundled script. Different agent CLIs work fine: point `--writer-agent`, `--writer-2-agent`, `--reviewer-agent`, `--reviewer-2-agent`, `--orchestrator-agent` at any name registered in `~/.config/tmux-pair/agents.json`. Built-in: `claude`, `codex`, `pi` (the users Custom-CLI). pi unterstützt alle Rollen, bringt aber zwei Einschränkungen: kein mid-session Model-Switch (kein `/model` Slash-Command, nur Pane-Restart) und kein `/compact`-Equivalent (Compact-Watcher pingt pi-Panes nicht; bei langen Runs Pane-Restart einplanen).
+These are defaults baked into the bundled script. Different agent CLIs work fine: point `--writer-agent`, `--reviewer-agent`, `--reviewer-2-agent`, `--orchestrator-agent` at any name registered in `~/.config/tmux-pair/agents.json`. Built-in: `claude`, `codex`, `pi` (the users Custom-CLI). pi unterstützt alle Rollen, bringt aber zwei Einschränkungen: kein mid-session Model-Switch (kein `/model` Slash-Command, nur Pane-Restart) und kein `/compact`-Equivalent (Compact-Watcher pingt pi-Panes nicht; bei langen Runs Pane-Restart einplanen).
 
 ## Dynamic team sizing (spawn)
 
-`/spawn --size N` picks one of four presets. `--parallel-writers` toggles between two-reviewers-and-one-writer and one-reviewer-and-two-writers when `--size 4` is chosen. `--size 5` activates both presets.
+`/spawn --size N` picks one of two presets. The writer count is always 1.
 
-| `--size` | `--parallel-writers` | Writers | Reviewers | Orchestrator | Use when |
-|----------|----------------------|---------|-----------|--------------|----------|
-| 3 (default) | n/a | 1 | 1 | 1 | standard task, one reviewer is enough |
-| 4 | off (default) | 1 | 2 | 1 | security-sensitive / risky: two reviewers consolidate |
-| 4 | on | 2 | 1 | 1 | parallel-friendly bullets, writers split disjoint files |
-| 5 | n/a | 2 | 2 | 1 | big feature with both signals |
-
-`--parallel-writers` requires `--size 4` or `--size 5`; passing it with `--size 3` errors out at argparse time.
+| `--size` | Writers | Reviewers | Orchestrator | Use when |
+|----------|---------|-----------|--------------|----------|
+| 3 (default) | 1 | 1 | 1 | standard task, one reviewer is enough |
+| 4 | 1 | 2 | 1 | security-sensitive / risky: two reviewers consolidate |
 
 ### Dual-review (reviewers >= 2)
 
@@ -55,19 +50,24 @@ Per cycle:
 5. Orchestrator consolidates both reports into ONE merged review (keep all unique BLOCKERs, dedupe overlaps, surface contradictions with context).
 6. Orchestrator sends ONE `REVIEW-CONSOLIDATED:` to the writer. Reviewers never speak directly to the writer.
 
-When to opt in (size 4 default, or size 5): risky refactors, security-sensitive code, blast-radius changes, anything where you want diversity of opinions on the diff.
+When to opt in (size 4): risky refactors, security-sensitive code, blast-radius changes, anything where you want diversity of opinions on the diff.
 
-### Parallel-writers (writers >= 2)
+### Parallel work via subagent-worktrees
 
-Per plan:
+There is no second writer pane. When the plan contains `B<x> || B<y> [parallel]` markers, the single writer fans out:
 
-1. Orchestrator partitions plan-bullets into DISJUNKT sub-sets per writer (`B3 -> wr1`, `B4 -> wr2`). Disjoint means no shared files (sonst Merge-Konflikt im Worktree).
-2. Orchestrator briefs writer-1 and writer-2 SEPARATELY, each with their bullet-subset.
-3. Both writers ping REVIEW-READY independently to the reviewer. No direct sync between writers.
-4. Reviewer trackt zwei Writer-Streams. Sequential REVIEW cycles per bullet, not batched.
-5. Bei impliziter File-Kollision: writer pingt `CLARIFY-NEEDED` an Orchestrator, der re-partitioniert.
+1. Per parallel bullet, the writer creates a sub-worktree:
+   `git worktree add ../<feature>-sub-<bullet-id> -b <feature>/sub-<bullet-id>`
+2. One `Task(general-purpose)` subagent per sub-worktree, working there with isolated files.
+3. After subagent-DONE: fast-forward merge back into the feature-WT:
+   `git -C <feature-wt> merge --ff-only <feature>/sub-<bullet-id>`
+   FF failure means the feature-WT moved on. Writer pings `CLARIFY-NEEDED` to the orchestrator; no automatic merge-commit.
+4. Cleanup per sub-bullet: `git worktree remove ...` + `git branch -D ...`.
+5. Final feature -> main merge is a **squash** done by the master after GATE-3-PASS, NOT by the writer. The feature branch keeps sub-merge history; main stays linear.
 
-When to opt in (size 4 + `--parallel-writers`, or size 5): plan has parallel-friendly bullets with disjoint files (split a module into N backends, bulk migration across independent areas).
+Sequential bullets (`B5 -> B6 [sequenziell: ...]`) stay in the main writer pane.
+
+When to opt for this fan-out: parallel-friendly plan-bullets with disjoint files (split a module into N backends, bulk migration across independent areas). Writer + orchestrator decide together during GATE-2 which bullets get sub-WTs.
 
 ## Solo (gated, self-driven)
 
@@ -100,8 +100,7 @@ Decision logic (skipped when the user passes `--solo` or `--spawn` explicitly):
    - **solo** for self-contained tasks (rename, doc cleanup, single-file fix, lint/format pass) with small affected file count and shallow recon.
    - **spawn --size 3** for non-trivial tasks where one writer + one reviewer suffices (default for most features).
    - **spawn --size 4** (dual-review) for security-sensitive code, auth/crypto/migration territory, or when cross-checking is explicitly wanted.
-   - **spawn --size 4 --parallel-writers** for tasks with obvious parallel-friendly sub-tasks on disjoint files.
-   - **spawn --size 5** when both dual-review and parallel-writers are warranted.
+   - Parallel-friendly sub-tasks on disjoint files: no extra `--size` knob; the single writer fans out via subagent-worktrees per parallel plan-bullet (FF-merge back, squash-merge feature->main at GATE-3-PASS). Pick `--size 3` or `--size 4` based on whether dual-review is warranted.
 4. **Confirm with user** (single `AskUserQuestion` with the recommendation as Option 1 (Recommended)) when the recommendation is non-obvious. Trivially-obvious cases proceed without confirmation; the recommendation is flagged in the spawn output.
 5. **Invoke** the picked mode with the appropriate flags.
 
@@ -308,7 +307,7 @@ When `task_kind=bug-fix` AND `plan-bullets <= 3` AND `predicted files-touched <=
 
 ## Pair protocol (the core loop inside a spawn)
 
-Inside a spawn, the writer-reviewer loop is called the pair protocol. The vocabulary is identical regardless of `--size`; only the addressing differs when dual-review or parallel-writers are active.
+Inside a spawn, the writer-reviewer loop is called the pair protocol. The vocabulary is identical regardless of `--size`; only the addressing differs when dual-review is active.
 
 1. Writer makes a meaningful change (one logical step), runs build/lint/tests locally if cheap, and pings the reviewer:
 
@@ -347,8 +346,8 @@ The orchestrator does:
 - recon (read upstream docs, grep the codebase, identify pointers)
 - write writer briefing(s) AND reviewer briefing(s) as separate messages
 - watch the loop at high level (capture-pane + nudge if silent > 10 min)
-- partition plan-bullets between writers when parallel-writers is active
 - consolidate reviews when dual-review is active
+- coach the writer on subagent-worktree fan-out for parallel plan-bullets (FF-merge per sub-bullet, squash-merge feature->main at GATE-3-PASS)
 - filter engineer pings: only forward MAJOR-STEP, BLOCKER, DONE, ABORT to human
 
 The orchestrator does NOT code, does NOT review, does NOT commit, does NOT decide on cleanup.
@@ -379,31 +378,9 @@ The orchestrator does NOT code, does NOT review, does NOT commit, does NOT decid
 +----------+----------+
 ```
 
-**Spawn `--size 4 --parallel-writers` (writer-2 stacked under writer-1):**
+Parallel work on disjoint plan-bullets does NOT add a second writer pane. The single writer fans out via subagent-worktrees that live outside the tmux session (`git worktree add ../<feature>-sub-<bullet-id>`). Each Task-subagent operates in its sub-worktree, then FF-merges back to the feature-worktree. The final feature -> main merge is a squash, done by the master after GATE-3-PASS.
 
-```
-+---------------------+
-|    Orchestrator     |
-+----------+----------+
-| Writer-1 |          |
-+----------+ Reviewer |
-| Writer-2 |          |
-+----------+----------+
-```
-
-**Spawn `--size 5` (both stacked):**
-
-```
-+---------------------+
-|    Orchestrator     |
-+----------+----------+
-| Writer-1 |Reviewer-1|
-+----------+----------+
-| Writer-2 |Reviewer-2|
-+----------+----------+
-```
-
-The base layout is forced via `select-layout main-horizontal` when neither dual-review nor parallel-writers is active. With either stack-extension, the plugin skips the automatic layout-force so the manual vertical splits stay intact.
+The base layout is forced via `select-layout main-horizontal` for `--size 3`. With `--size 4` (dual-review) the plugin skips the automatic layout-force so the manual vertical reviewer-2 split stays intact.
 
 ## Quick start
 
@@ -412,7 +389,7 @@ All commands assume the human is already inside a tmux session.
 ```
 /run    <project-path> <base> <feature> [task...]     # auto-recommends solo vs spawn
 /solo   <project-path> <base> <feature> [task...]
-/spawn  <project-path> <base> <feature> [task...] [--size 3|4|5] [--parallel-writers]
+/spawn  <project-path> <base> <feature> [task...] [--size 3|4]
 ```
 
 The script:
@@ -421,7 +398,7 @@ The script:
 2. Opens a tmux window named `<project-basename>-<feature>` (truncated to 30 chars).
 3. Spawns the agent panes and forces the chosen layout.
 4. Schedules the briefing(s) via `sleep 14 && send`, so the agents have time to boot before the message lands.
-5. Prints a JSON receipt with all pane IDs (plus `mode`, `size`, `writers`, `reviewers`, `parallel_writers`, `dual_review` flags for spawn).
+5. Prints a JSON receipt with all pane IDs (plus `mode`, `size`, `writers`, `reviewers`, `dual_review` flags for spawn).
 
 ## Briefing templates
 

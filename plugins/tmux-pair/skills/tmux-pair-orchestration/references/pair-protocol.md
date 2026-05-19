@@ -69,7 +69,7 @@ GATE-1 events are exceptional. Default GATE-1 traffic stays inside the orchestra
 
 ## Dual-Review events (opt-in via `--dual-review`)
 
-When `/spawn` runs with two reviewers (`--size 4` default or `--size 5`), the loop adds three reviewer-to-reviewer events plus one orchestrator-to-writer event. Single-reviewer mode (`--size 3` or `--size 4 --parallel-writers`) keeps the base vocabulary unchanged.
+When `/spawn` runs with two reviewers (`--size 4`), the loop adds three reviewer-to-reviewer events plus one orchestrator-to-writer event. Single-reviewer mode (`--size 3`) keeps the base vocabulary unchanged.
 
 | Event | From | To | When | Payload |
 |-------|------|-----|------|---------|

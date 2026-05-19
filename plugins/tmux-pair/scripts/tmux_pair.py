@@ -5,10 +5,10 @@ Subcommands:
   pane          single primitive agent in one pane (low-level)
   send          send text to a pane (handles multi-line + agent-TUI Enter quirks)
   solo          single agent in a fresh worktree, 6-phase gated self-review
-  spawn         coordinated team (orchestrator + writers + reviewers) in a
-                fresh worktree, sized 3..5 via --size (3 = 1W/1R/1O default;
-                4 = 1W/2R/1O dual-review; 4 + --parallel-writers = 2W/1R/1O;
-                5 = 2W/2R/1O)
+  spawn         coordinated team (orchestrator + writer + reviewers) in a
+                fresh worktree, sized 3..4 via --size (3 = 1W/1R/1O default;
+                4 = 1W/2R/1O dual-review). Parallel work happens via
+                subagent-worktrees the single writer spawns from its Task tool.
   list          list panes managed in the current session
   capture       capture-pane snapshot for one pane
 
@@ -2155,29 +2155,37 @@ def _briefing_procedure_block(*, with_standards: bool) -> str:
     )
 
 
-def _peer_writer_block(role: str, peer_writer_pane: str | None) -> str:
-    """Inline PARALLEL-WRITERS directive for engineer briefings when a second
-    writer is active. Role-specific: writer gets disjoint-bullets directive,
-    reviewer gets two-stream-tracking directive."""
-    if not peer_writer_pane:
+def _subagent_worktree_block(role: str, wt_path: Path) -> str:
+    """Inline SUBAGENT-WORKTREE directive for the writer engineer briefing.
+    Reviewer doesn't need this block: it sees the merged result in the feature
+    worktree like any other writer commit."""
+    if role.lower() != "writer":
         return ""
-    if role.lower() == "writer":
-        return (
-            f"PARALLEL-WRITERS: du bist EINER von zwei Writern. Counterpart:\n"
-            f"  {peer_writer_pane}. Ihr arbeitet auf DISJUNKTEN Plan-Bullets,\n"
-            f"  partitioniert vom Orchestrator. Kein direkter Sync; alles via\n"
-            f"  Orchestrator. Bei impliziter Datei-Kollision (du editierst eine\n"
-            f"  File die der andere Writer auch berührt): stop, ping Orchestrator\n"
-            f"  mit CLARIFY-NEEDED, re-partitionierung.\n\n"
-        )
-    if role.lower() == "reviewer":
-        return (
-            f"PARALLEL-WRITERS: zweiter Writer in {peer_writer_pane} aktiv. Du\n"
-            f"  trackst REVIEW-READY-Pings von beiden Writern. Sequentieller\n"
-            f"  REVIEW pro Bullet, nicht batched. APPROVE/BLOCK separat je\n"
-            f"  Writer-Bullet.\n\n"
-        )
-    return ""
+    return (
+        f"SUBAGENT-WORKTREE PATTERN (parallele Plan-Bullets)\n"
+        f"  Es gibt keinen zweiten Writer-Pane mehr. Wenn dein Plan Bullets mit\n"
+        f"  'B<x> || B<y> [parallel]' enthält, fan-out via Task-Subagents in\n"
+        f"  eigenen Sub-Worktrees:\n"
+        f"    1. Pro parallelem Bullet ein Sub-Worktree anlegen:\n"
+        f"         git worktree add ../$(basename {wt_path})-sub-<bullet-id> \\\n"
+        f"             -b <branch>/sub-<bullet-id>\n"
+        f"    2. Pro Sub-WT genau EIN Task(general-purpose)-Subagent spawnen,\n"
+        f"       der dort arbeitet. Eigene CWD, eigene Files, kein\n"
+        f"       File-Konflikt mit Geschwister-Subagents.\n"
+        f"    3. Nach Subagent-DONE: FF-merge zurück in den Feature-WT:\n"
+        f"         git -C {wt_path} merge --ff-only <branch>/sub-<bullet-id>\n"
+        f"       FF fehlgeschlagen heißt: jemand hat im Feature-WT schon\n"
+        f"       weitergearbeitet. Stop, ping Orchestrator mit CLARIFY-NEEDED.\n"
+        f"       Kein automatischer Merge-Commit.\n"
+        f"    4. Cleanup nach Merge:\n"
+        f"         git worktree remove ../$(basename {wt_path})-sub-<bullet-id>\n"
+        f"         git branch -D <branch>/sub-<bullet-id>\n"
+        f"    5. Sequenzielle Bullets bleiben im Haupt-Pane, kein Sub-WT nötig.\n"
+        f"  Der Squash-Final-Merge Feature->main passiert NACH GATE-3-PASS durch\n"
+        f"  den Master, nicht durch dich. Du sorgst nur dafür dass der Feature-WT\n"
+        f"  am Ende sauber linear ist (FF-Merges) oder konfliktfrei mergeable\n"
+        f"  bleibt.\n\n"
+    )
 
 
 def _briefing_spawn_engineer(
@@ -2185,7 +2193,6 @@ def _briefing_spawn_engineer(
     orchestrator_pane: str,
     wt_path: Path, branch: str, base: str, project: str,
     peer_reviewer_pane: str | None = None,
-    peer_writer_pane: str | None = None,
     with_standards: bool = False,
     interactive: bool = False,
 ) -> str:
@@ -2196,7 +2203,7 @@ def _briefing_spawn_engineer(
     dual_block = _dual_review_block(role, partner_pane, peer_reviewer_pane,
                                     final_target_pane=orchestrator_pane,
                                     final_target_label="Orchestrator")
-    peer_writer_block = _peer_writer_block(role, peer_writer_pane)
+    subagent_block = _subagent_worktree_block(role, wt_path)
     smart_workflow_block = _engineer_smart_workflow_block(
         role=role,
         decision_owner=f"Orchestrator {orchestrator_pane}",
@@ -2206,7 +2213,7 @@ def _briefing_spawn_engineer(
         f"[ROLE: {role} (gated workflow, orchestrator geführt)]\n\n"
         f"Partner: {partner_role} ({partner_pane}).\n"
         f"{dual_block}"
-        f"{peer_writer_block}"
+        f"{subagent_block}"
         f"Orchestrator: {orchestrator_pane} (briefst dich nach Recon + GATE 1 + GATE 2).\n"
         f"Du wartest jetzt PASSIV auf 'PLAN-LOCKED:'-Briefing vom Orchestrator.\n"
         f"Vor PLAN-LOCKED: KEIN Code, KEIN eigener Recon. Nur antworten wenn der\n"
@@ -2287,8 +2294,6 @@ def _briefing_orchestrator(
     claude_model: str = DEFAULT_CLAUDE_MODEL,
     reviewer_2_pane: str | None = None,
     reviewer_2_agent: str | None = None,
-    writer_2_pane: str | None = None,
-    writer_2_agent: str | None = None,
     with_standards: bool = False,
     with_greenfield: bool = False,
     interactive: bool = False,
@@ -2305,32 +2310,41 @@ def _briefing_orchestrator(
     threshold_k = _threshold_for_model(claude_model)
     interval_sec = 180  # poll cadence stays at 3 min regardless of context size
     dual_review = bool(reviewer_2_pane)
-    parallel_writers = bool(writer_2_pane)
-    parallel_writers_panes_line = (
-        f"  {writer_2_pane}  Writer-2 ({writer_2_agent})   "
-        f"- unten links unten\n"
-        if parallel_writers else ""
-    )
     dual_review_panes_line = (
         f"  {reviewer_2_pane}  Reviewer-2 ({reviewer_2_agent})  "
         f"- unten rechts unten\n"
         if dual_review else ""
     )
-    parallel_writers_directive = (
-        f"PARALLEL-WRITERS MODE\n"
-        f"  Zwei Writer aktiv: {writer_pane} ({writer_agent}) und\n"
-        f"  {writer_2_pane} ({writer_2_agent}). Pro Plan:\n"
-        f"  1. Du partitionierst die Plan-Bullets in DISJUNKTE Sub-Sets pro\n"
-        f"     Writer. Marker im Plan: 'B3 -> wr1', 'B4 -> wr2'. Disjoint heißt\n"
-        f"     keine gemeinsamen Files (sonst Merge-Konflikt im Worktree).\n"
-        f"  2. Du briefst beide Writer SEPARAT mit jeweils ihrem Bullet-Subset.\n"
-        f"  3. Beide Writer pingen unabhängig REVIEW-READY an Reviewer pro\n"
-        f"     ihrem Bullet. KEIN Cross-Talk zwischen Writern.\n"
-        f"  4. Reviewer trackt zwei Writer-Streams. Sequentielle REVIEW-Cycles\n"
-        f"     je Writer; APPROVE pro Bullet, nicht batched.\n"
-        f"  5. Bei impliziter Datei-Kollision (Writer entdeckt fremden Edit auf\n"
-        f"     seiner File): Writer pingt CLARIFY-NEEDED an DICH, du re-partitionierst.\n\n"
-        if parallel_writers else ""
+    subagent_worktree_directive = (
+        f"SUBAGENT-WORKTREE PATTERN (Parallel via Task-Subagents)\n"
+        f"  Es gibt EINEN Writer-Pane. Parallele Arbeit passiert NICHT in einem\n"
+        f"  zweiten Writer-Pane (gibt es nicht mehr), sondern via Task-Subagents\n"
+        f"  die der Writer selbst spawnt, jeder in einem eigenen Sub-Worktree.\n"
+        f"\n"
+        f"  Wenn dein Plan Bullets enthält die mit 'B3 || B4 [parallel]' markiert\n"
+        f"  sind, weise den Writer in seinem PLAN-LOCKED-Briefing an:\n"
+        f"    1. Pro parallelem Bullet einen Sub-Worktree anlegen:\n"
+        f"         git worktree add ../<feature>-wt-sub-<bullet-id> -b "
+        f"<feature>/sub-<bullet-id>\n"
+        f"    2. Pro Sub-Worktree EINEN Task(general-purpose)-Subagent spawnen,\n"
+        f"       der dort arbeitet (eigene CWD, eigenes git, kein File-Konflikt\n"
+        f"       mit Geschwister-Subagents).\n"
+        f"    3. Nach Subagent-DONE: Writer mergt Sub-Branch fast-forward zurück\n"
+        f"       in den Feature-WT:\n"
+        f"         git -C {wt_path} merge --ff-only "
+        f"<feature>/sub-<bullet-id>\n"
+        f"       Wenn FF nicht klappt (irgendwer hat im Feature-WT schon\n"
+        f"       weitergearbeitet): Writer pingt CLARIFY-NEEDED an DICH, du\n"
+        f"       entscheidest (rebase|merge-commit|abort). Niemals automatisch\n"
+        f"       Merge-Commit erzeugen.\n"
+        f"    4. Sub-Worktree cleanup nach Merge:\n"
+        f"         git worktree remove ../<feature>-wt-sub-<bullet-id>\n"
+        f"         git branch -D <feature>/sub-<bullet-id>\n"
+        f"    5. Final-Merge Feature->main passiert via Squash (Master macht das\n"
+        f"       nach GATE-3-PASS), NICHT via FF. Der Feature-Branch behält seine\n"
+        f"       Sub-Merge-History aber main bleibt linear.\n"
+        f"  Sequentielle Bullets ('B5 -> B6 [sequenziell: ...]') bleiben im\n"
+        f"  Haupt-Writer-Pane, kein Sub-Worktree nötig.\n\n"
     )
     dual_review_directive = (
         f"DUAL-REVIEW MODE\n"
@@ -2402,15 +2416,13 @@ def _briefing_orchestrator(
         f"WINDOW:   {window_name}\n\n"
         f"PANES\n"
         f"  {orchestrator_pane}  YOU (orchestrator)         - oben, full width\n"
-        f"  {writer_pane}    Writer{'-1' if parallel_writers else ''} ({writer_agent})     - unten links"
-        f"{(' oben' if parallel_writers else '')}\n"
-        f"{parallel_writers_panes_line}"
+        f"  {writer_pane}    Writer ({writer_agent})     - unten links\n"
         f"  {reviewer_pane}  Reviewer{'-1' if dual_review else ''} ({reviewer_agent})  - unten rechts"
         f"{(' oben' if dual_review else '')}\n"
         f"{dual_review_panes_line}"
         f"  {human_pane}    Human              - andere Pane\n\n"
         f"TASK (vom Human)\n{task or '(keine: frage Human)'}\n\n"
-        f"{parallel_writers_directive}"
+        f"{subagent_worktree_directive}"
         f"{dual_review_directive}"
         f"{smart_workflow_block}"
         f"{_briefing_standards_block(with_standards=with_standards, with_pre_flight=with_greenfield)}"
@@ -2702,49 +2714,39 @@ def _briefing_flags(args: argparse.Namespace, *, no_worktree: bool,
     return with_standards, with_greenfield
 
 
-def _spawn_layout(size: int, parallel_writers: bool) -> dict[str, int]:
-    """Map --size + --parallel-writers to writers/reviewers/orchestrator counts.
+def _spawn_layout(size: int) -> dict[str, int]:
+    """Map --size to writers/reviewers/orchestrator counts.
 
-    Argparse default is size=3. Mapping:
-      size=3                       -> 1W/1R/1O.
-      size=4 (no flag)             -> 1W/2R/1O (dual-review preset).
-      size=4 + --parallel-writers  -> 2W/1R/1O.
-      size=5                       -> 2W/2R/1O (both presets active).
-    Caller enforces parallel_writers requires size>=4.
+    Single writer always. Reviewer count flips at size 4.
+      size=3 -> 1W/1R/1O (default).
+      size=4 -> 1W/2R/1O (dual-review preset).
+    Parallel work happens via subagent-worktrees the writer spawns, not via
+    a second writer pane.
     """
     if size == 3:
         return {"writers": 1, "reviewers": 1, "orchestrator": 1}
     if size == 4:
-        return ({"writers": 2, "reviewers": 1, "orchestrator": 1}
-                if parallel_writers
-                else {"writers": 1, "reviewers": 2, "orchestrator": 1})
-    if size == 5:
-        return {"writers": 2, "reviewers": 2, "orchestrator": 1}
+        return {"writers": 1, "reviewers": 2, "orchestrator": 1}
     raise ValueError(f"unsupported team size: {size}")
 
 
 def cmd_spawn(args: argparse.Namespace) -> int:
     """Spawn a coordinated agent team in a fresh worktree.
 
-    Team size determined by --size (3..5, default 3) + --parallel-writers:
+    Team size determined by --size (3 or 4, default 3):
       size=3: 1 writer + 1 reviewer + 1 orchestrator (default).
       size=4: 1 writer + 2 reviewers + 1 orchestrator (dual-review preset).
-      size=4 + --parallel-writers: 2 writers + 1 reviewer + 1 orchestrator.
-      size=5: 2 writers + 2 reviewers + 1 orchestrator.
     Reviewers (>=2) swap findings then report to orchestrator for consolidation.
-    Writers (>=2) work on disjoint plan-bullets partitioned by orchestrator."""
-    if args.parallel_writers and args.size < 4:
-        sys.exit("error: --parallel-writers requires --size 4 or 5")
-    layout = _spawn_layout(args.size, args.parallel_writers)
-    parallel_writers = layout["writers"] >= 2
+    Parallel work: writer spawns subagent-worktrees for parallel plan-bullets
+    via its Task tool. Subagent merges back via FF; feature merges to main
+    via squash."""
+    layout = _spawn_layout(args.size)
     dual_review = layout["reviewers"] >= 2
 
     agents = load_agents()
     agent_list = [args.writer_agent, args.reviewer_agent, args.orchestrator_agent]
     if dual_review:
         agent_list.append(args.reviewer_2_agent)
-    if parallel_writers:
-        agent_list.append(args.writer_2_agent)
     for a in agent_list:
         if a not in agents:
             sys.exit(f"error: unknown agent '{a}'")
@@ -2756,19 +2758,17 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     cargo_target = _cargo_target_dir(project, no_shared_target)
 
     orchestrator_name = f"or.{window_name}"
-    writer_name = f"wr1.{window_name}" if parallel_writers else f"wr.{window_name}"
-    writer_2_name = f"wr2.{window_name}" if parallel_writers else None
+    writer_name = f"wr.{window_name}"
     reviewer_name = f"rv1.{window_name}" if dual_review else f"rv.{window_name}"
     reviewer_2_name = f"rv2.{window_name}" if dual_review else None
 
     pi_orchestrator_provider, pi_orchestrator_model, pi_orchestrator_thinking = _pi_overrides_for_role(args, "orchestrator")
     pi_writer_provider, pi_writer_model, pi_writer_thinking = _pi_overrides_for_role(args, "writer")
-    pi_writer_2_provider, pi_writer_2_model, pi_writer_2_thinking = _pi_overrides_for_role(args, "writer_2")
     pi_reviewer_provider, pi_reviewer_model, pi_reviewer_thinking = _pi_overrides_for_role(args, "reviewer")
     pi_reviewer_2_provider, pi_reviewer_2_model, pi_reviewer_2_thinking = _pi_overrides_for_role(args, "reviewer_2")
 
     # Layout: orchestrator on top, writer bottom-left, reviewer bottom-right.
-    # Extra panes (writer-2, reviewer-2) get stacked under their primary.
+    # Reviewer-2 (dual-review) gets stacked under reviewer-1.
     orchestrator_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
         agent=args.orchestrator_agent,
@@ -2806,28 +2806,6 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         ),
         split="v", display_name=writer_name,
     )
-    writer_2_pane = None
-    if parallel_writers:
-        # Stack writer-2 vertically under writer-1 in the bottom-left column.
-        tmux_safe("select-pane", "-t", writer_pane)
-        writer_2_pane = spawn_pane(
-            session=session, window_name=window_name, cwd=str(wt_path),
-            agent=args.writer_2_agent,
-            boot_command=_boot_command_with_standards(
-                agent=args.writer_2_agent, agents_dict=agents,
-                window_name=window_name, role="writer",
-                claude_effort=args.claude_effort,
-                codex_effort=args.codex_effort,
-                claude_model=args.claude_model,
-                cargo_target_dir=cargo_target,
-                pi_provider=pi_writer_2_provider,
-                pi_model=pi_writer_2_model,
-                pi_thinking=pi_writer_2_thinking,
-                display_name=writer_2_name,
-                project_dir=wt_path,
-            ),
-            split="v", display_name=writer_2_name,
-        )
     reviewer_pane = spawn_pane(
         session=session, window_name=window_name, cwd=str(wt_path),
         agent=args.reviewer_agent,
@@ -2870,7 +2848,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         )
 
     target_window = f"{session}:{window_name}"
-    if not dual_review and not parallel_writers:
+    if not dual_review:
         tmux_safe("select-layout", "-t", target_window, "main-horizontal")
 
     panes_to_wait = [
@@ -2878,8 +2856,6 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         (writer_pane, args.writer_agent),
         (reviewer_pane, args.reviewer_agent),
     ]
-    if parallel_writers:
-        panes_to_wait.append((writer_2_pane, args.writer_2_agent))
     if dual_review:
         panes_to_wait.append((reviewer_2_pane, args.reviewer_2_agent))
     ready = _wait_panes_ready(panes_to_wait, timeout=70)
@@ -2890,9 +2866,6 @@ def cmd_spawn(args: argparse.Namespace) -> int:
                        claude_model=args.claude_model)
     _post_boot_slashes(reviewer_pane, args.reviewer_agent, reviewer_name,
                        claude_model=args.claude_model)
-    if parallel_writers:
-        _post_boot_slashes(writer_2_pane, args.writer_2_agent,
-                           writer_2_name, claude_model=args.claude_model)
     if dual_review:
         _post_boot_slashes(reviewer_2_pane, args.reviewer_2_agent,
                            reviewer_2_name, claude_model=args.claude_model)
@@ -2921,8 +2894,6 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         claude_model=args.claude_model,
         reviewer_2_pane=reviewer_2_pane,
         reviewer_2_agent=args.reviewer_2_agent if dual_review else None,
-        writer_2_pane=writer_2_pane,
-        writer_2_agent=args.writer_2_agent if parallel_writers else None,
         with_standards=with_standards,
         with_greenfield=with_greenfield,
     )
@@ -2931,7 +2902,6 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         orchestrator_pane=orchestrator_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         peer_reviewer_pane=reviewer_2_pane,
-        peer_writer_pane=writer_2_pane,
         with_standards=with_standards,
     )
     reviewer_brief = _briefing_spawn_engineer(interactive=args.interactive,
@@ -2939,24 +2909,12 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         orchestrator_pane=orchestrator_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         peer_reviewer_pane=reviewer_2_pane,
-        peer_writer_pane=writer_2_pane,
         with_standards=with_standards,
     )
 
     _send_briefing_sync(orchestrator_pane, orchestrator_brief)
     _send_briefing_sync(writer_pane, writer_brief)
     _send_briefing_sync(reviewer_pane, reviewer_brief)
-    if parallel_writers:
-        writer_2_brief = _briefing_spawn_engineer(interactive=args.interactive,
-            role="Writer", partner_role="reviewer", partner_pane=reviewer_pane,
-            orchestrator_pane=orchestrator_pane,
-            wt_path=wt_path, branch=branch, base=args.base,
-            project=str(project),
-            peer_reviewer_pane=reviewer_2_pane,
-            peer_writer_pane=writer_pane,
-            with_standards=with_standards,
-        )
-        _send_briefing_sync(writer_2_pane, writer_2_brief)
     if dual_review:
         reviewer_2_brief = _briefing_spawn_engineer(interactive=args.interactive,
             role="Reviewer", partner_role="writer", partner_pane=writer_pane,
@@ -2964,7 +2922,6 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             wt_path=wt_path, branch=branch, base=args.base,
             project=str(project),
             peer_reviewer_pane=reviewer_pane,
-            peer_writer_pane=writer_2_pane,
             with_standards=with_standards,
         )
         _send_briefing_sync(reviewer_2_pane, reviewer_2_brief)
@@ -2974,7 +2931,6 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         "size": args.size,
         "writers": layout["writers"],
         "reviewers": layout["reviewers"],
-        "parallel_writers": parallel_writers,
         "dual_review": dual_review,
         "worktree": str(wt_path),
         "no_worktree": no_worktree,
@@ -2996,13 +2952,6 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         "human_pane": human_pane,
         "briefing_dispatch": "orchestrator + engineers briefed (post-ready); engineers wait for PLAN-LOCKED from orchestrator after GATE 2",
     }
-    if parallel_writers:
-        output.update({
-            "writer_2_pane": writer_2_pane,
-            "writer_2_agent": args.writer_2_agent,
-            "writer_2_name": writer_2_name,
-            "writer_2_ready": ready.get(writer_2_pane, False),
-        })
     if dual_review:
         output.update({
             "reviewer_2_pane": reviewer_2_pane,
@@ -3610,28 +3559,22 @@ def build_parser() -> argparse.ArgumentParser:
     se.set_defaults(func=cmd_send, identity_wrap=True)
 
     tr = sub.add_parser("spawn",
-                        help="coordinated agent team in a fresh worktree (size 3..5, default 3 = 1W/1R/1O)")
+                        help="coordinated agent team in a fresh worktree (size 3..4, default 3 = 1W/1R/1O)")
     tr.add_argument("--project", required=True)
     tr.add_argument("--feature", required=True)
     tr.add_argument("--base", default="origin/main")
     tr.add_argument("--task", default="",
                     help="task description sent to the orchestrator only")
-    tr.add_argument("--size", type=int, default=3, choices=[3, 4, 5],
+    tr.add_argument("--size", type=int, default=3, choices=[3, 4],
                     help="team size (default 3). 3 = 1W/1R/1O. 4 = 1W/2R/1O "
-                         "(dual-review preset). 4 + --parallel-writers = 2W/1R/1O. "
-                         "5 = 2W/2R/1O (both presets).")
-    tr.add_argument("--parallel-writers", action="store_true",
-                    help="use two writers on disjoint plan-bullets instead of "
-                         "a second reviewer. Requires --size 4 or 5. Implicit "
-                         "for --size 5.")
+                         "(dual-review preset). Parallel work happens via "
+                         "subagent-worktrees the single writer spawns, not "
+                         "via a second writer pane.")
     tr.add_argument("--writer-agent", default="claude")
-    tr.add_argument("--writer-2-agent", default="claude",
-                    help="second writer agent when parallel-writers active "
-                         "(--size 4 with --parallel-writers, or --size 5).")
     tr.add_argument("--reviewer-agent", default="codex")
     tr.add_argument("--reviewer-2-agent", default="codex",
                     help="second reviewer agent when dual-review active "
-                         "(--size 4 default, or --size 5).")
+                         "(--size 4 default).")
     tr.add_argument("--orchestrator-agent", default="claude")
     tr.add_argument("--claude-model", default=DEFAULT_CLAUDE_MODEL,
                     help=f"claude model slug (default: {DEFAULT_CLAUDE_MODEL}, "
@@ -3666,12 +3609,6 @@ def build_parser() -> argparse.ArgumentParser:
                     help="pi model slug override für pi-Writer-Pane.")
     tr.add_argument("--pi-writer-thinking", default=None,
                     help="pi thinking override für pi-Writer.")
-    tr.add_argument("--pi-writer-2-provider", default=None,
-                    help="pi provider override für pi-Writer-2-Pane.")
-    tr.add_argument("--pi-writer-2-model", default=None,
-                    help="pi model slug override für pi-Writer-2-Pane.")
-    tr.add_argument("--pi-writer-2-thinking", default=None,
-                    help="pi thinking override für pi-Writer-2.")
     tr.add_argument("--pi-reviewer-provider", default=None,
                     help="pi provider override für pi-Reviewer-Pane.")
     tr.add_argument("--pi-reviewer-model", default=None,
