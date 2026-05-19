@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spawn a solo with self-review", "spawn a coordinated agent team", "run multiple agents on this", "set up an orchestrator + writers + reviewers", "use the tmux-pair workflow", "/run for this task", or otherwise wants to run a single agent or a coordinated 3-to-5-pane spawn-team (orchestrator + writers + reviewers) in tmux panes wired up via git worktrees. Covers solo (single agent + gated subagent-driven self-review) and spawn (coordinated team sized 3..5 via --size and --parallel-writers), plus the /run auto-entry that recommends solo vs spawn from a short repo + task recon. Includes the pair protocol (REVIEW-READY -> REVIEW loop inside a spawn), when to choose solo vs spawn (and which --size), durable standards (claude --append-system-prompt-file + codex AGENTS.md), gated workflow (Clarify -> Reviewer-Readiness -> Plan-Check -> Loop -> Final-Verify with rules-bootstrap loop, PROJECT.md care, language templates for 7 stacks, REVIEW-READY-3-Felder, CLARIFY-NEEDED, Plan-Update-Commit, COMPLETE-Format), sender identity prefixes, explicit parallel-plan markers, engineer subagent strategy with repo-specific subagent detection (`.claude/agents/<repo>-*.md` listed in briefings), bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), Compact-Watcher with model-aware threshold, --claude-model + --no-worktree flags, briefing templates, and recovery from common failure modes.
-version: 0.16.0
+version: 0.17.0
 ---
 
 # tmux-pair-orchestration
