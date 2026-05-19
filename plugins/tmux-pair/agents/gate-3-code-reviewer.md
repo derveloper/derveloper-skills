@@ -86,6 +86,13 @@ Writer behavior: apply the patch silently with `git apply`, then ACK exactly `ap
    - No `Co-Authored-By: Claude` / `🤖` trailer in commit messages.
    - No `--no-verify` traces in hook output.
    - Echte Umlaute (ä/ö/ü/ß), keine ae/oe/ue/ss in deutschem Text.
+10. Recurring Pre-Flight checks (aggregated from spawn retros, falsifiable):
+   - **Decorator-Swallow on Trait-Default-Add**: If the diff adds a default-body method to a trait (especially lifecycle methods like `shutdown`/`close`/`flush`), `rg "impl <Trait> for" --type rust` MUST be run and every implementor checked. Decorators (>=2 forward methods on a wrapped impl) without explicit forward-override -> BLOCKER (trait-default no-op silently swallowed). Either forward-override or explicit no-op rationale in the bullet body.
+   - **Trait-Param-Honor**: Trait-method parameter prefixed `_` (e.g. `_grace`, `_token`) while the trait-doc describes the param as effective -> BLOCKER. Either honor the param (with test) or amend the trait-doc to declare it advisory.
+   - **Method-Resolution-Collision**: A new trait-method with the same name as a pre-existing inherent-impl on an implementor type -> BLOCKER (trait-method silently shadowed by inherent-method). `cargo check -p <crate>` shows the ambiguity-warning.
+   - **fmt-drift**: A `REVIEW-READY` claiming "fmt clean" without a `cargo fmt -p <crate> --check` (exit 0) line in evidence -> BLOCKER. Per-crate `cargo fmt -p <crate>` (without `--check`) silently rewrites neighbor files and produces drive-by drift.
+   - **Memory-Recon-Miss**: Mid-run self-decisions that would have been preventable by reading the prior memory files at RECON time -> WARNING (drift indicator; persist as memory follow-up).
+   - **API-Surface-Upfront**: A new public function/struct/trait added by one bullet and consumed by a later bullet in the same plan, where the consumer-bullet does not reference the producer-bullet's exact public signature -> WARNING (API drift between bullets).
 
 ## Output (exactly this format)
 

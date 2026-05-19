@@ -1,10 +1,12 @@
 # Gated Workflow
 
-`/spawn` (in all sizes) runs through four forced quality gates before code lands on the branch:
+`/spawn` (in all sizes) runs through four forced quality gates before code lands on the branch, plus a Post-Merge Retro as a fifth required step after the squash-merge:
 
 ```
-Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges
+Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges -> Post-Merge Retro -> Cleanup
 ```
+
+The Post-Merge Retro is Pflicht, not optional. See the "Post-Merge Retro" section below for the procedure. Cleanup (worktree remove, branch delete, window kill) happens only after retro patterns are persisted.
 
 Gates exist because writer+reviewer loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 1.5, 2, and 3; the user enforces gate 1 via `AskUserQuestion`.
 
@@ -569,6 +571,45 @@ For projects with thin or partial rules, GATE 1.5 fills only the missing topics 
 `GATE-1-ESCALATE`/`GATE-1-DECISION` are the ONLY gate-1 events crossing pane boundaries in normal spawns. The orchestrator's regular `AskUserQuestion`/answer cycle stays inside its own pane and never reaches the human.
 
 These extend the base pair-protocol vocabulary (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`; see `references/pair-protocol.md`). Engineers send those; gate events go between orchestrator and human.
+
+## Post-Merge Retro (Pflicht)
+
+After `COMPLETE` lands and the human squash-merges the worktree branch, the spawn-run is NOT yet done. The retro is the step where the team's hardest-won learnings get persisted before the panes die.
+
+**Sequence:**
+
+1. **Squash-merge on main.** `git merge --squash` from the worktree branch, then one commit on `main` with a consolidated body. Squash is the default in all cases: linear main-history, one commit per feature, plan-amendments and reactive-fixes vanish from main's view. Fast-forward or `--no-ff` only when the user explicitly wants to keep the review trail.
+2. **KEEP wt + panes.** Do NOT clean up immediately after the squash. Worktree, branch, and tmux panes (orchestrator + writer + reviewers) stay intact for the retro step.
+3. **Retro with team.** The human sends a tailored retro-question to EACH active pane via `tmux_pair.py send`. Expect 200-500 words factual analysis per agent (no praise, weaknesses direct):
+   - **Orchestrator**: phase wall-clock (RECON / GATE-1 / GATE-1.5 / GATE-2 / IMPL / GATE-3), GATE-2-iterations, mid-run self-decisions that would have been preventable at first-plan-write, drive-by / reactive commit share, structural plan errors, mode-choice retro.
+   - **Writer**: compile-vs-test time per bullet, public-API-touch impact, reactive-fix triggers per commit, hardest test pattern, fmt-drift cause, Pre-Flight gaps that cost time.
+   - **Reviewer 1+2** (with dual-review): concrete BLOCKER / WARNING per file:line, review-round count, divergence vs peer findings, dual-review value (what only the second reviewer caught), issue class avoidable in future tasks.
+4. **Pattern synthesis + persist.** The human collects the retros, identifies recurring issue classes (e.g. decorator-swallow, cancellation-root-mismatch, fmt-drift), and persists the learnings in:
+   - tmux-pair SKILL.md: when the pattern is workflow cross-cutting (Pre-Flight class, mode-choice heuristic, dual-review value).
+   - Consumer-repo rules (`.claude/rules/*.md` or `.claude/skills/<repo>-<topic>/SKILL.md`): when the pattern is repo-specific (e.g. example-project decorator-chain-recon, trait-param-honor-check).
+5. **Cleanup.** Only after pattern-persist:
+
+```bash
+cd <project-path>
+git worktree remove ../<project-name>-wt-<feature>
+git branch -D feature/<feature>      # -D because squash-merge is git-perspectively "unmerged"
+tmux kill-window -t <window-name>
+```
+
+A spawn run without retro does not persist the most expensive learnings of the run.
+
+## Recurring Pre-Flight Checks (aggregated from retros)
+
+These checks are aggregated from multiple spawn retros and are falsifiable. GATE 2 anchors them in plan-quality (Item 16); GATE 3 code-reviewer enforces them in the diff (Item 10):
+
+- **Decorator-Sweep on Trait-Default-Add**: adding a default-body trait method (esp. lifecycle: `shutdown`, `close`, `flush`) requires `rg "impl <Trait> for" --type rust` listing all implementors. Decorators (>=2 forward methods on wrapped impl) need explicit forward-override OR no-op rationale, otherwise the trait-default no-op is silently swallowed.
+- **Trait-Param-Honor**: `_`-prefixed param on a trait-method whose doc declares the param effective is silent-discard footgun. Either honor (with test) or amend the doc.
+- **Method-Resolution-Collision**: new trait-method with same name as existing inherent-impl on an implementor gets silently shadowed. `cargo check -p <crate>` decks the ambiguity-warning.
+- **fmt-drift**: `cargo fmt -p <crate>` without `--check` silently rewrites neighbor files. "fmt clean" claim requires `--check` evidence (exit 0).
+- **Memory-Recon as RECON Pflicht-Step**: read `MEMORY.md` + 3-5 most-relevant memory files before plan-write. Mid-run self-decisions preventable by memory-recon are a drift indicator.
+- **API-Surface-Upfront**: producer-bullet introduces a new public surface, consumer-bullet (later in same plan) must name the exact signature, not "the new function".
+
+These belong in `--with-standards` briefings AND in consumer-repo `.claude/rules/pre-flight-checklists.md`.
 
 ## Failure modes specific to gated runs
 

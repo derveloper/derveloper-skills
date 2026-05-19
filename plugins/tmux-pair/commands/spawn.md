@@ -111,12 +111,15 @@ If feature or task is ambiguous, ask the user.
 
 JSON with `mode: "spawn"`, `size`, `writers`, `reviewers`, `parallel_writers`, `dual_review`, `worktree`, `branch`, `window`, `orchestrator_pane`, `orchestrator_name`, `writer_pane`, `writer_name`, `reviewer_pane`, `reviewer_name`, `human_pane`. With dual-review active (reviewers >= 2): additional `reviewer_2_pane`, `reviewer_2_agent`, `reviewer_2_name`. With parallel-writers active (writers >= 2): additional `writer_2_pane`, `writer_2_agent`, `writer_2_name`. Relay back to the user.
 
-## Cleanup (manual)
+## Cleanup (manual, AFTER Post-Merge Retro)
+
+After `COMPLETE` and the human's squash-merge, KEEP the worktree + panes for the Post-Merge Retro (200-500 word factual answer per active pane on wall-clock, GATE-2 iterations, mid-run self-decisions, structural plan errors). Pattern-persist into SKILL.md (workflow cross-cutting) or consumer-repo rules / skills (repo-specific). Only THEN clean up:
 
 ```bash
 cd <project-path>
 git worktree remove ../<project-name>-wt-<feature>
-git branch -d feature/<feature>   # after merge
+git branch -D feature/<feature>   # -D because squash-merge is git-perspectively "unmerged"
+tmux kill-window -t <window-name>
 ```
 
-The orchestrator does NOT clean up; that decision stays with the human.
+The orchestrator does NOT clean up; that decision stays with the human. See `skills/tmux-pair-orchestration/references/gated-workflow.md` for the full retro procedure.

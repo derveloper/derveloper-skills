@@ -56,6 +56,17 @@ Default briefings are slim and task-focused. Include this section only when
   REVIEW-READY claims must be direct reads/greps/git-inspection. Don't relay
   a sub-agent's summary as fact.
 
+PRE-FLIGHT (Rust focus, applicable bullets only)
+- Decorator-Sweep on Trait-Default-Add: `rg "impl <Trait> for" --type rust`,
+  every decorator (>=2 forward methods) needs explicit forward-override or
+  no-op rationale.
+- Trait-Param-Honor: no `_`-prefixed param on a trait-method whose doc declares
+  it effective. Honor (with test) or amend the doc.
+- Method-Resolution-Collision: new trait-method name must not collide with an
+  existing inherent-impl on any implementor (`cargo check -p <crate>` clean).
+- fmt-drift: "fmt clean" claim requires `cargo fmt -p <crate> --check` exit 0
+  in REVIEW-READY evidence.
+
 START. Read POINTERS, plan one logical step, code, run gates, REVIEW-READY.
 ```
 

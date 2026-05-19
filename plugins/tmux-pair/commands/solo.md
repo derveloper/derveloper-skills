@@ -89,10 +89,15 @@ If the feature description is missing or ambiguous, ask the user before spawning
 
 JSON with `worktree`, `branch`, `window`, `solo_pane`, `solo_agent`, `solo_name`, `solo_ready`, `human_pane`. Relay back to the user so they can address the solo via the `send` subcommand.
 
-## Cleanup (manual)
+## Cleanup (manual, AFTER Post-Merge Retro)
+
+After the agent pings DONE and the human's squash-merge, KEEP the worktree + pane for the Post-Merge Retro (200-500 word factual answer on phase wall-clock, GATE-2 iterations, mid-run self-decisions preventable at first-plan-write, Pre-Flight gaps). Pattern-persist into SKILL.md or consumer-repo rules / skills. Only THEN clean up:
 
 ```bash
 cd <project-path>
 git worktree remove ../<project-name>-wt-<feature>
-git branch -d feature/<feature>   # after merge
+git branch -D feature/<feature>   # -D because squash-merge is git-perspectively "unmerged"
+tmux kill-window -t <window-name>
 ```
+
+See `skills/tmux-pair-orchestration/references/gated-workflow.md` for the full retro procedure.

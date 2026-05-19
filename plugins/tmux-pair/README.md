@@ -219,6 +219,23 @@ checks that during recon and asks whether to bootstrap a human-maintained
 skeleton. `~/git/example-project/PROJECT.md` is the reference example for format and
 detail depth.
 
+### Post-Merge Retro (Pflicht)
+
+After `COMPLETE` and the human's squash-merge, the spawn run is not yet done. Worktree + panes stay intact while the human collects a 200-500 word factual retro from each active pane (orchestrator, writer, reviewers), then persists recurring issue classes either into this plugin's SKILL.md (workflow cross-cutting) or into consumer-repo rules / skills (repo-specific). Cleanup follows only after pattern-persist. See `skills/tmux-pair-orchestration/references/gated-workflow.md` for the procedure.
+
+### Recurring Pre-Flight Checks (Rust focus)
+
+GATE 2 (`agents/gate-2-plan-check.md` Item 16) anchors and GATE 3 code-reviewer (`agents/gate-3-code-reviewer.md` Item 10) enforces:
+
+- Decorator-Sweep on Trait-Default-Add: list all `impl <Trait> for`, decorators need forward-override or no-op rationale.
+- Trait-Param-Honor: `_`-prefixed param vs effective trait-doc is silent-discard footgun.
+- Method-Resolution-Collision: new trait-method with same name as inherent-impl on implementor gets shadowed.
+- fmt-drift: `cargo fmt -p <crate>` without `--check` brushes neighbor files; "fmt clean" claims need `--check` evidence.
+- Memory-Recon-Pflicht: RECON reads `MEMORY.md` plus the relevant memory files before plan-write.
+- API-Surface-Upfront: consumer-bullet must name the producer-bullet's exact public signature.
+
+Aggregated from spawn retros, falsifiable, additive to standard adversarial review.
+
 ### Reviewer-Readiness + rules-bootstrap (GATE 1.5)
 
 A reviewer without rules says "looks fine": that is the failure mode GATE 1.5 prevents. The orchestrator runs the readiness-check before planning. On `NEEDS-RULES`, it loops: per gap one `AskUserQuestion`, then the bootstrap subagent generates `.claude/rules/<topic>.md` from one of seven shipped language templates (Rust, TypeScript, Python, Go, JavaScript, Java, generic skeleton) plus repo recon plus user answers. Templates ship in `templates/rules/` and are sanitized: no company-specific naming, ADRs, or domain references. Project-specific content comes from the user's own answers, baked into the user's own repo.

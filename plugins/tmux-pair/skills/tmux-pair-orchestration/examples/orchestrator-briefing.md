@@ -78,8 +78,12 @@ DUTIES IN ORDER
    Not for: review iteration, test output, style diffs, trivia.
 
 5. CLEANUP
-   You do NOT decide on cleanup. After DONE: ping human, wait. Human removes
-   the worktree, deletes the branch, kills the window.
+   You do NOT decide on cleanup. After DONE: ping human, wait. The human runs
+   the Post-Merge Retro (200-500 word factual answer per active pane on
+   wall-clock, GATE-2 iterations, mid-run self-decisions preventable at plan-
+   write, drive-by commit share, structural plan errors) BEFORE removing the
+   worktree, deleting the branch, or killing the window. Stay alive for the
+   retro ping.
 
 ANTI-PATTERNS
 - Don't open code files for editing.

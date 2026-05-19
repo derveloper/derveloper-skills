@@ -56,6 +56,17 @@ ANTI-PATTERNS
 - Don't relay a sub-agent's summary as a basis for findings. Use direct
   reads/greps/git-inspection.
 
+PRE-FLIGHT (Rust focus, scan diff for these classes)
+- Decorator-Swallow: any new default-body trait method on a trait with
+  decorator implementors (>=2 forward methods on wrapped impl) without
+  explicit forward-override = BLOCKER.
+- Trait-Param-Honor: `_`-prefixed param on trait-method whose doc declares it
+  effective = BLOCKER.
+- Method-Resolution-Collision: new trait-method with same name as inherent-impl
+  on an implementor = BLOCKER (silently shadowed).
+- fmt-drift: "fmt clean" claim without `cargo fmt -p <crate> --check` evidence
+  = BLOCKER.
+
 START. Wait for first REVIEW-READY.
 ```
 
