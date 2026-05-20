@@ -12,10 +12,10 @@
     {
       "name": "tmux-pair",
       "source": "./plugins/tmux-pair",
-      "description": "Coordinate one or more coding agents on a task via tmux + git worktrees. /run auto-recommends solo vs spawn from a quick repo + task recon. /solo runs a single agent with gated 6-phase self-review; /spawn runs a coordinated team of orchestrator + ONE writer + reviewers (size 3..4 via --size). Parallel work fans out via subagent-worktrees the writer spawns from its Task tool (FF-merge back per sub-bullet, squash-merge feature->main at GATE-3-PASS). Includes the orchestration script, the tmux-pair-orchestration skill, PROJECT.md care, scoped subagents for the gates, sender identity prefixes, explicit parallel-plan markers, auto-detection of repo-specific subagents (`.claude/agents/<repo>-*.md`) listed in every briefing, shipped rules templates for 7 stacks, bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), and pi as third coding agent alongside claude + codex.",
-      "version": "0.18.0",
+      "description": "Run a single coding agent on a task via tmux + git worktree. /run auto-entry performs a short repo + task recon, then dispatches to /solo. /solo runs one agent in a fresh worktree with a gated 6-phase workflow (Recon, Clarify, Reviewer-Readiness, Plan-Check, Loop, Final-Verify). Each gate runs two independent minds in parallel: a claude subagent plus `codex exec` (different model family, fresh context, no pane setup). Includes the orchestration script, the tmux-pair-orchestration skill, PROJECT.md care, scoped subagents for the gates, sender identity prefixes, explicit parallel-plan markers, auto-detection of repo-specific subagents (`.claude/agents/<repo>-*.md`) listed in every briefing, shipped rules templates for 7 stacks, bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), and pi as third coding agent alongside claude + codex. Multi-pane spawn modes were removed in 0.19.0.",
+      "version": "0.19.0",
       "category": "workflow",
-      "tags": ["tmux", "git-worktree", "pair-programming", "orchestration"]
+      "tags": ["tmux", "git-worktree", "solo-agent", "gated-workflow"]
     }
   ]
 }

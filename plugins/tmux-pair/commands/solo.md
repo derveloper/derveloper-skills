@@ -7,10 +7,18 @@ argument-hint: <project-path> <base> <feature> [task...] [--no-gated] [--no-work
 
 Spawn a single agent in a fresh `git worktree`, gated by a 6-phase self-driven
 workflow. The solo agent uses subagents for parallel recon (Phase 1), an
-adversarial plan-check (Phase 2), parallel implementation where independent
-(Phase 3), self-review (Phase 4), persists decisions to PROJECT.md + skills
-(Phase 5), then commits and pings the human (Phase 6). Default gated; switch
-off with `--no-gated` for plain spawn + task.
+adversarial plan-check (Phase 2) backed by a `codex exec` second-opinion,
+implementation (Phase 3), self-review (Phase 4) backed by `codex exec` for
+adversarial diff-review, persists decisions to PROJECT.md + skills (Phase 5),
+then commits and pings the human (Phase 6). Default gated; switch off with
+`--no-gated` for plain spawn + task.
+
+Solo is the only mode. Multi-pane spawn (size 3/4/5, parallel-writers, dual-
+reviewer panes) was removed: shared CARGO_TARGET_DIR contention, git-index-lock
+races, cross-writer PROJECT.md races, and dual-review coordination consistently
+outweighed the parallelism gain. Adversarial review-quality is preserved by
+running two independent minds in parallel at each gate: claude-subagent plus
+`codex exec` (different model family, fresh context, no pane setup).
 
 The plugin script auto-detects repo-specific subagents under
 `.claude/agents/<repo>-*.md` and lists them in the briefing so the solo
@@ -34,28 +42,28 @@ agent picks domain-experts over `general-purpose` for parallel work.
 - `/solo ~/code/myapp main small-doc --claude-model claude-opus-4-6` (200k context)
 - `/solo ~/code/myapp main bulk-rename --agent pi` (pi as solo, default cortecs/qwen3-coder-next)
 
-## When solo vs spawn
+## Bullet-Sweep Sizing
 
-| Scenario | Recommended |
-|----------|-------------|
-| Self-contained refactor with adversarial self-review enough | **solo (gated)** |
-| Doc cleanup, rule-to-skill migration, repo-wide rename | **solo (gated)** or **solo --no-gated** |
-| Plugin update with workflow consistency check | **solo (gated)** |
-| Risky feature, want a dedicated reviewer pane throughout | **spawn --size 3** |
-| Multi-file feature with upfront recon need + dedicated orchestrator | **spawn --size 3** (or 4 for dual-review) |
-| Security-sensitive, two reviewers consolidating | **spawn --size 4** (dual-review preset) |
-| Parallel-friendly feature with disjoint plan-bullets | **spawn** (single writer fans out via subagent-worktrees) |
+| Bullet count | Recommendation |
+|---|---|
+| 1-3 | solo, monolithic |
+| 4-10 | solo, monolithic, gated |
+| 11-22 | chain 3-5-bullet solo runs back-to-back, each its own squash-merge + retro. Plan-drift correlates strongly with bullet count in one run. |
 
-Solo trades a second pane (reviewer) for subagent-driven self-review. Cheaper
-in panes, but less continuous oversight. Good for cleanups and trivial-but-large
-work where the agent can adversarially check itself with `gate-2-plan-check`
-and `gate-3-*` subagents.
+## Adversarial Gates (correctness preservation)
+
+Solo keeps the same gates spawn-mode used, just with leaner mechanics:
+
+- **GATE-2 Plan-Check**: `Agent(gate-2-plan-check)` AND `codex exec "adversarial plan-attack"` in parallel. Two independent minds, different model families. BLOCKER in either → fix loop. PASS in both → proceed.
+- **GATE-3 Verify + Code-Review**: `Agent(gate-3-verifier)` (goal-backward against plan) AND `Agent(gate-3-code-reviewer)` (adversarial, claude) AND `codex exec "adversarial diff-review"` (adversarial, codex) in parallel. BLOCKER in any → fix loop. WARNING-only → proceed with documented follow-ups.
+- **Per-Bullet REVIEW-READY**: solo writes + spawns `Agent(gate-3-code-reviewer)` per bullet for inline review when the bullet is non-trivial. Codex-CLI per bullet is opt-in (cost-aware).
+- **Post-Merge Retro**: solo spawns 3 `Agent` personas (orchestrator-view, writer-view, reviewer-view) plus one `codex exec` retro, synthesizes the 4 outputs into a memory entry. Mandatory after every squash-merge.
 
 ## Optional flags
 
 - `--no-gated`: bypass the 6-phase workflow briefing. Minimal spawn + task. Use for trivial tasks where subagent-driven recon/plan/review is overkill.
 - `--no-worktree`: skip `git worktree add`, run on the project's current branch directly. Codex `AGENTS.md` write to project is skipped to avoid pollution.
-- `--interactive`: decision-pause-points in solo briefing (rare; default autonom). Flag-parity with spawn.
+- `--interactive`: decision-pause-points in solo briefing (rare; default autonom). Without this flag, V2 self-decisions proceed without asking the user.
 - `--with-standards`: append the durable standards bundle (STANDARDS, RECALL_DISCIPLINE, BULLET_START_RITUAL, PAIR_PROTOCOL) to the briefing.
 - `--greenfield`: enables `--with-standards` plus the greenfield pre-flight block. For first-session repos without `.claude/rules/` seed.
 - `--agent <name>`: agent for the solo pane (default `claude`). Other choices per `~/.config/tmux-pair/agents.json`: `codex`, `pi`.
