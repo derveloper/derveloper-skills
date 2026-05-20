@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spawn a solo with self-review", "run an agent on this with gates", "use the tmux-pair workflow", "/run for this task", or otherwise wants to run a single coding agent in a fresh git worktree with adversarial review gates. Solo is the only mode. Multi-pane spawn modes (writer + reviewer panes, dual-review, parallel-writers) were removed: shared CARGO_TARGET_DIR contention, git-index-lock races, cross-writer PROJECT.md races, and dual-review coordination outweighed the parallelism gain. Adversarial quality is preserved by running two independent minds at each gate: a claude subagent plus `codex exec` (different model family, fresh context, no pane setup). Sequential solo runs auto-squash-merge to base in Phase 7: each run produces ONE squash commit on the base branch, the feature branch + worktree are removed automatically, so chained runs always branch from a clean base. Covers the /run auto-entry, solo's 7-phase gated workflow (Recon -> Clarify -> Reviewer-Readiness -> Plan-Check -> Loop -> Final-Verify -> Persist -> Commit -> Auto-Squash-Merge), durable standards (claude --append-system-prompt-file + codex AGENTS.md), REVIEW-READY 3-field format, CLARIFY-NEEDED escalation, Plan-Update-Commit on drift, PROJECT.md care, DONE-MERGED format, sender identity prefixes, smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, --claude-model / --no-worktree flags, briefing templates, and recovery from common failure modes. Mandatory Post-Merge Retro persists recurring patterns into tmux-pair-skill or consumer-repo rules / skills.
-version: 0.20.2
+version: 0.21.0
 ---
 
 # tmux-pair-orchestration
@@ -55,7 +55,7 @@ Per phase:
 - **Phase 2/4 (Gates)**: already parallel both-minds (claude `Agent` + codex `Bash(codex exec)`). No new pick logic needed.
 - **Phase 5 (Persist) / Phase 7 (Auto-Squash-Merge)**: no subagents, main pane handles directly.
 
-Default tie-breaker for subagents stays `claude` (recon-strong, structured). Codex picks itself when the profile is mechanic / single-file / adversarial — those are codex's home turf.
+Default tie-breaker for subagents stays `claude` (recon-strong, structured). Codex picks itself when the profile is mechanic / single-file / adversarial: those are codex's home turf.
 
 ## Solo workflow (7 phases)
 
@@ -71,16 +71,16 @@ Default tie-breaker for subagents stays `claude` (recon-strong, structured). Cod
    - `Bash(codex exec "adversarial diff-review against main..HEAD")` (codex)
    BLOCKER in any → fix-loop. WARNING-only → proceed with documented follow-up. Max 3 review cycles.
 5. **PROJECT.md + Skill-Persist**: phase block in PROJECT.md, design decisions, domain knowledge as Skill under `.claude/skills/<repo>-<topic>/SKILL.md` (Persist-Convention; Rules only for cross-cutting always-on items).
-6. **Commit**: per-bullet conventional commits (kein AI-co-author), per-crate gates green, worktree clean. KEIN DONE-Ping bevor Phase 7 durch ist.
+6. **Commit**: per-bullet conventional commits (no AI co-author), per-crate gates green, worktree clean. No DONE ping before Phase 7 has finished.
 7. **Auto-Squash-Merge + Cleanup**: solo squashes all bullet commits into one commit on `<base>`, deletes the feature branch, removes the worktree, then pings `DONE-MERGED`. Sequential chained runs always start from clean base. Steps the solo executes itself:
    - `git -C <project> status --porcelain` -> must be empty (else BLOCKER)
    - `git -C <project> checkout <base>`
    - `git -C <project> merge --squash <branch>`
-   - `git -C <project> commit` (heredoc-Message: 1-Liner + Bullet-Body + Decisions + Test-Counts)
+   - `git -C <project> commit` (heredoc message: one-line subject + bullet body + decisions + test counts)
    - `git -C <project> branch -D <branch>`
    - `git -C <project> worktree remove <wt_path>` (skipped if `--no-worktree`)
    - `DONE-MERGED solo.<feature>: <squash-sha> on <base>` ping
-   - Merge conflict in Phase 7 → BLOCKER ping with concrete error, human resolves, then solo retries.
+   - Merge conflict in Phase 7 -> BLOCKER ping with concrete error, human resolves, then solo retries.
 
 Default flag set: `--no-gated` for trivial tasks where subagent-driven recon/plan/review is overkill (e.g. doc tweak, single-file rename). Gated is the default. Worktree is the default; `--no-worktree` opts out.
 
@@ -88,7 +88,7 @@ Default flag set: `--no-gated` for trivial tasks where subagent-driven recon/pla
 
 When the script sees `.claude/agents/<repo>-*.md` files in the target repo, it lists them in the briefing. The solo briefing instructs the agent to prefer those domain experts over `general-purpose` for Recon/Impl/Review subagent spawns. They know the repo's domain vocabulary, architecture constraints, and skill files.
 
-Detection logic: filename stem starting with `<project.name>-` (e.g. `example-project-kernel.md` in a `example-project` repo). Falls back to "no repo-subagents listed" if the directory is missing or empty.
+Detection logic: filename stem starting with `<project.name>-` (e.g. `example-repo-kernel.md` in an `example-repo` repo). Falls back to "no repo-subagents listed" if the directory is missing or empty.
 
 ### Codex-CLI integration concrete
 
@@ -145,7 +145,7 @@ Standards survive `/compact` and context resets because they sit in the system p
 
 - **claude panes** boot with `--append-system-prompt-file <path>` pointing at `/tmp/tmux-pair-durable-<window>-<role>.md`. The file is generated per-spawn from a single in-script constant (`DURABLE_STANDARDS_PROMPT`) so updates to standards land in the next spawn automatically.
 - **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created (i.e. not when `--no-worktree` is passed). If the repo already owns an `AGENTS.md`, the plugin leaves it alone: repo standards win.
-- **pi panes** boot with `--append-system-prompt <path>` (the user's Custom-CLI, `~/.pi/agent/`). pi reads `AGENTS.md` and `CLAUDE.md` via default discovery, so the codex path works transitively. Default model `qwen3-coder-next` via default provider `cortecs`, default `--thinking high`. Override per spawn via `--pi-provider`, `--pi-model`, `--pi-thinking`. Known limits: no mid-session `/model` switch (pane-restart required), no `/compact` equivalent (Compact-Watcher does not ping pi panes).
+- **pi panes** boot with `--append-system-prompt <path>` (a third-party custom CLI, config under `~/.pi/agent/`). pi reads `AGENTS.md` and `CLAUDE.md` via default discovery, so the codex path works transitively. Default model `qwen3-coder-next` via default provider `cortecs`, default `--thinking high`. Override per spawn via `--pi-provider`, `--pi-model`, `--pi-thinking`. Known limits: no mid-session `/model` switch (pane-restart required), no `/compact` equivalent (Compact-Watcher does not ping pi panes).
 - **`--with-standards`** appends the durable standards bundle (reviewer standards, recall discipline, bullet-start ritual).
 - **`--greenfield`** enables `--with-standards` plus greenfield pre-flight.
 - **`--no-worktree`**: if codex is the solo agent, standards are auto-enabled in the briefing so codex still receives durable standards context.
@@ -171,7 +171,7 @@ The implementation loop adds six protocol elements:
 - **CLARIFY-NEEDED**. When the agent hits a user-decision question mid-loop (scope, behavior, UX, architecture choice, naming conflict, trade-off not in the plan), it calls `AskUserQuestion` directly with 2-4 options. Engineers do NOT decide user-facing questions on their own.
 - **Plan-Update-Commit**. If a bullet hits a hard cap (LOC limit, file-size cap) or the estimate drifts more than ~50%, the agent commits a `docs(plan-amendment): ...` BEFORE the implementation commit that breaks the cap. A bullet with documented drift but no preceding amendment commit fails verifier.
 - **Parallel markers**. Plans mark independent bullets as `B3 || B4 [parallel]` and ordered bullets as `B3 -> B4 [sequenziell: <reason>]`. GATE 2 blocks missing markers.
-- **PROJECT.md care**. The agent updates project-local `PROJECT.md` for feature and refactor bullets that change package map, feature surface, design decisions, or implementation history. Reviewers sign off on the update or on a justified skip for refactor, test, or docs-only bullets with no feature-surface change. If no `PROJECT.md` exists, the agent asks whether to bootstrap a human-maintained skeleton. `~/git/example-project/PROJECT.md` is the format and detail-depth example.
+- **PROJECT.md care**. The agent updates project-local `PROJECT.md` for feature and refactor bullets that change package map, feature surface, design decisions, or implementation history. Reviewers sign off on the update or on a justified skip for refactor, test, or docs-only bullets with no feature-surface change. If no `PROJECT.md` exists, the agent asks whether to bootstrap a human-maintained skeleton. Use the PROJECT.md in your own repo (or this plugin's PROJECT.md, if present) as the format and detail-depth reference.
 - **COMPLETE-Ping format**. `COMPLETE: <Phase>. gate-3=PASS via <verifier-name + code-reviewer-name + codex-cli>. <diff-stat>. Bezug: <plan goals all met>.` Only AFTER GATE 3 returned PASS, never before.
 - **Recall-Discipline + Bullet-Start-Ritual**: cite the relevant rule + memory entry before any sensitive action (commit, push, external API), and post a class + rules + common BLOCKER-classes block before the first edit on each new plan-bullet.
 
@@ -317,93 +317,93 @@ The full list lives in `references/failure-modes.md`. The most common:
 - **tmux session crashed mid-run.** Symptom: panes gone, worktree intact. Recovery: re-spawn the pane manually, point it at the existing worktree, re-send the briefing with the current state attached.
 - **Pushed without human OK.** Symptom: `git push` happened despite the brief saying "wait for human". Cause: briefing missing or weakly worded. Fix: spell out the push gate explicitly in the briefing template.
 
-## Post-Merge Retro (Pflicht)
+## Post-Merge Retro (mandatory)
 
-Default-Workflow nach `DONE-MERGED`-Ping vom Solo-Agent. Phase 7 des Solo-Workflows hat den Squash-Merge + Branch-Delete + Worktree-Remove bereits ausgeführt. Der Retro-Step bleibt:
+Default workflow after the solo agent sends `DONE-MERGED`. Phase 7 of the solo workflow has already executed the squash-merge, branch delete, and worktree remove. The retro step remains:
 
-1. **Retro**: Master schickt eine tailored Retro-Frage an den Solo-Pane (via `tmux_pair.py send`, Pane lebt noch nach Phase 7) UND spawnt parallel 2-3 `Agent` personas mit unterschiedlichen Blickwinkeln (orchestrator-view, writer-view, reviewer-view) plus eine `codex exec "retro"` für eine vierte unabhängige Sicht. Erwartet 200-500 Wörter Faktenanalyse pro Quelle (kein Lob, Schwächen direkt). Inhalt:
+1. **Retro**: the orchestrator sends a tailored retro question to the solo pane (via `tmux_pair.py send`; the pane is still alive after Phase 7) AND spawns 2-3 `Agent` personas in parallel with different perspectives (orchestrator view, writer view, reviewer view), plus one `codex exec "retro"` for an independent fourth view. Expect 200-500 words of factual analysis per source (no praise, weaknesses stated directly). Topics:
 
-   - Phase-Wallclock pro 7-Phase-Schritt
-   - GATE-2-Iterationen + welche Mid-Run-SDs bei Plan-Schreiben verhindert werden konnten
-   - Drive-by/reactive-Commit-Anteil
-   - Strukturelle Plan-Fehler
-   - Schwierigstes Test-Pattern, fmt-drift-Ursache, Pre-Flight-Lücken
-   - Bullet-Count-Retro (war monolithisch richtig oder zu groß?)
-   - Phase-7-Konflikte / Cleanup-Friktionen
+   - Phase wall-clock per 7-phase step
+   - GATE-2 iterations and which mid-run self-decisions could have been prevented at plan-write time
+   - Drive-by / reactive commit share
+   - Structural plan errors
+   - Hardest test pattern, fmt-drift root cause, Pre-Flight gaps
+   - Bullet-count retro (was monolithic correct, or too large?)
+   - Phase 7 conflicts and cleanup friction
 
-2. **Pattern-Synthese + Persist**: Master sammelt die Retros, identifiziert recurring issue classes (decorator-swallow, cancellation-root-mismatch, fmt-drift, plan-vs-reality-mismatch), persistiert:
-   - tmux-pair-skill (diese Datei): wenn das Pattern workflow-cross-cutting ist (pre-flight-Klasse, Plan-Drift-Indikator)
-   - Konsument-Repo: `.claude/rules/*.md` (always-on cross-cutting) oder `.claude/skills/<repo>-<topic>/SKILL.md` (path-scoped domain) per Persist-Convention
+2. **Pattern synthesis + persist**: the orchestrator collects the retros, identifies recurring issue classes (decorator-swallow, cancellation-root-mismatch, fmt-drift, plan-vs-reality-mismatch), and persists:
+   - tmux-pair skill (this file): when the pattern is workflow-cross-cutting (Pre-Flight class, plan-drift indicator).
+   - Consumer repo: `.claude/rules/*.md` (always-on cross-cutting) or `.claude/skills/<repo>-<topic>/SKILL.md` (path-scoped domain) per Persist-Convention.
 
-3. **Window-Cleanup**: nach Pattern-Persist:
+3. **Window cleanup**: after pattern-persist:
 
 ```bash
 tmux kill-window -t <window-name>
 ```
 
-Worktree + Branch sind seit Phase 7 weg, nur das tmux-Window bleibt für den Retro übrig. Retro-Step ist Pflicht, nicht Optional. Ein Solo-Run ohne Retro persistiert nicht die teuersten Learnings des Runs.
+Worktree and branch are gone since Phase 7; only the tmux window remains for the retro. The retro step is mandatory, not optional. A solo run without a retro fails to persist the most expensive learnings of the run.
 
-## Recurring Pre-Flight Checks (aus Retros aggregiert)
+## Recurring Pre-Flight Checks (aggregated from retros)
 
-Diese Checks gehören in `--with-standards` Briefings UND in Konsument-Repo `.claude/rules/pre-flight-checklists.md`. Aggregiert aus mehreren Solo-Retros, falsifizierbar:
+These checks belong in `--with-standards` briefings AND in consumer-repo `.claude/rules/pre-flight-checklists.md`. Aggregated from multiple solo retros, all falsifiable:
 
-- **Decorator-Sweep vor Trait-Default-Add**: Bei Hinzufügen einer Default-Body Trait-Methode (insbesondere lifecycle wie `shutdown`/`close`/`flush`): vor REVIEW-READY `rg "impl <Trait> for" --type rust` ausführen, alle Implementoren auflisten, jeden mit ≥2 forward-Methoden als Decorator markieren und explizit forward-Override hinzufügen ODER no-op rationale in Plan-Amendment dokumentieren. Anti-Pattern: trait-default no-op wird von Decorator silent geswallowed.
+- **Decorator-Sweep before Trait-Default-Add**: when adding a default-body trait method (especially lifecycle methods like `shutdown`/`close`/`flush`), run `rg "impl <Trait> for" --type rust` before REVIEW-READY, list every implementor, mark each one with two or more forward methods as a decorator, and either add an explicit forward override OR document a no-op rationale in a plan-amendment. Anti-pattern: trait-default no-op is silently swallowed by a decorator.
 
-- **Trait-Param-Honor-Check**: Wenn Trait-Method-Param `_`-prefixed (`_grace`, `_token`) obwohl die Trait-Doc den Param als wirksam beschreibt: silent-discard footgun. Pre-Flight: `rg '_[a-z]+: ' <trait-file>` gegen Trait-Doc cross-checken. Default-Body soll Param entweder ehrlich ignorieren (Doc anpassen) oder honor + Test.
+- **Trait-Param-Honor check**: a trait-method param prefixed with `_` (`_grace`, `_token`) while the trait doc declares the param effective is a silent-discard footgun. Pre-flight: `rg '_[a-z]+: ' <trait-file>` cross-checked against the trait doc. The default body should either honestly ignore the param (and the doc gets updated) or honor it (with a test).
 
-- **Method-Resolution-Collision-Check**: Neue Trait-Methode mit gleichem Namen wie bestehende inherent-impl auf einem Implementor: pre-flight `cargo check -p <crate>` zeigt die ambiguity-warning. Anti-Pattern: trait-method wird stillschweigend von inherent-method geschattet.
+- **Method-Resolution-Collision check**: a new trait method with the same name as an existing inherent impl on an implementor: pre-flight `cargo check -p <crate>` surfaces the ambiguity warning. Anti-pattern: the trait method is silently shadowed by the inherent method.
 
-- **Format-Gate-Disziplin**: Writer-Claim "fmt clean" verlangt `cargo fmt -p <crate> --check` (NICHT `cargo fmt -p <crate>` ohne `--check`). Per-crate fmt ohne `--check` brushe neighbor-files silent und produziert drive-by-drift. Falsifizierbar: REVIEW-READY mit "fmt clean" + `--check`-Output, exit 0.
+- **Format-gate discipline**: a writer claim of "fmt clean" requires `cargo fmt -p <crate> --check` (NOT `cargo fmt -p <crate>` without `--check`). Per-crate fmt without `--check` silently rewrites neighbor files and produces drive-by drift. Falsifiable: REVIEW-READY with "fmt clean" plus `--check` output and exit 0.
 
-- **Mechanical-Lint-Fix-Pass VOR manuellem LLM-Edit (HART)**: jeder Clippy-Cleanup-Bullet MUSS mit `cargo clippy -p <crate> --fix --allow-dirty --lib --bins --examples -- -D warnings` UND der Test-Variante BEGINNEN. `--fix` erschlägt 60-90% der typischen Lints (format-args inlining, use-statement-cleanup, `&` redundancy, `into()` casts, needless-borrow, redundant-clone) deterministisch + idempotent in einer Sekunde. LLM-Edit dafür = pure Verschwendung: 15 Edit-Calls + 15 LLM-Roundtrips für etwas das `cargo clippy --fix` in einem Shell-Call erledigt. Recurring R3-Drift: Solo machte manuelle Edits auf format-Macros und use-Imports, statt `--fix`-Pass zuerst. Falsifizierbar: pro Clippy-Bullet im REVIEW-READY-Ping MUSS der `--fix`-Pass-Output (auch wenn 0 changes) zitiert sein, VOR den manuellen Fixes. Tool-Use-Log zeigt `Bash(cargo clippy --fix ...)` vor jedem `Edit`-Call der einen Clippy-Pattern (format-arg, use-cleanup, needless-borrow, etc.) ediert. Fehlend = BLOCK durch gate-3-code-reviewer.
+- **Mechanical lint-fix pass BEFORE manual LLM edits (hard rule)**: every clippy-cleanup bullet MUST start with `cargo clippy -p <crate> --fix --allow-dirty --lib --bins --examples -- -D warnings` AND the test-target variant. `--fix` clears 60-90% of the typical lints (format-args inlining, use-statement cleanup, `&` redundancy, `into()` casts, needless-borrow, redundant-clone) deterministically and idempotently in about a second. Doing this work with LLM edits is pure waste: 15 Edit calls plus 15 LLM round-trips for something `cargo clippy --fix` finishes in one shell call. Recurring drift: solo did manual edits on format macros and use-imports instead of running the `--fix` pass first. Falsifiable: for every clippy bullet the REVIEW-READY ping MUST cite the `--fix` pass output (even if zero changes) BEFORE the manual fixes. The tool-use log shows `Bash(cargo clippy --fix ...)` before any `Edit` call that touches a clippy-pattern (format-arg, use-cleanup, needless-borrow, etc.). Missing = BLOCK from gate-3-code-reviewer.
 
-- **Memory-Recon als RECON-Pflicht-Schritt**: Vor Plan-Schreiben `MEMORY.md` plus die 3-5 relevantesten memory-files am `~/.claude/projects/<repo>/memory/` lesen. Mid-Run-SDs die durch Memory-Recon antizipierbar gewesen wären sind ein Drift-Indikator. **Memory-Freshness-Gate**: Memory-Files >3 Tage alt = stale-Risk-Flag, im Plan-Recon zitieren ob Memory aktuell gegen current code geprüft wurde.
+- **Memory-Recon as a mandatory RECON step**: before plan-write, read `MEMORY.md` plus the 3-5 most relevant memory files under `~/.claude/projects/<repo>/memory/`. Mid-run self-decisions that would have been preventable by memory-recon are a drift indicator. **Memory-Freshness Gate**: memory files older than 3 days are a stale-risk flag; the plan-recon must state whether memory was re-validated against current code.
 
-- **Brief-vs-Reality-Validation vor Plan-Lock**: Brief auf altem Code-State ist die häufigste Plan-Drift-Quelle. Vor Plan-Lock: `cargo clippy -p <crate>` + `git grep -n "<keyword>"` + `rg-evidence` für jedes "verify-first" oder "should-be-X" Item im Brief. Falsifizierbar: Plan-Lock-Commit zitiert mindestens 2 Brief-Items mit current-code-Evidence-SHAs.
+- **Brief-vs-Reality validation before Plan-Lock**: a brief written against an old code state is the most common plan-drift source. Before Plan-Lock: run `cargo clippy -p <crate>` plus `git grep -n "<keyword>"` plus `rg`-evidence for every "verify-first" or "should-be-X" item in the brief. Falsifiable: the Plan-Lock commit cites at least two brief items with current-code evidence SHAs.
 
-- **Target-Dir Hygiene vor llvm-cov**: `.gitignore` enthält `target-cov/` (und ähnliche Tool-Output-Dirs) BEVOR der erste `cargo llvm-cov` läuft. Reactive-Fix nach Crash kostet 30+ min Recovery.
+- **Target-dir hygiene before llvm-cov**: `.gitignore` contains `target-cov/` (and similar tool-output dirs) BEFORE the first `cargo llvm-cov` runs. Reactive fix after a crash costs 30+ minutes of recovery.
 
-- **Cross-Boundary-Checks bei tool-/mcp-/hook-Crates**: zusätzlich zur Backend-Bullet-Klasse triggert eine Cross-Boundary-Klasse sobald das Diff `<repo>-tool-*`, `<repo>-mcp-*` oder `<repo>-hook-*` mit Message-Mutation anfasst. Drei falsifizierbare Checks: (1) Tool-Output-Audit (`rg "reqwest::Error|reqwest::Url|::Url\b" <touched-crate>/src/` plus visueller Audit aller `output:`/`Value::String(...)` im Error-Path), (2) Provider-Turn-Alternation (jeder Hook der `Decision::Replace(Vec<Message>)` oder `Decision::Inject(Message)` zurückgibt MUSS user/assistant-Alternation halten, Test gegen `validate_turn_sequence(&msgs)`), (3) Cap-Single-Source (pro Resource-Cap genau eine durchsetzende Stelle pro Call-Path). Pattern aus example-project-mcp-split R3-Retro: url-leak, double-validation, Apology-Turn-Bruch kamen alle erst im Adversarial-Gate hoch.
+- **Cross-boundary checks for tool / mcp / hook crates**: on top of the backend-bullet class, a cross-boundary class triggers as soon as the diff touches `<repo>-tool-*`, `<repo>-mcp-*`, or `<repo>-hook-*` crates with message mutation. Three falsifiable checks: (1) tool-output audit (`rg "reqwest::Error|reqwest::Url|::Url\b" <touched-crate>/src/` plus a visual audit of all `output:` / `Value::String(...)` sites in the error path), (2) provider-turn alternation (any hook that returns `Decision::Replace(Vec<Message>)` or `Decision::Inject(Message)` MUST keep user/assistant alternation; test against `validate_turn_sequence(&msgs)`), (3) cap single-source (exactly one enforcing site per resource cap per call-path). Pattern from a past mcp-split retro: url-leak, double-validation, and broken apology-turn alternation only surfaced in the adversarial gate.
 
-## Build/Compile-Speed-Erkenntnisse (R3 mcp-split, 2026-05-20)
+## Build / compile-speed findings (mcp-split retro)
 
-Aus einem Bench-Pass am Ende von R3 mcp-split. Compile/Link single-crate auf macOS ist NICHT der dominante Bottleneck:
+From a bench pass at the end of a recent mcp-split round. Single-crate compile/link on macOS is NOT the dominant bottleneck:
 
-| Konfiguration | Wallclock (example-project-tool-stt nextest) |
+| Configuration | Wallclock (example-crate nextest) |
 |---|---:|
 | Baseline warm | 3.54s |
 | Touch-rebuild | 4.01s |
 | Cold-clean | 4.60s |
-| sccache + CARGO_INCREMENTAL=0 warm-cache | 2.56s |
-| lld-Swap | 26.22s (RUSTFLAGS bricht alle Caches, nicht aussagekräftig) |
+| sccache + CARGO_INCREMENTAL=0 warm cache | 2.56s |
+| lld swap | 26.22s (RUSTFLAGS breaks all caches, not meaningful) |
 
-Befunde:
+Findings:
 
-- **shared-target-dir (V8) liefert schon den Hauptwin** cross-worktree (~80% Deps-Cache-Hit zwischen Runs in der Chain). Per-Crate cold-clean liegt bei 4-5s, das ist im Rahmen.
-- **sccache ist marginal** wenn shared-target-dir aktiv ist. Sccache hilft nur wenn `CARGO_INCREMENTAL=0`, was den Edit-Loop verlangsamt. Trade-Off: lohnt nur für Fresh-Target-Dir-Cold-Starts (CI, Branch-Swap).
-- **lld auf macOS nicht empfohlen**: Apple ld64 ist auf Mach-O bereits optimiert. RUSTFLAGS-Swap zwingt Full-Deps-Recompile und bricht alle Caches.
-- **mold auf macOS skip**: mold ist Linux-fokussiert, kein zuverlässiger macOS-Pfad.
+- **shared-target-dir (V8) already delivers the main win** cross-worktree (~80% deps-cache hit between chained runs). Per-crate cold-clean lands at 4-5s, which is fine.
+- **sccache is marginal** when shared-target-dir is active. sccache only helps with `CARGO_INCREMENTAL=0`, which slows the edit loop. Trade-off: only worth it for fresh-target-dir cold starts (CI, branch swap).
+- **lld on macOS not recommended**: Apple's ld64 is already optimized for Mach-O. The RUSTFLAGS swap forces a full deps recompile and breaks all caches.
+- **mold on macOS: skip**. mold is Linux-focused; macOS support is not a reliable path.
 
-**Echte Time-Sinks im Solo-Workflow** (nicht Build):
+**Real time sinks in the solo workflow** (not build):
 
-1. **Cargo-Invocations × Bullet-Count**: 8-12 cargo-calls pro Bullet (test, clippy-lib, clippy-tests, fmt, coverage) × ~4s Cargo-Overhead = ~40s pure Cargo-Overhead pro Bullet. Bei 8 Bullets ~320s nur für Cargo-Resolve-Loops.
-2. **Adversarial-Gate-Latenz**: ~30min pro Solo-Run (GATE-2 Subagent + codex-CLI + GATE-3 verifier + code-reviewer + codex). Token-Throughput-bound.
-3. **Subagent-Token-Throughput**: model-bound.
+1. **Cargo invocations x bullet count**: 8-12 cargo calls per bullet (test, clippy-lib, clippy-tests, fmt, coverage) x ~4s cargo overhead = ~40s of pure cargo overhead per bullet. At 8 bullets that is ~320s purely on cargo-resolve loops.
+2. **Adversarial-gate latency**: ~30 minutes per solo run (GATE-2 subagent + codex CLI + GATE-3 verifier + code-reviewer + codex). Token-throughput bound.
+3. **Subagent token throughput**: model bound.
 
-**Mögliche Workflow-Hebel** (höher als Build-Tuning):
+**Possible workflow levers** (higher impact than build-tuning):
 
-- Per-Bullet-Gates parallelisieren (clippy + test parallel statt sequenziell). Realisierbar via separate Bash-Background-Calls.
-- nextest-Archive für CI-Reuse (`cargo nextest archive`).
-- Sccache nur als optionales env (`RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0`) für Cold-Worktree-Starts, NICHT default.
-- Bullet-Cut nach API-Surface statt nach Crate: weniger Round-2-Fixes durch saubere Layer-Decisions upfront.
+- Parallelize per-bullet gates (clippy + test in parallel instead of sequential). Achievable via separate background bash calls.
+- nextest archive for CI reuse (`cargo nextest archive`).
+- sccache only as opt-in env (`RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0`) for cold-worktree starts, NOT default.
+- Cut bullets by API surface rather than by crate: fewer round-2 fixes thanks to clean layer decisions upfront.
 
-**Anti-Pattern**: Build-Bench ohne Workflow-Bench. Wenn Cargo-Invocations × Bullet-Count + Gate-Latenz nicht mitgemessen werden, optimiert man den falschen Hebel.
+**Anti-pattern**: build bench without workflow bench. If cargo invocations x bullet count plus gate latency are not measured alongside, the wrong lever is being optimized.
 
-## Cleanup (auto + manuell)
+## Cleanup (auto + manual)
 
-Der Solo-Agent removed Worktree + Branch automatisch in Phase 7 (Auto-Squash-Merge). Manuell bleibt nur das `tmux kill-window` nach Pattern-Persist.
+The solo agent removes the worktree and the branch automatically in Phase 7 (Auto-Squash-Merge). The only manual step left is `tmux kill-window` after pattern-persist.
 
-Vor 0.20.0 war Cleanup vollständig manuell und Pflicht-Reihenfolge (Retro -> dann Cleanup). Seit 0.20.0 macht der Solo-Agent Squash + Branch-Delete + Worktree-Remove selbst und der Retro-Step ist die einzige verbleibende Human-Pflicht.
+Before 0.20.0 cleanup was fully manual and order-sensitive (retro first, then cleanup). Since 0.20.0 the solo agent performs the squash, branch-delete, and worktree-remove itself, and the retro step is the only remaining human duty.
 
 ## Companion skills (bundled)
 

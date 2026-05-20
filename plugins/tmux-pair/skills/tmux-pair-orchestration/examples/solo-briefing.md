@@ -5,6 +5,8 @@ Adapt the bracketed fields to the task. The bundled script generates a baseline 
 ```
 [ROLE: Writer]
 
+Language: respond to the human in the language the human writes in. Default English.
+
 You are paired with the reviewer at pane <REVIEWER-PANE-ID>.
 
 WORKTREE: <worktree-path>

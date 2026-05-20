@@ -1,64 +1,64 @@
 # Rust Rules Skeleton
 
-Vorlage für Rust-Projekte. Bootstrap-Agent passt projektspezifisch an (Crate-Struktur, MSRV, async-Runtime, etc.).
+Template for Rust projects. The bootstrap agent adapts it per project (crate structure, MSRV, async runtime, and so on).
 
 ## 1. Style & Format
 
-- `rustfmt` mit eingecheckter `rustfmt.toml` ist verbindlich. CI bricht bei Diff.
-- `cargo clippy --all-targets --all-features -- -D warnings`. Keine `#[allow(...)]` ohne kurze Begründung im Code.
-- MSRV in `rust-toolchain.toml` festgenagelt. Nicht ohne Plan hochziehen.
-- Imports: `use foo::bar` Top-of-File, keine Inline-Pfade in Funktionen außer für Disambiguation.
+- `rustfmt` with a checked-in `rustfmt.toml` is mandatory. CI fails on any diff.
+- `cargo clippy --all-targets --all-features -- -D warnings`. No `#[allow(...)]` without a short justification in the code.
+- MSRV pinned in `rust-toolchain.toml`. Do not bump without a plan.
+- Imports: `use foo::bar` at the top of the file; no inline paths inside functions except for disambiguation.
 
 ## 2. Tests
 
-- Unit-Tests im selben File unter `#[cfg(test)] mod tests`.
-- Integration-Tests in `tests/`.
-- `cargo nextest run` als Standard-Runner wenn im Projekt vorhanden.
-- Nur `#[ignore]` mit Issue-Link oder Begründungs-Comment.
-- Property-/Fuzz-Tests bei Crypto, Parsing, Datenstrukturen-Invarianten.
+- Unit tests in the same file under `#[cfg(test)] mod tests`.
+- Integration tests in `tests/`.
+- `cargo nextest run` as the standard runner if available in the project.
+- `#[ignore]` only with an issue link or justification comment.
+- Property and fuzz tests for crypto, parsing, and data-structure invariants.
 
 ## 3. Architecture & Boundaries
 
-- Workspace-Layout: ein Crate je klar abgegrenzte Verantwortung. `Cargo.toml` Workspace-Member-Liste ist die Wahrheit.
-- Public-API nur was bewusst exportiert wird (`pub` an Modul-Wurzeln, sonst `pub(crate)`).
-- Breaking-Changes nur mit semver-bump im jeweiligen Crate.
-- Feature-Flags in `Cargo.toml` haben Doku-Kommentar was sie ein-/ausschalten.
-- Externe Dependencies: jede neue Dependency ist begründungspflichtig (PR-Beschreibung).
+- Workspace layout: one crate per clearly bounded responsibility. The `Cargo.toml` workspace member list is the source of truth.
+- Public API is only what is deliberately exported (`pub` at module roots, `pub(crate)` otherwise).
+- Breaking changes only with a semver bump in the affected crate.
+- Feature flags in `Cargo.toml` carry a doc comment explaining what they switch on or off.
+- External dependencies: every new dependency requires a justification in the PR description.
 
 ## 4. Anti-Patterns
 
-- `unwrap()` / `expect("infallible")` in Library-Code: BLOCK. Nur in Tests + main.rs erlaubt.
-- `panic!()` in Lib-Pfaden ohne dokumentierte Invariante: BLOCK.
-- Globaler Mutable State (`static mut`, `lazy_static!` mit Mutability): nur mit explizitem Konsens.
-- `Box<dyn Error>` als Error-Typ in Public-APIs ist faul, lieber konkretes `enum Error` per `thiserror`.
-- `clone()` im Hot-Path ohne Notwendigkeit.
-- `#[allow(dead_code)]` als Workaround statt Code zu löschen.
+- `unwrap()` / `expect("infallible")` in library code: BLOCK. Only allowed in tests and `main.rs`.
+- `panic!()` in library paths without a documented invariant: BLOCK.
+- Global mutable state (`static mut`, `lazy_static!` with mutability): only with explicit consensus.
+- `Box<dyn Error>` as the error type in public APIs is lazy; prefer a concrete `enum Error` via `thiserror`.
+- `clone()` in the hot path when not needed.
+- `#[allow(dead_code)]` as a workaround instead of deleting the code.
 
 ## 5. Naming
 
-- Funktionen + Variablen: `snake_case`.
-- Typen, Traits, Enums: `UpperCamelCase`.
-- Konstanten + statische: `SCREAMING_SNAKE_CASE`.
-- Modulnamen: kurz, snake_case, kein Plural wenn Singular trifft.
-- Trait-Methoden vermeiden Verben wie `get_` außer beim Lookup von Map-ähnlichen Strukturen.
+- Functions and variables: `snake_case`.
+- Types, traits, enums: `UpperCamelCase`.
+- Constants and statics: `SCREAMING_SNAKE_CASE`.
+- Module names: short, snake_case, no plural when singular fits.
+- Trait methods avoid verbs like `get_` except when looking up map-like structures.
 
 ## 6. Security & Privacy
 
-- `unsafe` braucht `// SAFETY:` Kommentar mit Invariante.
-- Secrets via env/Vault, nie im Repo, nie in Logs.
-- Input-Validation an FFI- und Network-Boundaries (z.B. Axum-Handler, Tonic-Service).
-- `tracing`-Felder filtern: keine PII, keine Tokens, keine vollen Bodies.
-- `serde`-Deserialization mit `deny_unknown_fields` wo vertrauliche Strukturen reinkommen.
+- `unsafe` requires a `// SAFETY:` comment stating the invariant.
+- Secrets via env/Vault, never in the repo, never in logs.
+- Input validation at FFI and network boundaries (for example Axum handlers, Tonic services).
+- Filter `tracing` fields: no PII, no tokens, no full request bodies.
+- `serde` deserialization with `deny_unknown_fields` where sensitive structures come in.
 
 ## 7. Build & Verification
 
 - `cargo build --all-targets`: clean.
-- `cargo test --all-features` oder `cargo nextest run`: alle grün.
-- `cargo clippy --all-targets --all-features -- -D warnings`: keine Warnings.
-- `cargo fmt --check`: kein Diff.
+- `cargo test --all-features` or `cargo nextest run`: all green.
+- `cargo clippy --all-targets --all-features -- -D warnings`: no warnings.
+- `cargo fmt --check`: no diff.
 - Optional: `cargo deny`, `cargo audit` in CI.
 
 ## 8. Domain (project-specific)
 
-- Beim Bootstrap füllen: Repo-Zweck, Domain-Vokabular, Compliance-Anforderungen, Stakeholder.
-- Beispiele die der Reviewer nachschlagen können muss: Datenmodelle, Trait-Hierarchien, Crate-Verantwortlichkeiten.
+- Fill in during bootstrap: repo purpose, domain vocabulary, compliance requirements, stakeholders.
+- Examples a reviewer must be able to look up: data models, trait hierarchies, crate responsibilities.

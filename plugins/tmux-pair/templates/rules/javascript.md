@@ -1,63 +1,63 @@
 # JavaScript Rules Skeleton
 
-Vorlage für plain-JS-Projekte (Node-Scripts, Browser-Code ohne TypeScript). Wenn TypeScript verfügbar ist, lieber `typescript.md` als Basis.
+Template for plain-JS projects (Node scripts, browser code without TypeScript). If TypeScript is available, prefer `typescript.md` as the base.
 
 ## 1. Style & Format
 
-- `prettier` als Formatter mit eingecheckter Config.
-- `eslint` mit eingechecktem Regelset; CI: `--max-warnings 0`.
-- ECMAScript-Modules (`import`/`export`), CommonJS nur wenn Legacy.
-- Keine `// eslint-disable-...` ohne Begründung.
+- `prettier` as the formatter with a checked-in config.
+- `eslint` with a checked-in rule set; CI: `--max-warnings 0`.
+- ECMAScript modules (`import`/`export`); CommonJS only for legacy code.
+- No `// eslint-disable-...` without justification.
 
 ## 2. Tests
 
-- Test-Runner: vitest / jest / node:test, eingecheckt.
-- Tests neben File (`foo.test.js`) oder in `__tests__/`.
-- Coverage-Threshold im CI-Gate.
+- Test runner: vitest / jest / node:test, checked in.
+- Tests next to the file (`foo.test.js`) or under `__tests__/`.
+- Coverage threshold enforced as a CI gate.
 
 ## 3. Architecture & Boundaries
 
-- Feature-Folder-Layout statt querliegender Util-Müllhalden.
-- ESM-Imports stabil, keine zyklischen Importe (`import/no-cycles`).
-- Public-API per Barrel-File (`index.js`).
-- Externe Dependencies PR-begründet, Bundle-Size beobachten.
+- Feature-folder layout instead of a sprawling util dumping ground.
+- Stable ESM imports, no cyclic imports (`import/no-cycles`).
+- Public API via a barrel file (`index.js`).
+- External dependencies require PR-level justification; watch bundle size.
 
 ## 4. Anti-Patterns
 
-- `var`: BLOCK. `let`/`const` Pflicht.
-- `==`: BLOCK. `===` immer (außer `null`-Check `== null`).
-- Implicit Globals: BLOCK. `'use strict'` oder ESM-Module.
-- `eval` / `Function(...)`-Compile: BLOCK.
-- `console.log` in committed Code (nur Scripts).
-- Sync-IO im Hot-Path (`fs.readFileSync`, etc.) ohne Begründung.
+- `var`: BLOCK. `let`/`const` only.
+- `==`: BLOCK. Always use `===` (except `== null` for null checks).
+- Implicit globals: BLOCK. Use `'use strict'` or ESM modules.
+- `eval` / `Function(...)` compile: BLOCK.
+- `console.log` in committed code (scripts only).
+- Sync IO in the hot path (`fs.readFileSync`, etc.) without justification.
 
 ## 5. Naming
 
-- Variablen + Funktionen: `camelCase`.
-- Klassen: `PascalCase`.
-- Konstanten: `SCREAMING_SNAKE_CASE` für echte Konstanten.
+- Variables and functions: `camelCase`.
+- Classes: `PascalCase`.
+- Constants: `SCREAMING_SNAKE_CASE` for true constants.
 - Files: `kebab-case.js`.
-- Booleans mit `is`/`has`/`should`-Prefix.
+- Booleans with `is`/`has`/`should` prefix.
 
 ## 6. Security & Privacy
 
-- Inputs an HTTP-/Form-Boundaries validieren (Zod/Joi/Hand-Validator).
-- Secrets via `process.env`, nicht im Repo, nicht im Client-Bundle.
-- Raw-HTML-Injection nur via Sanitizer (DOMPurify) oder Markdown-Renderer mit Safe-Mode.
-- Logging: keine PII / Tokens / Bodies ungefiltert.
-- CSP-Header in Production gesetzt.
+- Validate inputs at HTTP/form boundaries (Zod/Joi/hand-written validator).
+- Secrets via `process.env`, never in the repo, never in the client bundle.
+- Raw-HTML injection only via a sanitizer (DOMPurify) or a Markdown renderer in safe mode.
+- Logging: no PII, no tokens, no unfiltered request bodies.
+- CSP header set in production.
 
 ## 7. Build & Verification
 
 - `npm install` / `pnpm install --frozen-lockfile`.
 - `eslint .`: clean.
 - `prettier --check`: clean.
-- `npm test`: alle grün.
+- `npm test`: all green.
 - Optional: `npm audit`, `osv-scanner` in CI.
 
 ## 8. Domain (project-specific)
 
-- Zweck des Repos in einem Satz.
-- Domain-Vokabular.
-- Compliance-Anforderungen.
-- Stakeholder-Reviewer.
+- Purpose of the repo in one sentence.
+- Domain vocabulary.
+- Compliance requirements.
+- Stakeholder reviewers.

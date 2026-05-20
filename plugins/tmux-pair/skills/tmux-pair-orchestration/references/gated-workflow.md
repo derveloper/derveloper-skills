@@ -6,7 +6,7 @@
 Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges -> Post-Merge Retro -> Cleanup
 ```
 
-The Post-Merge Retro is Pflicht, not optional. See the "Post-Merge Retro" section below for the procedure. Cleanup (worktree remove, branch delete, window kill) happens only after retro patterns are persisted.
+The Post-Merge Retro is mandatory, not optional. See the "Post-Merge Retro" section below for the procedure. Cleanup (worktree remove, branch delete, window kill) happens only after retro patterns are persisted.
 
 Gates exist because writer+reviewer loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 1.5, 2, and 3; the user enforces gate 1 via `AskUserQuestion`.
 
@@ -167,7 +167,7 @@ Failure modes:
 - **Stale readiness cache.** Rules edited but cache-hit returned old verdict: hash collision (slug + 16-hex prefix). Recovery: `--no-cache` for the affected spawn, then re-check. Prevention: keep the rules-content-hash deterministic (sorted glob, file-bytes only).
 - **TESTS-PROOF marker missing on 0.14+ commit.** Writer forgot the block. BLOCKER in GATE 3, fix-loop fixes by amending the bullet commit with the proper marker. Prevention: writer briefing template includes the marker block as a copy-paste skeleton.
 - **fmt-drift from shared target.** `cargo fmt` on a shared CARGO_TARGET_DIR sometimes triggers a rebuild for sibling worktrees on first run after rust-toolchain changes. Recovery: let cargo build re-warm; no functional problem. Prevention: keep `rust-toolchain.toml` consistent across worktrees.
-- **Falsch-positive Trivial-Plan-Detection.** `_predict_files_touched` overcounts (prose with file-paths) or undercounts (bullets referencing files only by description). Inline-mode only triggers below the threshold, so undercounting is the risky direction. Recovery: orchestrator should add explicit `Files zu ändern:` blocks in plans to make the regex prediction stable. Prevention: keep `bug-fix` as the only inline-eligible task_kind for now.
+- **False-positive trivial-plan detection.** `_predict_files_touched` overcounts (prose with file-paths) or undercounts (bullets referencing files only by description). Inline-mode only triggers below the threshold, so undercounting is the risky direction. Recovery: orchestrator should add explicit `Files to change:` blocks in plans to make the regex prediction stable. Prevention: keep `bug-fix` as the only inline-eligible task_kind for now.
 - **Recon-cache hits on stale `/tmp`.** Reboot wipes `/tmp` on macOS but not on Linux; an old recon snapshot can outlive the source tree. Recovery: `--no-cache`. Prevention: 1h TTL is short enough that drift is bounded.
 
 ## Gate 1: Clarify
@@ -229,7 +229,7 @@ Output: `VERDICT: READY | NEEDS-RULES` plus `LANGUAGES`, `COVERAGE` per topic, `
 
 - `READY` -> proceed to plan + GATE 2.
 - `NEEDS-RULES` -> bootstrap loop:
-  1. Per gap, orchestrator/human calls `AskUserQuestion` with 2-4 concrete options ("Welcher Linter blockiert Merges?", "Welcher Test-Runner ist Pflicht?", etc.). Recommended option first, suffix `(Recommended)`.
+  1. Per gap, orchestrator/human calls `AskUserQuestion` with 2-4 concrete options ("Which linter blocks merges?", "Which test runner is mandatory?", etc.). Recommended option first, suffix `(Recommended)`.
   2. Spawn `tmux-pair:rules-bootstrap` subagent (Sonnet 4.6, `Read+Grep+Glob+Bash+Edit+Write`). Inputs: GAPS list, user-answer block, detected languages, plugin templates path (`${CLAUDE_PLUGIN_ROOT}/templates/rules/`). Subagent bakes `.claude/rules/<topic>.md` from templates + repo recon + user answers.
   3. Re-run readiness-check. If `READY` -> proceed. If `NEEDS-RULES` after a third iteration: `AskUserQuestion` "abort, manually amend, or accept partial coverage?". The orchestrator owns the loop; the human is only pinged on `COMPLETE` or `ABORT`.
 - `READY` after a fresh bootstrap (rules just generated): orchestrator may ask the user via `AskUserQuestion` whether to run a `/tmux-pair:gepa` optimization pass on the new rules. Default: skip. GEPA is shipped as a plugin skill (`skills/gepa/`, Genetic-Pareto algorithm, paper arXiv:2507.19457). The orchestrator does NOT call GEPA autonomously because it requires user-supplied test diffs (3-5 known-bug diffs in `.gepa/test-diffs/`) for the eval script. If the user opts in and has those inputs, the orchestrator points them at `/tmux-pair:gepa init` and the user runs the loop in their own pane. Without test diffs the optimization score is wishful thinking; the orchestrator skips rather than fake it.
@@ -245,7 +245,7 @@ Output: `VERDICT: READY | NEEDS-RULES` plus `LANGUAGES`, `COVERAGE` per topic, `
 - Bootstrap-without-AskUser. Generating rules from templates alone misses project specifics; the user-answer step is the magic.
 - Rules-bootstrap touching topics already COVERED. The agent only writes rules for GAPS; existing rules are owned by the project.
 - Auto-running `/gepa`. GEPA is optional, opt-in, out-of-band. The plugin does not depend on user-installed skills.
-- ASCII substitutes (ae/oe/ue/ss) in generated rules. Real Umlauts ä/ö/ü/ß everywhere.
+- Slop or substitute spellings in generated rules. Generated rules respect the consumer repo's own language and orthography conventions; the plugin itself ships English-only baseline content.
 
 ## Gate 2: Plan-Check
 
@@ -256,9 +256,9 @@ Output: `VERDICT: READY | NEEDS-RULES` plus `LANGUAGES`, `COVERAGE` per topic, `
 **Mechanism:** spawn ONE `tmux-pair:gate-2-plan-check` subagent (Sonnet 4.6, scoped tools `Read+Grep+Glob+Bash`, NO `Edit`/`Write` so it cannot accidentally commit code instead of just verdicting). The agent's checklist + output format live in its system prompt (`agents/gate-2-plan-check.md`). The orchestrator passes only runtime inputs as the Task user-message:
 
 ```
-Task vom Human: {TASK}
-User-Antworten aus GATE 1: {CLARIFY_RESPONSE}
-Plan (Bullets): {PLAN_BULLETS}
+Task from human: {TASK}
+User answers from GATE 1: {CLARIFY_RESPONSE}
+Plan (bullets): {PLAN_BULLETS}
 Worktree: {WT_PATH}
 Base: {BASE}
 Run your checklist and return your VERDICT block.
@@ -286,7 +286,7 @@ A plan that compiles past GATE 2 must be edit-optimised. Each of the (max ~5) bu
 1. **Concrete files + functions + line ranges.** No "somewhere in `src/`". No "implement auth". The orchestrator is allowed to delegate the search to a subagent, but the resulting plan must be specific.
 2. **Edit strategy.** State what tool fits: `sed -i s/A/B/g <files>` for pattern replace across N>3 spots, `MultiEdit` for clustered changes in one file, `Write` for new files, AST/codemod for structural changes. Avoid implicit "engineer decides" when the strategy is obvious. Three similar lines is a sed; thirty is mandatory.
 3. **Test coverage.** Per bullet: which test files cover the goal of this bullet, and what they assert. If a project is intentionally untested (`Frickel`-marker: one-shot script, demo, throwaway), say so explicitly with a one-line justification. GATE 2 BLOCKERs absent test coverage on non-Frickel projects.
-4. **Parallelisability marker.** Every bullet carries an explicit marker. Use `B3 || B4 [parallel]` when bullets can run together without shared files, or `B3 -> B4 [sequenziell: <reason>]` when ordering is required. The orchestrator checks whether independent bullets are needlessly serial. Subagents for independent research/generation spawn in parallel.
+4. **Parallelisability marker.** Every bullet carries an explicit marker. Use `B3 || B4 [parallel]` when bullets can run together without shared files, or `B3 -> B4 [sequential: <reason>]` when ordering is required. The orchestrator checks whether independent bullets are needlessly serial. Subagents for independent research/generation spawn in parallel.
 5. **Done definition.** Measurable: test green, file exists, function returns X, lint green. Not vague ("works correctly").
 
 A skeletal plan (`add user auth`) is a `GATE-2-BLOCKER`, full stop. The fix is to expand the plan, not retry the subagent on the same input.
@@ -360,13 +360,14 @@ Subagents receive concrete scope, path bounds, output limits, and a reminder to
 respect other agents' edits. The main pane integrates summaries, not raw
 scrollback.
 
-### PROJECT.md-Pflege
+### PROJECT.md maintenance
 
 Every established project should keep a project-local `PROJECT.md` as the
 canonical human and agent map of the codebase. The file is maintained manually,
-not generated. A good reference shape is `~/git/example-project/PROJECT.md`: project
-overview, architecture, crate or package map, feature surface, design decisions,
-implementation history, and current operating notes.
+not generated. Use the PROJECT.md in your own repo (or this plugin's own
+PROJECT.md, if present) as a reference shape: project overview, architecture,
+crate or package map, feature surface, design decisions, implementation
+history, and current operating notes.
 
 For every feature or refactor bullet, the writer owns the `PROJECT.md` update
 when the change affects one of these surfaces:
@@ -405,9 +406,9 @@ Both rituals exist because in pair-runs prior to the rules-from-sessions changes
 
 Engineer pings without these three fields are blocked by the reviewer without code review:
 
-1. **Was geändert**: bullet/pain number + files + LOC-diff or NEW marker.
-2. **Verifikation**: concrete result. For code bullets: `workspace-gate=PASS` plus test-run output (e.g. `cargo-nextest "247 passed 0 failed"`). For doc-only: `workspace-gate=N/A doc-only`.
-3. **Bezug**: which plan-bullet / pain-point. So the reviewer knows the acceptance criterion.
+1. **What changed**: bullet / pain number + files + LOC diff or NEW marker.
+2. **Verification**: concrete result. For code bullets: `workspace-gate=PASS` plus test-run output (e.g. `cargo-nextest "247 passed 0 failed"`). For doc-only: `workspace-gate=N/A doc-only`.
+3. **Reference**: which plan-bullet / pain-point. So the reviewer knows the acceptance criterion.
 
 Workspace-gate is mandatory: code bullets must run their test suite (or smart test subset, if so planned) green BEFORE pinging `REVIEW-READY`. "Tests still running" is a discipline violation, not a status.
 
@@ -487,7 +488,7 @@ The orchestrator sends `COMPLETE` to the user only AFTER GATE 3 returned PASS. R
 
 ```
 COMPLETE: <Phase>. gate-3=PASS via <verifier-name + code-reviewer-name>.
-<diff-stat or commit list>. Bezug: <plan goals all met>.
+<diff-stat or commit list>. Reference: <plan goals all met>.
 ```
 
 If the orchestrator skips GATE 3, the reviewer is allowed to start a verify run on its own and mark the COMPLETE as premature. The orchestrator does not commit against a GATE-3 FAIL without explicit user escalation.
@@ -531,10 +532,10 @@ The standards list (when included) is not negotiable; it is part of the contract
 
 - Conventional Commits, no `--no-verify`, no `--no-gpg-sign`
 - No AI co-author trailer in commit messages
-- Real umlauts ä/ö/ü/ß; `ae/oe/ue/ss` substitutes are forbidden
+- Output respects the consumer repo's language conventions; this plugin ships English-only baseline content
 - No emojis unless explicitly asked
 - No em/en dashes (`--`); use colons, commas, periods
-- No anti-AI-slop vocabulary (`delve`, `facettenreich`, `wegweisend`, `Es ist wichtig zu beachten`, negation-parallelism, trailing participles, three-element lists without reason)
+- No anti-AI-slop vocabulary (`delve`, `tapestry`, `multifaceted`, `pivotal`, `leverage` as verb, `it is important to note`, negation-parallelism, trailing participles, three-element lists without reason)
 - Linting mandatory before commit; tests must pass
 - `fd` over `find`, `rg` over `grep`; exclude `.git`, `node_modules`, `build`, `target`
 - Comments sparse, only when the WHY isn't obvious
@@ -572,7 +573,7 @@ For projects with thin or partial rules, GATE 1.5 fills only the missing topics 
 
 These extend the base pair-protocol vocabulary (`REVIEW-READY`, `REVIEW`, `DONE`, `BLOCKER`; see `references/pair-protocol.md`). Engineers send those; gate events go between orchestrator and human.
 
-## Post-Merge Retro (Pflicht)
+## Post-Merge Retro (mandatory)
 
 After `COMPLETE` lands and the human squash-merges the worktree branch, the spawn-run is NOT yet done. The retro is the step where the team's hardest-won learnings get persisted before the panes die.
 
@@ -586,7 +587,7 @@ After `COMPLETE` lands and the human squash-merges the worktree branch, the spaw
    - **Reviewer 1+2** (with dual-review): concrete BLOCKER / WARNING per file:line, review-round count, divergence vs peer findings, dual-review value (what only the second reviewer caught), issue class avoidable in future tasks.
 4. **Pattern synthesis + persist.** The human collects the retros, identifies recurring issue classes (e.g. decorator-swallow, cancellation-root-mismatch, fmt-drift), and persists the learnings in:
    - tmux-pair SKILL.md: when the pattern is workflow cross-cutting (Pre-Flight class, mode-choice heuristic, dual-review value).
-   - Consumer-repo rules (`.claude/rules/*.md` or `.claude/skills/<repo>-<topic>/SKILL.md`): when the pattern is repo-specific (e.g. example-project decorator-chain-recon, trait-param-honor-check).
+   - Consumer-repo rules (`.claude/rules/*.md` or `.claude/skills/<repo>-<topic>/SKILL.md`): when the pattern is repo-specific (e.g. example-repo decorator-chain-recon, trait-param-honor-check).
 5. **Cleanup.** Only after pattern-persist:
 
 ```bash
@@ -606,7 +607,7 @@ These checks are aggregated from multiple spawn retros and are falsifiable. GATE
 - **Trait-Param-Honor**: `_`-prefixed param on a trait-method whose doc declares the param effective is silent-discard footgun. Either honor (with test) or amend the doc.
 - **Method-Resolution-Collision**: new trait-method with same name as existing inherent-impl on an implementor gets silently shadowed. `cargo check -p <crate>` decks the ambiguity-warning.
 - **fmt-drift**: `cargo fmt -p <crate>` without `--check` silently rewrites neighbor files. "fmt clean" claim requires `--check` evidence (exit 0).
-- **Memory-Recon as RECON Pflicht-Step**: read `MEMORY.md` + 3-5 most-relevant memory files before plan-write. Mid-run self-decisions preventable by memory-recon are a drift indicator.
+- **Memory-Recon as a mandatory RECON step**: read `MEMORY.md` + 3-5 most-relevant memory files before plan-write. Mid-run self-decisions preventable by memory-recon are a drift indicator.
 - **API-Surface-Upfront**: producer-bullet introduces a new public surface, consumer-bullet (later in same plan) must name the exact signature, not "the new function".
 
 These belong in `--with-standards` briefings AND in consumer-repo `.claude/rules/pre-flight-checklists.md`.
@@ -614,7 +615,7 @@ These belong in `--with-standards` briefings AND in consumer-repo `.claude/rules
 ## Failure modes specific to gated runs
 
 - **GATE 1.5 bootstrap-loop diverges.** Reviewer never says READY because each round flags new gaps. Recovery: after iteration 3, orchestrator asks user via `AskUserQuestion` to decide between abort, partial-coverage with explicit accept, or manual rules edit. Prevention: bootstrap subagent only writes rules for items in the GAPS list, does not invent new gaps. Readiness-check must classify every topic as COVERED/NA/MISSING (no "kinda" verdicts).
-- **Engineer skips PLAN-LOCKED.** Writer starts coding before the orchestrator's `PLAN-LOCKED:` arrives. Recovery: orchestrator pings `PROCESS-NEEDS-FIX` with the plan, writer reverts uncommitted work, restarts from PLAN-LOCKED. Prevention: engineer briefing should be explicit ("vor PLAN-LOCKED: KEIN Code").
+- **Engineer skips PLAN-LOCKED.** Writer starts coding before the orchestrator's `PLAN-LOCKED:` arrives. Recovery: orchestrator pings `PROCESS-NEEDS-FIX` with the plan, writer reverts uncommitted work, restarts from PLAN-LOCKED. Prevention: engineer briefing should be explicit ("no code before PLAN-LOCKED").
 - **GATE 2 BLOCKER auto-retried.** Orchestrator silently re-runs the subagent without telling human. Symptom: same plan keeps failing GATE 2 with similar findings. Prevention: orchestrator briefing forbids auto-retry.
 - **GATE 3 BLOCKER ignored.** Human sees BLOCKER but merges anyway under time pressure. The work then breaks production. Prevention: GATE-3-BLOCKER pings should be loud (multi-line, explicit BLOCKER list, no PASS sneaking in).
 - **Standards-block violated post-GATE-3.** A late commit slips a `--no-verify` or an `ae/oe/ue` past the verifier. Recovery: revert the commit, fix, GATE 3 again. Prevention: GATE 3 verifier explicitly checks for these in the diff.

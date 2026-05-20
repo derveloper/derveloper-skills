@@ -219,10 +219,10 @@ The GATE 3 verifier checks whether `PROJECT.md` was touched when the plan
 includes a feature, workflow, command, flag, package-map, architecture, or
 history-worthy change. If a repository has no `PROJECT.md`, the orchestrator
 checks that during recon and asks whether to bootstrap a human-maintained
-skeleton. `~/git/example-project/PROJECT.md` is the reference example for format and
+skeleton. This plugin's own `PROJECT.md` is a reference example for format and
 detail depth.
 
-### Post-Merge Retro (Pflicht)
+### Post-Merge Retro (Mandatory)
 
 After `COMPLETE` and the human's squash-merge, the spawn run is not yet done. Worktree + panes stay intact while the human collects a 200-500 word factual retro from each active pane (orchestrator, writer, reviewers), then persists recurring issue classes either into this plugin's SKILL.md (workflow cross-cutting) or into consumer-repo rules / skills (repo-specific). Cleanup follows only after pattern-persist. See `skills/tmux-pair-orchestration/references/gated-workflow.md` for the procedure.
 
@@ -234,7 +234,7 @@ GATE 2 (`agents/gate-2-plan-check.md` Item 16) anchors and GATE 3 code-reviewer 
 - Trait-Param-Honor: `_`-prefixed param vs effective trait-doc is silent-discard footgun.
 - Method-Resolution-Collision: new trait-method with same name as inherent-impl on implementor gets shadowed.
 - fmt-drift: `cargo fmt -p <crate>` without `--check` brushes neighbor files; "fmt clean" claims need `--check` evidence.
-- Memory-Recon-Pflicht: RECON reads `MEMORY.md` plus the relevant memory files before plan-write.
+- Memory recon (mandatory): RECON reads `MEMORY.md` plus the relevant memory files before plan-write.
 - API-Surface-Upfront: consumer-bullet must name the producer-bullet's exact public signature.
 
 Aggregated from spawn retros, falsifiable, additive to standard adversarial review.

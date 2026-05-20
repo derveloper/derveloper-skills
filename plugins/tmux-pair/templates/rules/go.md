@@ -1,65 +1,65 @@
 # Go Rules Skeleton
 
-Vorlage für Go-Projekte. Bootstrap-Agent passt Toolchain-Version, Module-Layout und Framework an.
+Template for Go projects. The bootstrap agent adapts toolchain version, module layout, and framework.
 
 ## 1. Style & Format
 
-- `gofmt`/`goimports` ist verbindlich, CI bricht bei Diff.
-- `golangci-lint run` mit eingecheckter `.golangci.yml` als Linter-Gate.
-- Mindest-Linters: `errcheck`, `govet`, `staticcheck`, `gosimple`, `unused`, `gosec`.
-- Go-Toolchain-Version in `go.mod` festgenagelt; nicht ohne Plan hochziehen.
+- `gofmt`/`goimports` is mandatory, CI fails on any diff.
+- `golangci-lint run` with a checked-in `.golangci.yml` as the linter gate.
+- Minimum linters: `errcheck`, `govet`, `staticcheck`, `gosimple`, `unused`, `gosec`.
+- Go toolchain version pinned in `go.mod`; do not bump without a plan.
 
 ## 2. Tests
 
-- Standard-Test-Tooling: `go test ./...`.
-- Tests neben dem File (`foo_test.go` neben `foo.go`).
-- Table-driven Tests bevorzugt, klare Sub-Tests via `t.Run`.
-- Coverage via `go test -coverprofile=...`, Threshold im CI-Gate.
-- `t.Parallel()` wo möglich; Race-Detector im CI (`go test -race`).
+- Standard test tooling: `go test ./...`.
+- Tests live next to the file (`foo_test.go` next to `foo.go`).
+- Prefer table-driven tests with clear sub-tests via `t.Run`.
+- Coverage via `go test -coverprofile=...`, threshold enforced by the CI gate.
+- Use `t.Parallel()` where possible; race detector in CI (`go test -race`).
 
 ## 3. Architecture & Boundaries
 
-- Module-Layout: ein Modul pro Repo. `cmd/<binary>/main.go` für Binaries, `internal/` für nicht-API-Pakete.
-- Public-API nur was unter `pkg/` oder Top-Level liegt; alles andere `internal/`.
-- Keine zirkulären Importe (Compiler verhindert, aber Architektur sauber halten).
-- Externe Dependencies: jede neue PR-begründet, `go.mod` mit klaren Versionen, kein `replace` außer für lokale Worktrees.
+- Module layout: one module per repo. `cmd/<binary>/main.go` for binaries, `internal/` for non-API packages.
+- Public API is only what lives under `pkg/` or the top level; everything else goes into `internal/`.
+- No circular imports (the compiler prevents it, but keep the architecture clean).
+- External dependencies: every new one requires a PR-level justification, `go.mod` with explicit versions, no `replace` directives outside of local worktrees.
 
 ## 4. Anti-Patterns
 
-- `panic` außerhalb von init / wirklich-impossible-states: BLOCK.
-- `interface{}`/`any` als Pflasterlösung statt richtigem Typ: BLOCK ohne Begründung.
-- `init()` für Magic-Side-Effects: BLOCK. Init explicit machen.
-- `time.Now()` / `os.Getenv()` direkt im Hot-Path statt über injizierte Clock/Config.
-- Globale Mutable State (Package-Level-Vars): nur mit Begründung.
-- Error wrappen verlieren: immer `fmt.Errorf("...: %w", err)`.
+- `panic` outside of init or genuinely impossible states: BLOCK.
+- `interface{}`/`any` as a band-aid instead of a proper type: BLOCK without justification.
+- `init()` for magic side effects: BLOCK. Make initialization explicit.
+- `time.Now()` / `os.Getenv()` called directly in the hot path instead of through an injected clock/config.
+- Global mutable state (package-level vars): only with justification.
+- Losing wrapped errors: always use `fmt.Errorf("...: %w", err)`.
 
 ## 5. Naming
 
-- Exportierte Identifier: `UpperCamelCase`.
-- Unexportierte: `lowerCamelCase`.
-- Acronyme groß (`HTTP`, `URL`, `ID`).
-- Receiver-Namen kurz (1-2 Buchstaben), konsistent pro Typ.
-- Files: `snake_case.go`, Tests `<file>_test.go`.
+- Exported identifiers: `UpperCamelCase`.
+- Unexported: `lowerCamelCase`.
+- Acronyms uppercase (`HTTP`, `URL`, `ID`).
+- Receiver names short (1-2 letters), consistent per type.
+- Files: `snake_case.go`, tests `<file>_test.go`.
 
 ## 6. Security & Privacy
 
-- Secrets via env / Vault, nie im Repo.
-- Input-Validation an HTTP-Boundaries (z.B. via `validator` oder Hand-Parser, kein blindes JSON-Decode in DB-Struct).
-- SQL: `database/sql` mit Parametern oder `sqlc`/`sqlx`. Kein String-Concat in Queries.
-- `crypto/*` Pflicht, niemals `math/rand` für Crypto.
-- Logging: keine PII, keine Tokens.
+- Secrets via env / Vault, never in the repo.
+- Input validation at HTTP boundaries (for example via `validator` or a hand-written parser, no blind JSON decode into a DB struct).
+- SQL: `database/sql` with parameters, or `sqlc`/`sqlx`. No string concatenation in queries.
+- `crypto/*` is mandatory; never use `math/rand` for crypto.
+- Logging: no PII, no tokens.
 
 ## 7. Build & Verification
 
 - `go build ./...`: clean.
 - `go vet ./...`: clean.
 - `golangci-lint run`: clean.
-- `go test ./... -race`: alle grün.
+- `go test ./... -race`: all green.
 - Optional: `govulncheck`, `gosec` in CI.
 
 ## 8. Domain (project-specific)
 
-- Zweck des Repos in einem Satz.
-- Domain-Vokabular.
-- Compliance-Anforderungen.
-- Stakeholder-Reviewer.
+- Purpose of the repo in one sentence.
+- Domain vocabulary.
+- Compliance requirements.
+- Stakeholder reviewers.
