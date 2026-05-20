@@ -41,6 +41,8 @@ All `/solo` flags are forwarded unchanged.
 
    Ambiguous task → claude (safer default, recon-strong). User can always override with `--agent codex` / `--agent pi`.
 
+   **The same heuristic applies inside the solo run to subagent spawns**: `Agent(...)` (claude Task tool) for recon-heavy / plan-driven / repo-domain sub-bullets; `Bash(codex exec --cd <sub-wt> "...")` for single-file / mechanic / codemod / adversarial bug-hunt sub-bullets. Default tie-breaker stays claude. See `skills/tmux-pair-orchestration/SKILL.md` "Same heuristic applies to subagent spawns" for the per-phase mapping.
+
 4. **Surface the pick** in the recon note (e.g. `recon: 12 affected files, .claude/rules/ present, agent=codex (bug-hunt profile)`). One line, no AskUserQuestion unless the user typed something contradictory like "use claude" in the task but the heuristic picked codex.
 5. **Invoke solo** with the resolved flags + `--agent <pick>`.
 

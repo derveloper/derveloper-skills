@@ -37,6 +37,26 @@ Agent pick heuristic (used by `/run`):
 
 Ambiguous → `claude` (safer default). User can override anytime with `--agent codex` / `--agent pi`. The picked agent is surfaced in the `/run` recon note.
 
+**Same heuristic applies to subagent spawns inside the solo run.** The solo agent has two subagent mechanisms with different strength profiles, and picks per task:
+
+| Mechanism | Tool | Strength profile |
+|---|---|---|
+| claude subagent | `Agent(general-purpose)` or `Agent(<repo>-*)` (Task tool) | Plan-integration, multi-step recon with `AskUserQuestion` chaining, design + briefing-driven impl, structured output (XML / JSON / markdown), repo-domain experts (`.claude/agents/<repo>-*.md`). |
+| codex subagent | `Bash(codex exec --skip-git-repo-check --cd <wt> "...")` | Single-file edits, code translation, mechanic refactors, codemods, adversarial bug-hunt, race-condition tracing, "find the real cause" prompts (gpt-5.5 + xhigh). Out-of-process, no context pollution. |
+
+Per phase:
+
+- **Phase 1 (Recon)**: usually `claude` subagents (4-6 parallel `Agent` calls). One `Bash(codex exec "recon-attack")` in parallel for second-opinion when the task is ambiguous or domain-unfamiliar.
+- **Phase 3 (Implementation)**: parallel sub-bullets → pick per bullet profile.
+  - Recon-heavy / multi-file / plan-driven bullet → `Agent` in a sub-worktree.
+  - Single-file mechanic / codemod / lang-translation bullet → `Bash(codex exec --cd <sub-wt> "<task>")`. Lean, no setup, direct file-ops.
+  - Adversarial bug-hunt sub-bullet → codex exec.
+  - Sequential bullet stays in the main pane (no subagent).
+- **Phase 2/4 (Gates)**: already parallel both-minds (claude `Agent` + codex `Bash(codex exec)`). No new pick logic needed.
+- **Phase 5 (Persist) / Phase 7 (Auto-Squash-Merge)**: no subagents, main pane handles directly.
+
+Default tie-breaker for subagents stays `claude` (recon-strong, structured). Codex picks itself when the profile is mechanic / single-file / adversarial — those are codex's home turf.
+
 ## Solo workflow (7 phases)
 
 1. **Recon**: 4-6 parallel subagent spawns. Domain-experts when `.claude/agents/<repo>-*.md` exists; `Explore` otherwise. Each subagent <300 words with `file:line` pointers. Adds `MEMORY.md` freshness check (>3 day old memory files = stale-risk flag).
