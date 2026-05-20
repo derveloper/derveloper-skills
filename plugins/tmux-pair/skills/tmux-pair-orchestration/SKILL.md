@@ -1,12 +1,12 @@
 ---
 name: tmux-pair-orchestration
-description: This skill should be used when the user asks to "spawn a solo with self-review", "run an agent on this with gates", "use the tmux-pair workflow", "/run for this task", or otherwise wants to run a single coding agent in a fresh git worktree with adversarial review gates. Solo is the only mode. Multi-pane spawn modes (writer + reviewer panes, dual-review, parallel-writers) were removed: shared CARGO_TARGET_DIR contention, git-index-lock races, cross-writer PROJECT.md races, and dual-review coordination outweighed the parallelism gain. Adversarial quality is preserved by running two independent minds at each gate: a claude subagent plus `codex exec` (different model family, fresh context, no pane setup). Covers the /run auto-entry, solo's 6-phase gated workflow (Recon -> Clarify -> Reviewer-Readiness -> Plan-Check -> Loop -> Final-Verify -> Persist -> Commit), durable standards (claude --append-system-prompt-file + codex AGENTS.md), REVIEW-READY 3-field format, CLARIFY-NEEDED escalation, Plan-Update-Commit on drift, PROJECT.md care, COMPLETE format, sender identity prefixes, smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, --claude-model / --no-worktree flags, briefing templates, and recovery from common failure modes. Mandatory Post-Merge Retro persists recurring patterns into tmux-pair-skill or consumer-repo rules / skills.
-version: 0.19.0
+description: This skill should be used when the user asks to "spawn a solo with self-review", "run an agent on this with gates", "use the tmux-pair workflow", "/run for this task", or otherwise wants to run a single coding agent in a fresh git worktree with adversarial review gates. Solo is the only mode. Multi-pane spawn modes (writer + reviewer panes, dual-review, parallel-writers) were removed: shared CARGO_TARGET_DIR contention, git-index-lock races, cross-writer PROJECT.md races, and dual-review coordination outweighed the parallelism gain. Adversarial quality is preserved by running two independent minds at each gate: a claude subagent plus `codex exec` (different model family, fresh context, no pane setup). Sequential solo runs auto-squash-merge to base in Phase 7: each run produces ONE squash commit on the base branch, the feature branch + worktree are removed automatically, so chained runs always branch from a clean base. Covers the /run auto-entry, solo's 7-phase gated workflow (Recon -> Clarify -> Reviewer-Readiness -> Plan-Check -> Loop -> Final-Verify -> Persist -> Commit -> Auto-Squash-Merge), durable standards (claude --append-system-prompt-file + codex AGENTS.md), REVIEW-READY 3-field format, CLARIFY-NEEDED escalation, Plan-Update-Commit on drift, PROJECT.md care, DONE-MERGED format, sender identity prefixes, smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, --claude-model / --no-worktree flags, briefing templates, and recovery from common failure modes. Mandatory Post-Merge Retro persists recurring patterns into tmux-pair-skill or consumer-repo rules / skills.
+version: 0.20.0
 ---
 
 # tmux-pair-orchestration
 
-Run a single coding agent on a task. The agent lives in its own tmux pane in a fresh `git worktree`, executes a 6-phase gated workflow, and uses subagents plus `codex exec` for adversarial review at each gate.
+Run a single coding agent on a task. The agent lives in its own tmux pane in a fresh `git worktree`, executes a 7-phase gated workflow, and uses subagents plus `codex exec` for adversarial review at each gate.
 
 This skill applies whenever the user wants to set up such a run, monitor it, draft briefings, recover from a stuck loop, or do the post-merge retro. The default entry-point is `/run`.
 
@@ -26,7 +26,7 @@ Adversarial review-quality is preserved by parallel two-mind gates inside the si
 
 Default agent: `claude` (recon-strong, follows briefings, integrates plan + subagent feedback cleanly). Override via `--agent codex` or `--agent pi` (the user's custom CLI). Reviewer subagents run at top reasoning tier regardless of solo agent's budget.
 
-## Solo workflow (6 phases)
+## Solo workflow (7 phases)
 
 1. **Recon**: 4-6 parallel subagent spawns. Domain-experts when `.claude/agents/<repo>-*.md` exists; `Explore` otherwise. Each subagent <300 words with `file:line` pointers. Adds `MEMORY.md` freshness check (>3 day old memory files = stale-risk flag).
 2. **Plan + GATE-2 Plan-Check**: bullet plan with parallel/sequential markers, then TWO independent adversarial checks in parallel:
@@ -40,7 +40,16 @@ Default agent: `claude` (recon-strong, follows briefings, integrates plan + suba
    - `Bash(codex exec "adversarial diff-review against main..HEAD")` (codex)
    BLOCKER in any → fix-loop. WARNING-only → proceed with documented follow-up. Max 3 review cycles.
 5. **PROJECT.md + Skill-Persist**: phase block in PROJECT.md, design decisions, domain knowledge as Skill under `.claude/skills/<repo>-<topic>/SKILL.md` (Persist-Convention; Rules only for cross-cutting always-on items).
-6. **Commit + DONE-Ping**: conventional commit, per-crate gates green, worktree clean, then ping the human.
+6. **Commit**: per-bullet conventional commits (kein AI-co-author), per-crate gates green, worktree clean. KEIN DONE-Ping bevor Phase 7 durch ist.
+7. **Auto-Squash-Merge + Cleanup**: solo squashes all bullet commits into one commit on `<base>`, deletes the feature branch, removes the worktree, then pings `DONE-MERGED`. Sequential chained runs always start from clean base. Steps the solo executes itself:
+   - `git -C <project> status --porcelain` -> must be empty (else BLOCKER)
+   - `git -C <project> checkout <base>`
+   - `git -C <project> merge --squash <branch>`
+   - `git -C <project> commit` (heredoc-Message: 1-Liner + Bullet-Body + Decisions + Test-Counts)
+   - `git -C <project> branch -D <branch>`
+   - `git -C <project> worktree remove <wt_path>` (skipped if `--no-worktree`)
+   - `DONE-MERGED solo.<feature>: <squash-sha> on <base>` ping
+   - Merge conflict in Phase 7 → BLOCKER ping with concrete error, human resolves, then solo retries.
 
 Default flag set: `--no-gated` for trivial tasks where subagent-driven recon/plan/review is overkill (e.g. doc tweak, single-file rename). Gated is the default. Worktree is the default; `--no-worktree` opts out.
 
@@ -116,7 +125,7 @@ The standards block covers: real Umlaute (no ASCII substitutes), Conventional Co
 ## Gated workflow (default)
 
 ```
-Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges -> Post-Merge Retro
+Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Commit -> Auto-Squash-Merge (Phase 7) -> DONE-MERGED -> Post-Merge Retro
 ```
 
 - **GATE 1 (Clarify)**. The solo agent calls `AskUserQuestion` directly. The human only sees a `GATE-1-ESCALATE` if a question is outside the agent's authority.
@@ -279,35 +288,29 @@ The full list lives in `references/failure-modes.md`. The most common:
 
 ## Post-Merge Retro (Pflicht)
 
-Default-Workflow nach `COMPLETE`-Ping vom Solo-Agent:
+Default-Workflow nach `DONE-MERGED`-Ping vom Solo-Agent. Phase 7 des Solo-Workflows hat den Squash-Merge + Branch-Delete + Worktree-Remove bereits ausgeführt. Der Retro-Step bleibt:
 
-1. **Squash-Merge auf `main`**: `git merge --squash` aus dem Worktree-Branch, dann ein commit auf `main` mit zusammengefasstem Body. Squash ist die Default-Strategie in jedem Fall: lineare main-History, ein commit pro Feature, Plan-Amendments und Reactive-Fixes verschwinden aus der main-Sicht. (Fast-forward oder `--no-ff` nur wenn der User explizit den Review-Trail behalten will.)
+1. **Retro**: Master schickt eine tailored Retro-Frage an den Solo-Pane (via `tmux_pair.py send`, Pane lebt noch nach Phase 7) UND spawnt parallel 2-3 `Agent` personas mit unterschiedlichen Blickwinkeln (orchestrator-view, writer-view, reviewer-view) plus eine `codex exec "retro"` für eine vierte unabhängige Sicht. Erwartet 200-500 Wörter Faktenanalyse pro Quelle (kein Lob, Schwächen direkt). Inhalt:
 
-2. **KEEP wt + pane**: nach dem Squash NICHT sofort cleanen. Worktree, Branch und tmux-Pane bleiben für den Retro-Step intakt.
-
-3. **Retro**: Master schickt eine tailored Retro-Frage an den Solo-Pane (via `tmux_pair.py send`) UND spawnt parallel 2-3 `Agent` personas mit unterschiedlichen Blickwinkeln (orchestrator-view, writer-view, reviewer-view) plus eine `codex exec "retro"` für eine vierte unabhängige Sicht. Erwartet 200-500 Wörter Faktenanalyse pro Quelle (kein Lob, Schwächen direkt). Inhalt:
-
-   - Phase-Wallclock pro 6-Phase-Schritt
+   - Phase-Wallclock pro 7-Phase-Schritt
    - GATE-2-Iterationen + welche Mid-Run-SDs bei Plan-Schreiben verhindert werden konnten
    - Drive-by/reactive-Commit-Anteil
    - Strukturelle Plan-Fehler
    - Schwierigstes Test-Pattern, fmt-drift-Ursache, Pre-Flight-Lücken
    - Bullet-Count-Retro (war monolithisch richtig oder zu groß?)
+   - Phase-7-Konflikte / Cleanup-Friktionen
 
-4. **Pattern-Synthese + Persist**: Master sammelt die Retros, identifiziert recurring issue classes (decorator-swallow, cancellation-root-mismatch, fmt-drift, plan-vs-reality-mismatch), persistiert:
+2. **Pattern-Synthese + Persist**: Master sammelt die Retros, identifiziert recurring issue classes (decorator-swallow, cancellation-root-mismatch, fmt-drift, plan-vs-reality-mismatch), persistiert:
    - tmux-pair-skill (diese Datei): wenn das Pattern workflow-cross-cutting ist (pre-flight-Klasse, Plan-Drift-Indikator)
    - Konsument-Repo: `.claude/rules/*.md` (always-on cross-cutting) oder `.claude/skills/<repo>-<topic>/SKILL.md` (path-scoped domain) per Persist-Convention
 
-5. **Cleanup**: erst nach Pattern-Persist:
+3. **Window-Cleanup**: nach Pattern-Persist:
 
 ```bash
-cd <project-path>
-git worktree remove ../<project-name>-wt-<feature>
-git branch -D feature/<feature>      # -D weil Squash-Merge git-perspektivisch "unmerged" ist
 tmux kill-window -t <window-name>
 ```
 
-Retro-Step ist Pflicht, nicht Optional. Ein Solo-Run ohne Retro persistiert nicht die teuersten Learnings des Runs.
+Worktree + Branch sind seit Phase 7 weg, nur das tmux-Window bleibt für den Retro übrig. Retro-Step ist Pflicht, nicht Optional. Ein Solo-Run ohne Retro persistiert nicht die teuersten Learnings des Runs.
 
 ## Recurring Pre-Flight Checks (aus Retros aggregiert)
 
@@ -327,9 +330,11 @@ Diese Checks gehören in `--with-standards` Briefings UND in Konsument-Repo `.cl
 
 - **Target-Dir Hygiene vor llvm-cov**: `.gitignore` enthält `target-cov/` (und ähnliche Tool-Output-Dirs) BEVOR der erste `cargo llvm-cov` läuft. Reactive-Fix nach Crash kostet 30+ min Recovery.
 
-## Cleanup (manuell, NACH Retro)
+## Cleanup (auto + manuell)
 
-Cleanup ist der human's call und passiert erst nach Retro + Pattern-Persist. Der Solo-Agent removed keine Worktrees, killed keine Windows, deleted keine Branches während des Runs.
+Der Solo-Agent removed Worktree + Branch automatisch in Phase 7 (Auto-Squash-Merge). Manuell bleibt nur das `tmux kill-window` nach Pattern-Persist.
+
+Vor 0.20.0 war Cleanup vollständig manuell und Pflicht-Reihenfolge (Retro -> dann Cleanup). Seit 0.20.0 macht der Solo-Agent Squash + Branch-Delete + Worktree-Remove selbst und der Retro-Step ist die einzige verbleibende Human-Pflicht.
 
 ## Companion skills (bundled)
 
@@ -344,7 +349,7 @@ External companion (NOT bundled): `code-simplifier` from `claude-plugins-officia
 
 ### References
 
-- **`references/gated-workflow.md`**: 6-phase solo workflow, subagent prompt templates, gate event vocabulary, gate-specific failure modes.
+- **`references/gated-workflow.md`**: 7-phase solo workflow, subagent prompt templates, gate event vocabulary, gate-specific failure modes.
 - **`references/failure-modes.md`**: common failure modes with diagnostics, recovery, prevention.
 
 ### Examples

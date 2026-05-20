@@ -50,6 +50,6 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py solo \
 
 JSON from `/solo`, prefixed by a one-line recon note (e.g. `recon: 12 affected files, .claude/rules/ present`).
 
-## Cleanup (manual)
+## Cleanup (auto, Phase 7)
 
-Same as `/solo`. See `commands/solo.md`.
+Same as `/solo`: Phase 7 auto-squash-merges + cleans up. Only `tmux kill-window` is manual. See `commands/solo.md`.

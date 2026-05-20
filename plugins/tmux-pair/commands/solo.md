@@ -1,17 +1,18 @@
 ---
-description: Spawn a single agent in a fresh git worktree, gated by a 6-phase self-driven workflow (recon, plan-check, impl, self-review, PROJECT.md/skill-persist, commit) with subagent-driven adversarial gates
+description: Spawn a single agent in a fresh git worktree, gated by a 7-phase self-driven workflow (recon, plan-check, impl, self-review, PROJECT.md/skill-persist, commit, auto-squash-merge) with subagent-driven adversarial gates
 argument-hint: <project-path> <base> <feature> [task...] [--no-gated] [--no-worktree] [--interactive] [--with-standards] [--greenfield] [--agent claude|codex|pi] [--claude-model SLUG] [--claude-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL] [--pi-provider NAME] [--no-shared-target]
 ---
 
 # solo
 
-Spawn a single agent in a fresh `git worktree`, gated by a 6-phase self-driven
+Spawn a single agent in a fresh `git worktree`, gated by a 7-phase self-driven
 workflow. The solo agent uses subagents for parallel recon (Phase 1), an
 adversarial plan-check (Phase 2) backed by a `codex exec` second-opinion,
 implementation (Phase 3), self-review (Phase 4) backed by `codex exec` for
 adversarial diff-review, persists decisions to PROJECT.md + skills (Phase 5),
-then commits and pings the human (Phase 6). Default gated; switch off with
-`--no-gated` for plain spawn + task.
+commits per bullet (Phase 6), then auto-squash-merges to base + cleans up the
+feature branch + worktree (Phase 7) before pinging DONE-MERGED. Default gated;
+switch off with `--no-gated` for plain spawn + task (Phase 7 still applies).
 
 Solo is the only mode. Multi-pane spawn (size 3/4/5, parallel-writers, dual-
 reviewer panes) was removed: shared CARGO_TARGET_DIR contention, git-index-lock
@@ -97,15 +98,14 @@ If the feature description is missing or ambiguous, ask the user before spawning
 
 JSON with `worktree`, `branch`, `window`, `solo_pane`, `solo_agent`, `solo_name`, `solo_ready`, `human_pane`. Relay back to the user so they can address the solo via the `send` subcommand.
 
-## Cleanup (manual, AFTER Post-Merge Retro)
+## Cleanup (auto, Phase 7)
 
-After the agent pings DONE and the human's squash-merge, KEEP the worktree + pane for the Post-Merge Retro (200-500 word factual answer on phase wall-clock, GATE-2 iterations, mid-run self-decisions preventable at first-plan-write, Pre-Flight gaps). Pattern-persist into SKILL.md or consumer-repo rules / skills. Only THEN clean up:
+Phase 7 of the gated workflow does the squash-merge + branch-delete + worktree-remove automatically. The human only kills the tmux window after the Post-Merge Retro:
 
 ```bash
-cd <project-path>
-git worktree remove ../<project-name>-wt-<feature>
-git branch -D feature/<feature>   # -D because squash-merge is git-perspectively "unmerged"
 tmux kill-window -t <window-name>
 ```
+
+If solo encountered a merge-conflict in Phase 7, it sends a BLOCKER-ping instead of DONE-MERGED. Then the human resolves manually and confirms before solo retries.
 
 See `skills/tmux-pair-orchestration/references/gated-workflow.md` for the full retro procedure.
