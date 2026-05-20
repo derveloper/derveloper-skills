@@ -2,23 +2,27 @@
 
 ## Project Overview
 
-`tmux-pair` is a Claude Code plugin for running coding-agent solos or
-coordinated spawn-teams (orchestrator + ONE writer + 1-2 reviewers, sized 3..4)
-in tmux panes. It creates isolated git worktrees, starts agent CLIs, sends role
-briefings, and provides helper commands for cross-pane messaging, compaction,
-monitoring, and cleanup. Parallel work happens via subagent-worktrees the
-writer spawns from its Task tool (FF-merge per sub-bullet, squash-merge feature
--> main at GATE-3-PASS). The `/run` slash-command auto-recommends solo vs spawn
-from a short repo + task recon.
+`tmux-pair` is a Claude Code plugin for running a single coding agent on a
+task via tmux + git worktrees. It creates an isolated git worktree, starts
+the agent CLI, sends a 7-phase self-driven briefing, and provides helper
+commands for compaction, monitoring, and post-merge cleanup. Solo is the
+only mode; multi-pane spawn (writer + reviewer panes, dual-review,
+parallel-writers) was retired in 0.19.0 for CARGO_TARGET_DIR contention,
+git-index-lock races, cross-writer PROJECT.md races, and dual-review
+coordination overhead. Parallel work happens via subagent fan-out: claude
+`Agent(...)` calls for recon-heavy / plan-driven sub-bullets and
+`Bash(codex exec --cd <sub-wt> "...")` for single-file / mechanic /
+adversarial sub-bullets. The `/run` slash-command picks `claude` or `codex`
+per task profile and delegates to `/solo` with the resolved flags.
 
 ## Architecture
 
 - `scripts/tmux_pair.py`: main runtime. Owns tmux pane spawning, worktree
   creation, generated briefings, durable standards, send/compact/status/monitor
-  subcommands, and pane identity handling.
-- `commands/solo.md`, `commands/spawn.md`, `commands/run.md`: Claude slash
-  command wrappers that parse user arguments and invoke the script (`run`
-  delegates to `/solo` or `/spawn` after a recon-driven recommendation).
+  subcommands, pane identity handling, and the Phase 7 auto-squash-merge.
+- `commands/solo.md` and `commands/run.md`: Claude slash command wrappers
+  that parse user arguments and invoke the script (`run` does a short
+  recon + agent pick and dispatches to `/solo`).
 - `agents/*.md`: scoped subagent definitions for reviewer-readiness,
   rules-bootstrap, plan-check, final verifier, and final code-reviewer gates.
 - `skills/tmux-pair-orchestration/`: long-form workflow documentation,
@@ -27,54 +31,69 @@ from a short repo + task recon.
   optimization and adversarial review.
 - `templates/rules/`: language rule skeletons used by rules-bootstrap.
 
+A `spawn` subparser still exists in `scripts/tmux_pair.py` for backwards
+compatibility with pre-0.19.0 invocations and is not the recommended path.
+The plugin's documentation, slash commands, skills, and briefings cover only
+the solo flow.
+
 ## Feature Surface
 
-- Solo mode: single agent in a fresh worktree, gated 6-phase self-driven
-  workflow (recon, plan + GATE-2, impl, GATE-3 self-review, PROJECT.md + skill
-  persist, commit). Adversarial gates run as subagents.
-- Spawn mode: orchestrator + ONE writer + 1-2 reviewers in a fresh worktree,
-  with the orchestrator handling recon, user clarification, plan-check, loop
-  supervision, and final verification. Sized via `--size 3..4`:
-  - size 3 (default): 1 writer + 1 reviewer + 1 orchestrator.
-  - size 4: 1 writer + 2 reviewers + 1 orchestrator (dual-review preset).
-- Parallel work via subagent-worktrees (single writer fans out): one sub-WT
-  per parallel plan-bullet, FF-merge back to the feature-WT per subagent,
-  squash-merge feature -> main at GATE-3-PASS done by the master.
-- Run mode (`/run` slash-command): repo + task recon, recommends solo vs spawn
-  (and recommended `--size`), delegates to `/solo` or `/spawn`. Explicit
-  user-mode overrides the recommendation.
-- Dual-review (reviewers >= 2): independent review, findings-swap, orchestrator
-  consolidation into one APPROVE/BLOCK.
-- Parallel-writers (writers >= 2): orchestrator partitions plan-bullets into
-  disjoint sub-sets per writer; no direct sync between writers.
-- Gated workflow: Clarify, Reviewer-Readiness, Plan-Check, Implementation Loop,
-  Final-Verify.
-- Adaptive GATE strictness: the orchestrator classifies task_kind
-  (bug-fix/feature/refactor) during recon; gate-2-plan-check, gate-3-verifier,
-  and gate-3-code-reviewer relax or tighten checklist items per class.
-- `--interactive` flag (spawn): opt-in decision pause points. Off by default
-  (unattended-by-default with V2 threshold self-decisions, all logged in the
-  COMPLETE ping).
-- Inline-fix spec: reviewer may include findings under 20 LOC as INLINE-FIX in
-  the REVIEW output (trigger: cosmetic/typo/missing-doc; anti-trigger:
-  architecture/security/test-logic). Writer applies silently with ACK.
-- WARNING/NOTE schema: BLOCKER = fix-loop required, WARNING =
-  followup-memory + PROJECT.md (no fix-loop), NOTE = log-only.
-- Durable standards: Claude receives `--append-system-prompt-file`; Codex reads
-  generated worktree `AGENTS.md` when applicable.
-- PROJECT.md care: feature and refactor bullets update project maps when package
-  map, feature surface, design decisions, or implementation history change.
-- Engineer subagent strategy: Writer, Reviewer, and Orchestrator delegate
-  bounded side work such as parallel recon files, parallel test suites, and
-  independent fix branches.
+- Solo: single agent in a fresh worktree, gated 7-phase self-driven workflow:
+  Phase 1 Recon, Phase 2 Plan + GATE-2, Phase 3 Implementation, Phase 4 GATE-3
+  Final-Verify, Phase 5 PROJECT.md + Skill-Persist, Phase 6 Commit, Phase 7
+  Auto-Squash-Merge onto base + branch and worktree cleanup. Adversarial gates
+  run two independent minds in parallel (claude subagent + `codex exec`
+  out-of-process second opinion).
+- `/run` auto-entry: short repo + task recon, picks `claude` or `codex` per
+  task profile (recon-heavy / plan-integration -> claude;
+  single-file / mechanic / adversarial bug-hunt -> codex; opt-in `pi` for
+  cost-sensitive bulk work), then invokes `/solo` with the resolved flags.
+- The same `claude` vs `codex` heuristic applies inside the solo run to
+  subagent spawns: `Agent(...)` for recon-heavy / plan-driven sub-bullets,
+  `Bash(codex exec --cd <sub-wt> "...")` for single-file / mechanic /
+  adversarial sub-bullets.
+- Phase 7 auto-squash-merge (since 0.20.0): solo squashes its bullet commits
+  into one commit on the base branch, deletes the feature branch, removes the
+  worktree, and pings `DONE-MERGED` so sequential chained runs always start
+  from a clean base. Hard-fail in Phase 7 (merge --squash conflict, dirty main
+  worktree) surfaces via `AskUserQuestion` in the solo's own pane with
+  recovery options, never a BLOCKER ping to the master pane.
+- `SOLO USER INPUT RULE`: all human input lands in the solo agent's own pane
+  via `AskUserQuestion`. The Phase 7 `DONE-MERGED` ping is the only
+  back-channel signal allowed. Subagent fan-out follows the same rule:
+  subagents return results to solo, solo decides via `AskUserQuestion`.
+- Parallel sub-worktrees: when the plan carries `B3 || B4 [parallel]` markers,
+  solo creates per-bullet sub-worktrees, fans out one subagent per sub-WT,
+  FF-merges each subagent's branch back into the feature-WT, then cleans up
+  the sub-worktree before Phase 7.
+- Adaptive GATE strictness: solo classifies `task_kind`
+  (bug-fix / feature / refactor) during recon; `gate-2-plan-check`,
+  `gate-3-verifier`, and `gate-3-code-reviewer` relax or tighten checklist
+  items per class.
+- `--interactive` flag: opt-in decision pause points. Off by default
+  (unattended-by-default with V2 threshold self-decisions, logged in the
+  internal COMPLETE marker and persisted as a PROJECT.md row).
+- Inline-fix spec: reviewer subagents may include findings under 20 LOC as
+  `INLINE-FIX` (trigger: cosmetic / typo / missing-doc; anti-trigger:
+  architecture / security / test-logic). Solo applies silently with ACK.
+- WARNING / NOTE schema: BLOCKER = fix-loop required; WARNING =
+  follow-up-memory + PROJECT.md (no fix-loop); NOTE = log-only.
+- Durable standards: claude receives `--append-system-prompt-file`; codex reads
+  the generated worktree `AGENTS.md` when applicable.
+- PROJECT.md care: feature and refactor bullets update the project map when
+  package map, feature surface, design decisions, or implementation history
+  change.
+- Engineer subagent strategy: solo delegates bounded side work (parallel
+  recon files, parallel test suites, independent fix branches) instead of
+  doing it inline.
 - Parallel-plan markers: every plan bullet carries either a parallel marker
-  such as `B3 || B4 [parallel]` or a sequencing marker with a reason.
+  (`B3 || B4 [parallel]`) or a sequencing marker (`B3 -> B4 [sequential: <reason>]`).
 - Sender identity: `tmux_pair.py send` prefixes normal messages with
   `[FROM: <pane-name>]` using stable tmux pane user options.
 
 ## Design Decisions
 
-- `tmux_pair.py send` is the only supported spawn-mode communication path
+- `tmux_pair.py send` is the only supported cross-pane communication path
   because it handles multi-line pastes and Enter retries for agent TUIs.
 - Sender names are stored in `@tmux-pair-sender` at spawn time. `pane_title` is
   only a fallback because agent TUIs can overwrite it with spinner or working
@@ -376,3 +395,85 @@ V2 decision log for 0.21.0:
 | D4 | Generic placeholders (`example-repo`, `~/code/example-project`, `${CLAUDE_PLUGIN_ROOT}`) instead of leaving anonymized references | The depersonalized text must still convey what the original example meant (a consumer repo path, the plugin root, a third-party tool). Generic placeholders carry the structural meaning without leaking identity. |
 | D5 | Version bump 0.20.2 -> 0.21.0 (minor) with `refactor!` commit subject | The diff is text-only and preserves all logic, but the UX-default flip (English instead of whichever language the briefing template happened to use) is observable to existing users, so the `!` marker is honest. Minor bump because the feature surface gains the language-aware directive without removing any flag. |
 | D6 | Existing pre-merge git history left untouched | Out of scope for this refactor: a separate `git filter-repo` pass will rewrite history for PII and language after the squash-merge. The bullet commits in this run are English from the start, so the squash commit on `main` is already clean. |
+
+### 0.22.0 (Docs sync to solo-only 7-phase reality + SOLO USER INPUT RULE, 2026-05-21)
+
+User direction: the plugin docs had drifted out of sync with the runtime
+since the 0.19.0 multi-pane spawn removal. README still advertised two
+modes (solo and spawn) with a 6-phase solo workflow and the `/spawn` slash
+command; the orchestration skill's reference docs still framed the gated
+workflow around an orchestrator pane; the solo-briefing example was a
+spawn-mode writer template; PROJECT.md's Overview, Architecture, and
+Feature Surface prose still listed spawn / dual-review / parallel-writers
+as active features. The 0.21.0 English-only refactor had also left
+German-marker leftovers (`sequenziell`, `Bezug:`) in a handful of spots.
+This release brings every doc surface in sync with the current runtime:
+solo-only, 7-phase, auto-squash-merge in Phase 7, DONE-MERGED ping, and
+the `/run` agent-pick heuristic that picks `claude` vs `codex` per task
+profile and applies the same heuristic to subagent fan-out inside solo.
+
+Additionally, this release hardens the solo briefing with an explicit
+`SOLO USER INPUT RULE`: all human input lands in the solo agent's own pane
+via `AskUserQuestion`. The Phase 7 `DONE-MERGED` ping is the only
+back-channel signal to the spawning master pane. Hard-fail in Phase 7
+(merge --squash conflict, dirty main worktree blocking checkout) is
+surfaced via `AskUserQuestion` in the solo's own pane, never a BLOCKER
+ping. Subagent fan-out follows the same rule: subagents return results to
+solo, solo decides via `AskUserQuestion`. This codifies a longstanding
+user direction that previously sat in memory but was not enforced in the
+solo briefing template.
+
+- BREAKING UX (none on behavior, only on prose): no flag was removed; the
+  `spawn` subparser stays in `scripts/tmux_pair.py` for backwards
+  compatibility with pre-0.19.0 invocations and is documented as a legacy
+  surface, not as the recommended path.
+- Rewritten: `README.md` (full rewrite, ~250 lines, solo front-door, `/run`
+  agent-pick heuristic, 7-phase summary, auto-squash-merge Phase 7,
+  DONE-MERGED ping format, history paragraph at the bottom that explains
+  why multi-pane spawn was retired in 0.19.0). Section count cut from 18 to
+  16; flag list trimmed to what `python3 scripts/tmux_pair.py solo --help`
+  actually exposes. No `/spawn` slash-command refs outside history.
+- Rewritten: `skills/tmux-pair-orchestration/examples/solo-briefing.md`
+  (was a spawn-mode writer template, now an actual solo briefing template
+  matching the script-generated baseline, including the
+  `SOLO USER INPUT RULE` block).
+- Reframed: `skills/tmux-pair-orchestration/references/gated-workflow.md`
+  and `references/failure-modes.md` got a "Solo is the only mode (since
+  0.19.0)" banner at the top plus a rewritten opening section. Older
+  sections that still use "orchestrator" / "writer" / "reviewer" as
+  functional role names within the single-agent solo flow are flagged as
+  such so the reference content stays useful without sounding stale.
+- Fixed in `skills/tmux-pair-orchestration/SKILL.md`: "Bezug:" -> "Reference:",
+  three "sequenziell" markers -> "sequential", a "BLOCKER ping" Phase 7
+  conflict-recovery line replaced with `AskUserQuestion`, and the
+  "COMPLETE-Ping format" entry reframed as "COMPLETE marker (internal
+  phase log)" since solo no longer pings any peer with it.
+- Fixed in `scripts/tmux_pair.py`: module docstring (was promoting spawn as
+  the default), `cmd_solo` docstring ("6-phase" -> "7-phase"), `solo`
+  subparser help (added Phase 7 mention), and `--no-gated` help (added
+  "Phase 7 auto-squash-merge still applies"). `_briefing_solo` gained the
+  new `SOLO_USER_INPUT_RULE_BLOCK` constant injected near the top of both
+  gated and ungated variants; the existing `User pane: ... DONE/BLOCKER
+  ping` preamble was rewritten so DONE-MERGED is the only back-channel
+  signal and all human input goes through `AskUserQuestion` in the solo's
+  own pane; the gated Phase 7 conflict line and the ungated merge-conflict
+  line both changed from "BLOCKER ping" to "AskUserQuestion in own pane";
+  the gated `ANTI-PATTERNS` block lost the "Interim pings to the user
+  (only DONE/BLOCKER)" bullet in favor of "Pinging the spawning master
+  pane for human input. All human questions land in this pane via
+  AskUserQuestion. DONE-MERGED at Phase 7 is the only back-channel signal".
+- Tightened: `commands/solo.md` `--no-gated` line ("6-phase" -> "7-phase").
+- Version sync: `plugin.json`, `.claude-plugin/marketplace.json`, and the
+  orchestration skill frontmatter all on 0.22.0.
+
+V2 decision log for 0.22.0:
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Spawn subparser stays in the runtime; docs say solo-only | Removing the subcommand would be a hard breaking change for any user invoking it directly. Documentation alignment is enough: every doc surface, slash command, skill, and briefing covers only the solo flow, so future users see solo-only; pre-0.19.0 callers that still type `tmux_pair.py spawn ...` keep working until a major bump retires the subparser. |
+| D2 | `SOLO USER INPUT RULE` as a dedicated briefing constant, not an addition to `ASKUSER_DISCIPLINE_BLOCK` | The rule combines a delivery mechanism (AskUserQuestion in own pane) with a forbidden alternative (BLOCKER ping back to master) and an explicit Phase 7 exception. ASKUSER_DISCIPLINE_BLOCK is about HOW to format questions; the new block is about WHERE solo handles input. Distinct concerns, distinct blocks. The new block references the old one for format detail. |
+| D3 | Phase 7 merge conflict surfaces via AskUserQuestion, not BLOCKER ping | Consistent with the SOLO USER INPUT RULE: the human is local to the solo's pane. AskUserQuestion gives structured 2-4 recovery options (rebase + retry, abort, manual resolve + retry); a BLOCKER ping is unstructured prose and asymmetric (solo asks, master pane answers, solo waits). |
+| D4 | Reference docs reframed via banner + opening rewrite rather than full rewrite | `gated-workflow.md` (622 lines) and `failure-modes.md` (215 lines) contain a lot of mechanism-level guidance (subagent prompt templates, gate event vocabulary, send-helper failure modes) that still applies in the solo flow. Surgical reframe at the top plus targeted fixes for the strict-forbidden terms preserves the reference value without a 800-line rewrite. |
+| D5 | `solo-briefing.md` got a full rewrite | The previous content was a writer-role briefing template from spawn-mode times. A solo template needs Phase 7, the SOLO USER INPUT RULE, and the gated-7-phase scaffolding; a banner reframe would not have produced a useful starting template. |
+| D6 | German-only marker leftovers fixed across SKILL.md and README in this run | The 0.21.0 English-only refactor missed `sequenziell`, `Bezug:`, and a few other markers. Catching them now keeps the plugin source 100 percent English. |
+| D7 | Squash-merge subject `docs(tmux-pair): bring docs in sync with solo-only 7-phase reality (0.22.0)` | User-prescribed exact wording; matches the conventional-commit pattern used by previous version bumps in this repo. |

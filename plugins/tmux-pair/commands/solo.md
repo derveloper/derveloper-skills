@@ -62,7 +62,7 @@ Solo keeps the same gates spawn-mode used, just with leaner mechanics:
 
 ## Optional flags
 
-- `--no-gated`: bypass the 6-phase workflow briefing. Minimal spawn + task. Use for trivial tasks where subagent-driven recon/plan/review is overkill.
+- `--no-gated`: bypass the 7-phase workflow briefing. Minimal spawn + task. Use for trivial tasks where subagent-driven recon/plan/review is overkill.
 - `--no-worktree`: skip `git worktree add`, run on the project's current branch directly. Codex `AGENTS.md` write to project is skipped to avoid pollution.
 - `--interactive`: decision-pause-points in solo briefing (rare; default autonom). Without this flag, V2 self-decisions proceed without asking the user.
 - `--with-standards`: append the durable standards bundle (STANDARDS, RECALL_DISCIPLINE, BULLET_START_RITUAL, PAIR_PROTOCOL) to the briefing.

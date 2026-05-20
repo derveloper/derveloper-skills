@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""tmux-pair: spawn coordinated coding-agent teams in tmux + git worktrees.
+"""tmux-pair: run a coding agent on a task via tmux + git worktrees.
+
+Solo is the only supported mode. The spawn subcommand is legacy code retained
+from pre-0.19.0; the multi-pane spawn flow was retired for CARGO_TARGET_DIR
+contention, git-index-lock races, cross-writer PROJECT.md races, and
+dual-review coordination overhead. New work uses solo + subagent fan-out
+plus parallel `codex exec` second-opinion at each gate.
 
 Subcommands:
   pane          single primitive agent in one pane (low-level)
   send          send text to a pane (handles multi-line + agent-TUI Enter quirks)
-  solo          single agent in a fresh worktree, 6-phase gated self-review
-  spawn         coordinated team (orchestrator + writer + reviewers) in a
-                fresh worktree, sized 3..4 via --size (3 = 1W/1R/1O default;
-                4 = 1W/2R/1O dual-review). Parallel work happens via
-                subagent-worktrees the single writer spawns from its Task tool.
+  solo          single agent in a fresh worktree, 7-phase gated self-driven
+                workflow with auto-squash-merge onto base in Phase 7
+  spawn         legacy multi-pane coordinated team (retained from pre-0.19.0,
+                not the recommended path)
   list          list panes managed in the current session
   capture       capture-pane snapshot for one pane
 
@@ -1644,6 +1649,32 @@ ASKUSER_DISCIPLINE_BLOCK = (
     "AskUser themselves.\n"
 )
 
+SOLO_USER_INPUT_RULE_BLOCK = (
+    "SOLO USER INPUT RULE (MANDATORY)\n"
+    "  All human input lands inside YOUR OWN pane via AskUserQuestion.\n"
+    "  Phase 1 Clarify, GATE 2 scope decisions, GATE 3 BLOCKER triage,\n"
+    "  Phase 7 merge conflict, and every other unexpected situation:\n"
+    "  AskUserQuestion in this pane with 2-4 concrete options,\n"
+    "  recommended option on position 1 (see ASKUSER DISCIPLINE). The\n"
+    "  human is sitting at this pane (or will switch to it); the\n"
+    "  question lands in the right place automatically.\n"
+    "\n"
+    "  Do NOT ping the spawning master pane with `BLOCKER: human\n"
+    "  decision needed`, `should I proceed?`, 4-option escalation\n"
+    "  pings, or any other request for input. That is the removed\n"
+    "  spawn-mode pattern; in solo the human is local to your pane.\n"
+    "\n"
+    "  Subagent fan-out follows the same rule: subagents return their\n"
+    "  results to YOU. YOU decide via AskUserQuestion in this pane\n"
+    "  when human input is needed. Subagents do not message the human.\n"
+    "\n"
+    "  Exception: the Phase 7 DONE-MERGED ping is the ONLY back-channel\n"
+    "  signal allowed to the spawning master pane. Hard-fail in Phase 7\n"
+    "  (merge --squash conflict, dirty main worktree blocking checkout)\n"
+    "  is surfaced via AskUserQuestion in your own pane, describing the\n"
+    "  failure and offering 2-4 recovery options. No BLOCKER ping back.\n"
+)
+
 INLINE_FIX_SPEC_BLOCK = (
     "V1 REVIEWER-TRIVIAL-FIX-INLINE\n"
     "Trigger for INLINE-FIX in the review output: under 20 LOC and\n"
@@ -3093,24 +3124,30 @@ def _briefing_solo(
             f"BASE:     {base}\n"
             f"PROJECT:  {project}\n\n"
             f"TASK\n{task or '(none: wait for the user)'}\n\n"
-            f"User pane: {human_pane}. DONE/BLOCKER ping:\n"
+            f"User pane: {human_pane}. Phase 7 DONE-MERGED is the ONLY back-channel ping:\n"
             f"    {send_human} \"DONE-MERGED solo.{feature}: <squash-sha + short>\"\n"
-            f"    {send_human} \"BLOCKER solo.{feature}: <question>\"\n\n"
+            f"All human input (questions, decisions, hard-fail recovery) uses\n"
+            f"AskUserQuestion in THIS pane. No BLOCKER ping to master. See\n"
+            f"SOLO USER INPUT RULE below.\n\n"
             f"{repo_block}"
+            f"{SOLO_USER_INPUT_RULE_BLOCK}\n"
             f"{ENGINEER_SUBAGENT_STRATEGY_BLOCK}\n"
             f"{_briefing_standards_block(with_standards=with_standards)}"
             f"WORKSPACE GATE MANDATORY before every commit\n"
             f"  Build / test / lint / format the relevant crates. No push.\n\n"
             f"AUTO SQUASH MERGE AFTER FEATURE COMMIT (MANDATORY)\n"
             f"  After a successful feature commit: squash onto {base}.\n"
-            f"  1. git -C {project} status --porcelain == empty? Otherwise BLOCKER.\n"
+            f"  1. git -C {project} status --porcelain == empty? Otherwise\n"
+            f"     AskUserQuestion in own pane with the dirty file list and\n"
+            f"     2-4 recovery options.\n"
             f"  2. git -C {project} checkout {base}\n"
             f"  3. git -C {project} merge --squash {branch}\n"
             f"  4. git -C {project} commit (heredoc message, one-liner + body).\n"
             f"  5. git -C {project} branch -D {branch}\n"
             f"  6. git -C {project} worktree remove {wt_path} (if worktree mode).\n"
             f"  7. DONE-MERGED ping. No push.\n"
-            f"  On merge conflict: BLOCKER ping with the concrete error.\n"
+            f"  On merge conflict: AskUserQuestion in own pane with the\n"
+            f"  concrete error and 2-4 recovery options. No BLOCKER ping.\n"
         )
     return (
         f"Language: respond to the human in the language the human writes in. Default English.\n\n"
@@ -3120,9 +3157,11 @@ def _briefing_solo(
         f"BASE:     {base}\n"
         f"PROJECT:  {project}\n\n"
         f"TASK\n{task or '(none: wait for the user)'}\n\n"
-        f"User pane: {human_pane}. NO interim pings. Only DONE-MERGED or a real BLOCKER:\n"
+        f"User pane: {human_pane}. Phase 7 DONE-MERGED is the ONLY back-channel ping:\n"
         f"    {send_human} \"DONE-MERGED solo.{feature}: <squash-sha on {base} + phase summary>\"\n"
-        f"    {send_human} \"BLOCKER solo.{feature}: <question + 2-4 options>\"\n\n"
+        f"All human input (questions, decisions, hard-fail recovery) uses\n"
+        f"AskUserQuestion in THIS pane. No BLOCKER ping to master. See\n"
+        f"SOLO USER INPUT RULE below.\n\n"
         f"SOLO GATED WORKFLOW (subagent-centric)\n"
         f"  You are a single agent. You delegate to subagents as much as\n"
         f"  possible; your main pane orchestrates. Phases in fixed order:\n"
@@ -3194,8 +3233,9 @@ def _briefing_solo(
         f"    all branch fresh from {base}, so each run MUST end with a\n"
         f"    squash merge + branch delete.\n"
         f"    1. git -C {project} status --porcelain -> empty? Otherwise\n"
-        f"       BLOCKER (the main worktree must be clean, otherwise\n"
-        f"       there is no safe checkout).\n"
+        f"       AskUserQuestion in own pane with dirty file list and 2-4\n"
+        f"       recovery options (the main worktree must be clean,\n"
+        f"       otherwise there is no safe checkout).\n"
         f"    2. git -C {project} checkout {base}\n"
         f"    3. git -C {project} merge --squash {branch}\n"
         f"    4. git -C {project} commit with a heredoc message:\n"
@@ -3207,13 +3247,16 @@ def _briefing_solo(
         f"    6. git -C {project} worktree remove {wt_path} (if worktree\n"
         f"       mode; path == project with --no-worktree, skip this\n"
         f"       step).\n"
-        f"    7. DONE-MERGED ping to the user:\n"
+        f"    7. DONE-MERGED ping to the user (back-channel exception):\n"
         f"       {send_human} \"DONE-MERGED solo.{feature}: <squash-sha> on {base}.\n"
         f"                       <bullet count> bullets squashed. Worktree+branch cleaned.\"\n"
-        f"    On conflict in merge --squash: BLOCKER ping with the\n"
-        f"    concrete error. NO push.\n"
+        f"    On conflict in merge --squash: AskUserQuestion in own pane\n"
+        f"    with concrete error + 2-4 recovery options. NO BLOCKER ping\n"
+        f"    to master. NO push.\n"
         f"\n"
         f"{repo_block}"
+        f"{SOLO_USER_INPUT_RULE_BLOCK}\n"
+        f"{ASKUSER_DISCIPLINE_BLOCK}\n"
         f"{ENGINEER_SUBAGENT_STRATEGY_BLOCK}\n"
         f"{PROJECT_MD_CARE_BLOCK}\n"
         f"{MID_RUN_PERSISTENCE_BLOCK}\n"
@@ -3222,23 +3265,27 @@ def _briefing_solo(
         f"- Skipping Phase 2 or Phase 4 without subagent self-check.\n"
         f"- Using general-purpose instead of a repo subagent when a\n"
         f"  matching domain subagent exists.\n"
-        f"- Interim pings to the user (only DONE/BLOCKER).\n"
+        f"- Pinging the spawning master pane for human input. All human\n"
+        f"  questions land in this pane via AskUserQuestion. DONE-MERGED\n"
+        f"  at Phase 7 is the only back-channel signal.\n"
         f"- Touching pre-existing dirty files (respect the allowlist).\n"
         f"- Pushing without the user's OK.\n"
     )
 
 
 def cmd_solo(args: argparse.Namespace) -> int:
-    """Single agent in a fresh worktree, gated 6-phase self-driven workflow.
+    """Single agent in a fresh worktree, gated 7-phase self-driven workflow.
 
     Phase 1 (recon) -> Phase 2 (plan + GATE-2 self-check via subagent) ->
     Phase 3 (impl, parallel subagents where independent) -> Phase 4 (GATE-3
     self-review via subagent) -> Phase 5 (PROJECT.md + skill persist) ->
-    Phase 6 (commit + DONE ping). Each phase uses subagents for parallel
-    work. With --no-gated: minimal briefing, just spawn + task. Default ON.
+    Phase 6 (commit) -> Phase 7 (auto-squash-merge onto base + branch and
+    worktree cleanup + DONE-MERGED ping). Each phase uses subagents for
+    parallel work. With --no-gated: minimal briefing, just spawn + task.
+    Default ON.
 
     Worktree default. With --no-worktree: solo runs on the project's current
-    branch directly (codex AGENTS.md write is skipped, like /spawn).
+    branch directly (codex AGENTS.md write to the project is skipped).
     """
     agents = load_agents()
     if args.agent not in agents:
@@ -3816,7 +3863,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     so = sub.add_parser("solo",
                         help="single agent in a fresh worktree, gated "
-                             "6-phase self-driven workflow")
+                             "7-phase self-driven workflow with "
+                             "auto-squash-merge in Phase 7")
     so.add_argument("--project", required=True,
                     help="path to the git repo to base the worktree on")
     so.add_argument("--feature", required=True,
@@ -3834,8 +3882,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "current branch directly. AGENTS.md write to "
                          "project is skipped to avoid pollution.")
     so.add_argument("--no-gated", action="store_true",
-                    help="bypass the 6-phase workflow briefing. Minimal "
-                         "spawn + task only. Use for trivial tasks where "
+                    help="bypass the 7-phase workflow briefing. Minimal "
+                         "spawn + task only. Phase 7 auto-squash-merge "
+                         "still applies. Use for trivial tasks where "
                          "subagent-driven recon/plan/review is overkill.")
     so.add_argument("--interactive", action="store_true",
                     help="Decision-pause-points in solo briefing (rare for "

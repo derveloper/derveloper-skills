@@ -1,32 +1,24 @@
 # tmux-pair
 
-Spawn coding-agent solos or coordinated spawn-teams (orchestrator + ONE writer + reviewers, size 3..4) in tmux panes, each pinned to its own fresh `git worktree`. Parallel work fans out via subagent-worktrees the writer spawns from its Task tool.
+Run a single coding agent on a task via tmux + git worktrees. The agent lives in its own pane in a fresh `git worktree`, executes a 7-phase gated self-driven workflow with adversarial review at each gate, then auto-squash-merges its bullet commits onto the base branch and cleans up the feature branch and worktree.
 
 ## What it does
 
-Two modes, both create a sibling worktree and a tmux window with one pane per agent:
+`/run` is the default entry-point: it does a short repo + task recon, picks `claude` or `codex` for the agent based on task profile, then invokes `/solo` with the resolved flags. `/solo` spawns a single agent in a fresh worktree and runs the gated workflow.
 
-| Mode | Panes | Layout | Use when |
-|------|-------|--------|----------|
-| **solo** | one agent (gated 6-phase, subagent-driven self-review) | single pane | self-contained refactor/cleanup where adversarial gate-subagents are enough; human is hands-off after spawn |
-| **spawn** | orchestrator + 1 writer + 1-2 reviewers, sized via `--size 3..4` (default 3 = 1W/1R/1O; 4 = 1W/2R/1O dual-review) | orchestrator on top, writer + reviewer(s) below; second reviewer stacks vertically under reviewer-1 | bigger task, recon-heavy, want a dedicated agent to brief the writer, filter noise, and consolidate reviews. Parallel plan-bullets fan out via subagent-worktrees the writer creates from its Task tool. |
+| Slash command | Purpose |
+|---|---|
+| `/run` | auto-entry: recon + agent pick + dispatch to `/solo` |
+| `/solo` | spawn solo agent directly with explicit flags |
 
-A third top-level entry-point, `/run`, performs a short repo + task recon and recommends solo or spawn (with a recommended `--size`) based on task complexity. Explicit mode-flags from the user override the recommendation.
-
-In spawn mode, the agents talk peer-to-peer by running:
-
-```
-python3 <plugin>/scripts/tmux_pair.py send <pane-id> "<message>"
-```
-
-The helper handles the multi-line submit quirks of common agent TUIs (paste-buffer + extra Enters) so messages reliably land. It also prefixes normal send messages with `[FROM: <pane-name>] ` unless the message already starts with `[FROM:`. Spawned panes store the stable sender name in `@tmux-pair-sender`, so prefixes stay useful even when Claude or Codex overwrites the visible pane title with a spinner.
+There is one mode. Solo, gated, self-driven, with subagent fan-out for parallel work. Adversarial review-quality is preserved by running two independent minds at each gate: a claude subagent (`Agent(...)`) plus `codex exec` (out-of-process, different model family, fresh context).
 
 ## Requirements
 
 - `tmux` (running session: the script spawns into the current session)
 - `git` 2.5+ (worktrees)
 - `python3` 3.9+
-- One or more agent CLIs on `PATH` (defaults assume `claude` and `codex`, configurable)
+- `claude` and/or `codex` on `PATH` (configurable; `pi` opt-in as third agent)
 
 ## Quick start
 
@@ -35,46 +27,62 @@ Inside an existing tmux session:
 ```
 /run    <project-path> <base-ref> <feature-name> <task description>
 /solo   <project-path> <base-ref> <feature-name> <task description>
-/spawn  <project-path> <base-ref> <feature-name> <task description>
 ```
 
-`/run` is the default: it inspects the repo and task and recommends solo or spawn. `/solo` and `/spawn` invoke the modes directly. All three create a worktree at `<project-parent>/<project-basename>-wt-<feature>` and branch `feature/<feature>` from `<base-ref>`.
+Both create a worktree at `<project-parent>/<project-basename>-wt-<feature>` and branch `feature/<feature>` from `<base-ref>`. Phase 7 squashes that feature branch back onto the base, deletes the branch, removes the worktree, and pings `DONE-MERGED` so sequential chained runs always start from a clean base.
 
-Solo runs a single agent through a 6-phase gated workflow (recon, plan+GATE-2, impl, GATE-3 self-review, PROJECT.md + skill persist, commit). Subagents drive the parallel recon, the adversarial plan-check (`tmux-pair:gate-2-plan-check`), and the final review (`tmux-pair:gate-3-verifier` + `tmux-pair:gate-3-code-reviewer`). Switch off the gates with `--no-gated`.
+## /run agent-pick heuristic
 
-Spawn runs the 5-gate workflow (Clarify, Reviewer-Readiness with rules-bootstrap loop, Plan-Check, Implementation Loop, Final-Verify). Team size is set with `--size` (default 3, max 4). Parallel plan-bullets fan out via subagent-worktrees the writer spawns.
+When the user does NOT pass `--agent` explicitly, `/run` picks `claude` or `codex` based on task profile:
+
+| Task profile | Pick | Reason |
+|---|---|---|
+| Recon-heavy, multi-file, plan-integration, AskUserQuestion-heavy, design work, briefings, greenfield scaffolding, compliance/PII | `claude` | Plan integration + Task tool subagent spawn + structured AskUserQuestion. Default tie-breaker. |
+| Single-file edits, code translation (lang A to B), mechanic refactor, bulk-rename, codemod | `codex` | Terminal-driven, direct file-ops, fast turnaround per file. |
+| Adversarial bug-hunt, debugging mystery panics, race-condition tracing, "find the real cause" | `codex` | gpt-5.5 + xhigh reasoner sharp on adversarial logic. |
+| Cost-sensitive bulk work (mass renames, mechanic migrations) | `pi` (opt-in via `--agent pi`) | Cortecs/qwen3 fits bulk; expensive top-tier models would burn budget. |
+
+Ambiguous task -> `claude` (safer default). The picked agent is surfaced in the `/run` recon note.
+
+**The same heuristic applies inside the solo run to subagent spawns**: `Agent(...)` (claude Task tool) for recon-heavy / plan-driven / repo-domain sub-bullets, `Bash(codex exec --cd <sub-wt> "...")` for single-file / mechanic / codemod / adversarial bug-hunt sub-bullets. Default tie-breaker stays `claude`. Phase 1 (Recon) defaults to claude subagents; Phase 3 (Impl) picks per sub-bullet profile; Phase 2 and Phase 4 (Gates) already run both minds in parallel.
+
+## Solo workflow (7 phases)
+
+```
+Phase 1 Recon -> Phase 2 Plan + GATE-2 -> Phase 3 Implementation -> Phase 4 GATE-3 Final-Verify -> Phase 5 PROJECT.md + Skill-Persist -> Phase 6 Commit -> Phase 7 Auto-Squash-Merge + Cleanup -> DONE-MERGED -> Post-Merge Retro
+```
+
+1. **Recon**: 4-6 parallel subagent spawns. Domain-experts when `.claude/agents/<repo>-*.md` exists; `Explore` otherwise. Each subagent under 300 words with `file:line` pointers.
+2. **Plan + GATE-2 Plan-Check**: bullet plan with parallel/sequential markers, then two independent adversarial checks in parallel: `Agent(gate-2-plan-check)` plus `Bash(codex exec "adversarial plan-attack")`. BLOCKER in either means fix-loop. GATE 1 Clarify and GATE 1.5 Reviewer-Readiness fold into this phase: solo calls `AskUserQuestion` for missing intent, and the readiness-check subagent confirms `.claude/rules/*.md` cover the 8-item checklist (with a rules-bootstrap loop on `NEEDS-RULES`).
+3. **Implementation**: agent codes directly. Per-bullet runs nextest + clippy + per-crate gates inline. PROJECT.md care for feature/refactor bullets.
+4. **GATE-3 Final-Verify**: three independent adversarial checks in parallel: `Agent(gate-3-verifier)`, `Agent(gate-3-code-reviewer)`, `Bash(codex exec "diff-review")`. BLOCKER in any means fix-loop. WARNING-only proceeds with documented follow-up.
+5. **PROJECT.md + Skill-Persist**: phase block + decisions in PROJECT.md, domain insights as a `.claude/skills/<repo>-<topic>/SKILL.md` (default) or `.claude/rules/<key>.md` (cross-cutting, justified).
+6. **Commit**: per-bullet conventional commits (no AI co-author). Workspace gate PASS first. Worktree clean (only pre-existing allowlist permitted). No push.
+7. **Auto-Squash-Merge + Cleanup**: solo squashes its bullet commits into one commit on the base branch, deletes the feature branch, removes the worktree, then pings `DONE-MERGED`. Sequential chained runs always start from a clean base. On merge conflict: AskUserQuestion in own pane with 2-4 recovery options. No BLOCKER ping back to master.
+
+All human input lands in the solo agent's own pane via `AskUserQuestion`. The Phase 7 `DONE-MERGED` ping is the only back-channel signal to the spawning master pane.
+
+Switch off the gates with `--no-gated` for trivial tasks (Phase 7 still applies).
 
 ## Configuration
 
-Spawn-time flags:
-
 ```
-# solo only
 --agent claude                  # default: claude (choices: claude|codex|pi)
---no-gated                      # bypass the 6-phase gated workflow briefing
-
-# spawn only
---size 3                        # team size: 3..4 (default 3 = 1W/1R/1O, 4 = 1W/2R/1O dual-review)
---writer-agent claude           # default: claude
---reviewer-agent codex          # default: codex (reviewer-1 in dual-review)
---reviewer-2-agent codex        # second reviewer when dual-review active (size 4 default or size 5)
---orchestrator-agent claude     # default: claude
-
-# both modes
---with-standards                # include durable standards bundle in briefings
---greenfield                    # include standards plus greenfield pre-flight
---no-worktree                   # skip git worktree, run on the project's current branch
---interactive                   # opt-in Decision-Pause-Points for V2 decisions
---claude-model claude-opus-4-7  # default model for any claude pane
---claude-effort xhigh           # default --effort level for non-reviewer claude panes (solo)
---codex-effort xhigh            # default model_reasoning_effort for non-reviewer codex panes (gpt-5.5)
---reviewer-claude-effort xhigh  # effort override applied to claude-reviewer subagents
---reviewer-codex-effort xhigh   # effort override applied to codex-reviewer subagents
---pi-provider cortecs           # pi default provider (claude-bridge for Subscription)
---pi-model qwen3-coder-next     # pi default model (claude-opus-4-7 via bridge)
+--no-gated                      # bypass the 7-phase gated workflow briefing
+--no-worktree                   # skip git worktree add, run on the current branch
+--with-standards                # append the durable standards bundle to the briefing
+--greenfield                    # --with-standards plus greenfield pre-flight
+--interactive                   # turn V2 self-decisions into AskUserQuestion pause points
+--claude-model claude-opus-4-7  # default claude model (1M context); claude-opus-4-6 for 200k
+--claude-effort xhigh           # default --effort for claude
+--codex-effort xhigh            # default model_reasoning_effort for codex (gpt-5.5)
+--pi-provider cortecs           # pi default provider
+--pi-model qwen3-coder-next     # pi default model
 --pi-thinking high              # pi default reasoning level
---no-cache                      # disable V6 readiness-cache + V9 recon-cache (spawn only)
---no-shared-target              # disable V8 CARGO_TARGET_DIR sharing
+--pi-writer-provider <name>     # pi role override (solo uses the writer role internally)
+--pi-writer-model <slug>
+--pi-writer-thinking <level>
+--no-shared-target              # disable shared CARGO_TARGET_DIR (V8)
 ```
 
 Add or replace agent commands in `~/.config/tmux-pair/agents.json`:
@@ -87,144 +95,94 @@ Add or replace agent commands in `~/.config/tmux-pair/agents.json`:
 }
 ```
 
-The defaults baked into the script are deliberately minimal: a single command per agent, nothing project-specific.
-Briefings are task-focused and compact by default.
-In spawn, this lean default is useful for resume flows. For full orchestrator boot-time procedure coverage on first runs, use `--greenfield`.
+Briefings are task-focused and compact by default. `--with-standards` includes the standards bundle; `--greenfield` adds the greenfield pre-flight block for first-session repos without `.claude/rules/`.
 
 ## Model selection and Compact-Watcher
 
-The default claude model is `claude-opus-4-7` (1M context). Override per spawn:
+Default claude model: `claude-opus-4-7` (1M context). Override per spawn:
 
 ```
 /solo  ~/code/myapp main rule-migration --no-gated
 /solo  ~/code/myapp main repo-rename --claude-model claude-opus-4-6
-/spawn ~/code/myapp main session-tokens --claude-model claude-opus-4-6
-/spawn ~/code/myapp main session-tokens --size 4
-/spawn ~/code/myapp main greenfield-session --greenfield
+/solo  ~/code/myapp main greenfield-session --greenfield
 ```
 
-The compact-watcher threshold scales with the context window automatically: 1M to 700k threshold (70%), 200k to 140k threshold. Override with `monitor --threshold-k <N>` if needed. Codex pane boot follows the user's configured CLI default; Codex engineer subagents use the Spark-first policy below.
+The compact-watcher threshold scales with the context window automatically: 1M context to 700k threshold (70%), 200k to 140k. Override with `monitor --threshold-k <N>`.
 
-The default reasoning effort for every pane is `xhigh` on both harnesses: claude panes start with `--effort xhigh`, codex panes (gpt-5.5) with `-c model_reasoning_effort=xhigh`. Reviewer subagents inherit the same xhigh tier via `--reviewer-claude-effort xhigh` and `--reviewer-codex-effort xhigh`. Override per spawn with `--claude-effort`, `--codex-effort`, `--reviewer-claude-effort`, `--reviewer-codex-effort`; pass an empty string to skip the flag entirely so the harness uses its own default or the `CLAUDE_CODE_EFFORT_LEVEL` env-var.
+Default reasoning effort: `xhigh` on both harnesses. Claude panes start with `--effort xhigh`; codex panes (gpt-5.5) with `-c model_reasoning_effort=xhigh`. Override per spawn with `--claude-effort`, `--codex-effort`; pass an empty string to skip the flag.
 
-## Dynamic team sizing
+Solo does not auto-start the watcher: the agent self-compacts between phases when appropriate. Self-compact pattern: write a self-re-brief file at `/tmp/self-compact-<window>.md` (plan-bullet, current state, next step, relevant standards), send `/compact <focus>` to own pane, after settle read the file and continue.
 
-`/spawn --size N` picks one of two presets. The flag maps directly to the reviewer count; the writer count is always 1.
+## Subagent fan-out (sub-worktrees)
 
-| `--size` | Writers | Reviewers | Orchestrator | Layout |
-|----------|---------|-----------|--------------|--------|
-| 3 (default) | 1 | 1 | 1 | orchestrator top, writer bottom-left, reviewer bottom-right |
-| 4 | 1 | 2 | 1 | dual-review preset: reviewer-2 stacked under reviewer-1 |
-
-Per dual-review cycle: writer pings `REVIEW-READY` to BOTH reviewers in parallel, both review independently (no crosstalk), then swap findings via `REVIEWER-FINDINGS:` + `PEER-REVIEW:`, finally each sends a `REVIEW-FINAL (Reviewer):` to the orchestrator for consolidation. The orchestrator merges both reports (keep all unique BLOCKERs, dedupe overlaps, surface contradictions with context) and sends ONE `REVIEW-CONSOLIDATED:` to the writer. Reviewers never speak directly to the writer.
-
-## Parallel work via subagent-worktrees
-
-There is no second writer pane. When the plan contains parallel-friendly bullets (`B3 || B4 [parallel]`), the writer fans out via its Task tool into per-bullet sub-worktrees:
+When the plan contains parallel-friendly bullets (`B3 || B4 [parallel]`), the solo agent fans out via the Task tool into per-bullet sub-worktrees:
 
 1. `git worktree add ../<feature>-sub-<bullet-id> -b <feature>/sub-<bullet-id>` per parallel bullet.
-2. One `Task(general-purpose)` subagent per sub-worktree, working there with isolated files.
-3. After subagent-DONE: `git -C <feature-wt> merge --ff-only <feature>/sub-<bullet-id>`. FF failure means the feature-WT moved on; writer pings `CLARIFY-NEEDED` to the orchestrator instead of forcing a merge-commit.
+2. One subagent per sub-worktree, working there with isolated files. `Agent(...)` (claude Task tool) for recon-heavy / plan-driven / repo-domain sub-bullets; `Bash(codex exec --cd <sub-wt> "<task>")` for single-file / mechanic / codemod / adversarial sub-bullets.
+3. After subagent-DONE: `git -C <feature-wt> merge --ff-only <feature>/sub-<bullet-id>`. FF failure means the feature-WT moved on: solo calls `AskUserQuestion` in own pane (no force-merge-commit).
 4. `git worktree remove ../<feature>-sub-<bullet-id>` + `git branch -D <feature>/sub-<bullet-id>` to clean up.
-5. The final feature -> main merge is a **squash**, done by the master after GATE-3-PASS. The feature branch keeps its sub-merge history while main stays linear.
+5. Phase 7 squashes the feature branch onto base, keeping main linear.
 
-Sequential bullets (`B5 -> B6 [sequenziell: ...]`) stay in the main writer pane.
+Sequential bullets (`B5 -> B6 [sequential: <reason>]`) stay in the main solo pane.
 
 ## Durable standards
 
-Standards survive `/compact` and context resets because they sit in the system prompt. Engineer briefings are slim by default.
+Standards survive `/compact` and context resets because they sit in the system prompt, not in the briefing user-message. Engineer briefings are slim by default.
 
 - **claude panes** boot with `--append-system-prompt-file <path>` (the plugin writes a per-spawn standards file under `/tmp/tmux-pair-durable-<window>-<role>.md`).
 - **codex panes** read `AGENTS.md` from the worktree root. The plugin writes that file when a real worktree is created.
 - For task-specific runs, briefings are minimal by default and omit durable standards block repetition.
 - Add `--with-standards` to include the standards bundle in briefings, or `--greenfield` for standards plus pre-flight.
-- For `--no-worktree` with codex, the plugin automatically sets standards-on when needed so codex still receives the rule set via briefing.
-- `agents.json` overrides are respected: if the user has remapped `claude` to a wrapper, the plugin does not inject `--append-system-prompt-file` blindly.
+- For `--no-worktree` with codex, the plugin auto-enables standards-in-briefing so codex still receives the rule set.
+- `agents.json` overrides are respected: a wrapper-remap of `claude` is not blindly augmented with `--append-system-prompt-file`.
 
 ## Scoped subagents (Haiku/Sonnet routing)
 
-The orchestrator's gate-checks and recon are routed to plugin-namespaced subagents with explicit model + tool restrictions instead of generic `general-purpose`:
+Gate checks and recon are routed to plugin-namespaced subagents with explicit model + tool restrictions instead of generic `general-purpose`:
 
 | Role | Subagent | Model | Tools | Why |
 |------|----------|-------|-------|-----|
 | GATE 1.5 Readiness-Check | `tmux-pair:reviewer-readiness-check` | Sonnet 4.6 | Read + Grep + Glob + Bash | Reviews `.claude/rules/*.md` against an 8-item checklist (style, tests, architecture, anti-patterns, naming, security, build, domain). Returns READY or NEEDS-RULES. NO Edit/Write so it cannot bake rules itself. |
-| GATE 1.5 Rules-Bootstrap | `tmux-pair:rules-bootstrap` | Sonnet 4.6 | Read + Grep + Glob + Bash + Edit + Write | Bakes `.claude/rules/<topic>.md` from plugin language templates + repo recon + orchestrator-collected user answers. Edit+Write because writing rules files IS the job. Does not call AskUserQuestion itself; orchestrator owns the user dialog. |
-| GATE 2 Plan-Check | `tmux-pair:gate-2-plan-check` | Sonnet 4.6 | Read + Grep + Glob + Bash | Plan validation needs reasoning. Checks every bullet for explicit `B3 || B4 [parallel]` or `B3 -> B4 [sequenziell: reason]` markers. NO Edit/Write so the agent cannot accidentally commit code. |
+| GATE 1.5 Rules-Bootstrap | `tmux-pair:rules-bootstrap` | Sonnet 4.6 | Read + Grep + Glob + Bash + Edit + Write | Bakes `.claude/rules/<topic>.md` from plugin language templates + repo recon + solo-collected user answers. |
+| GATE 2 Plan-Check | `tmux-pair:gate-2-plan-check` | Sonnet 4.6 | Read + Grep + Glob + Bash | Plan validation needs reasoning. Checks every bullet for explicit `B3 || B4 [parallel]` or `B3 -> B4 [sequential: <reason>]` markers. NO Edit/Write so the agent cannot accidentally commit code. |
 | GATE 3 Verifier | `tmux-pair:gate-3-verifier` | Haiku 4.5 | Read + Grep + Glob + Bash | Goal-backward coverage check + build/test runs are deterministic; Haiku is sufficient and ~5x cheaper than Sonnet. |
 | GATE 3 Code-Reviewer | `tmux-pair:gate-3-code-reviewer` | Sonnet 4.6 | Read + Grep + Glob + Bash | Style nuance, security edge cases, anti-AI-slop detection need Sonnet's nuance. |
-| RECON | built-in `Explore` | Haiku 4.5 | read-only | File-snippet lookups + pointer extraction; Anthropic's stock Explore agent fits. |
+| RECON | built-in `Explore` | Haiku 4.5 | read-only | File-snippet lookups + pointer extraction. |
 
-Net effect: ~60-70 percent token savings vs all-Opus subagents, no quality loss on gate-tasks. The agent files live in `agents/` and ship with the plugin; per-spawn customisation goes in those files, not in the orchestrator briefing.
+Each gate also runs a parallel `Bash(codex exec ...)` second-opinion (out-of-process, different model family) so adversarial review-quality stays high without coordination cost.
 
 ## Smart workflow (V1-V10)
 
-- V1 Reviewer-Trivial-Fix-Inline: reviewers can send isolated <20 LOC cosmetic,
-  typo, or missing-doc patches as `INLINE-FIX`; writers apply and ACK with
-  `applied B<N> inline-fix (X lines)`.
-- V2 Orchestrator-Direct-Decision-Threshold: small repo-pattern decisions run
-  autonomously by default and every self-decision is logged in `COMPLETE` AND
-  persisted as a row in the consumer repo's `PROJECT.md` Implementation
-  History. A spawn run is not complete without that `PROJECT.md` entry.
-- V3 Adaptive GATE-Strictness: `task_kind` is `bug-fix`, `feature`, or
-  `refactor`; GATE 2 and GATE 3 verifier adapt deterministic checklist items
-  per class.
-- V4 Engineer-Auto-Resolve WARNINGs: BLOCKER enters the fix-loop, WARNING goes
-  to follow-up memory plus PROJECT.md when relevant, NOTE is log-only.
-- V5 Unattended-Default: `/solo`, `/spawn`, `/run` run unattended by default;
-  `--interactive` turns V2 self-decisions into `AskUserQuestion` pause points.
-- V6 Readiness-Cache (24h TTL): `reviewer-readiness-check` results cached at
-  `~/.cache/tmux-pair/readiness/<repo>-<rules-hash>-<commit>.json`. Cache-Hit +
-  PASS skips the subagent spawn. `NEEDS-RULES` is never cached. Bust via
-  `--no-cache`.
-- V7 Test-Trust-Chain (TESTS-PROOF marker): writer DONE-Pings and bullet
-  commit messages carry a `TESTS-PROOF:` block (test/lint/fmt commands + PASS
-  counts + `COMMIT_SHA`). `gate-3-verifier` parses via
-  `tmux_pair.py parse-tests-proof` and trusts when `HEAD == COMMIT_SHA`. Stale
-  markers WARNING + narrow re-run; missing on 0.14+ runs BLOCKER. No
-  workspace-wide re-runs when the engineers already certified the suite.
-- V8 Cargo-Target-Sharing: shared `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo>/`
-  prefix on every boot command for Cargo repos. Cross-worktree cache; cargo's
-  lock-file handles concurrency. Non-Rust repos skip automatically. Bust via
-  `--no-shared-target`.
-- V9 Recon-Cache with Delta-Mode (1h TTL): orchestrator recon JSON cached at
-  `/tmp/tmux-pair-recon-<repo>-<commit>.json`; follow-up spawns read the cache
-  + delta-recon for files with `mtime > cache-time`. Bust via `--no-cache`.
-- V10 Inline-Gates for trivial plans: when `task_kind=bug-fix` AND
-  `bullets <= 3` AND `predicted files-touched <= 5`, the orchestrator runs
-  GATE 2 inline in its own pane; `gate-3-verifier` may also inline when
-  TESTS-PROOF is valid. `gate-3-code-reviewer` always stays as subagent.
-  Helper: `tmux_pair.py inline-gate-decide --plan-file <path> --task-kind <kind>`.
+- **V1 Inline-Fix-for-Trivial-Findings**: reviewer subagents may send isolated under-20-LOC cosmetic / typo / missing-doc patches as `INLINE-FIX`; solo applies and ACKs with `applied B<N> inline-fix (X lines)`.
+- **V2 Direct-Decision-Threshold**: small repo-pattern decisions run autonomously by default and every self-decision is logged in `COMPLETE` AND persisted as a row in the consumer repo's `PROJECT.md` Implementation History. A solo run is not complete without that `PROJECT.md` entry.
+- **V3 Adaptive GATE-Strictness**: `task_kind` in (`bug-fix`, `feature`, `refactor`); GATE 2 and GATE 3 verifier adapt deterministic checklist items per class.
+- **V4 Auto-Resolve WARNINGs**: BLOCKER enters the fix-loop, WARNING goes to follow-up memory plus PROJECT.md when relevant, NOTE is log-only.
+- **V5 Unattended-Default**: `/solo` and `/run` run unattended by default; `--interactive` turns V2 self-decisions into `AskUserQuestion` pause points.
+- **V6 Readiness-Cache (24h TTL)**: `reviewer-readiness-check` results cached at `~/.cache/tmux-pair/readiness/<repo>-<rules-hash>-<commit>.json`. Cache-Hit + PASS skips the subagent spawn. `NEEDS-RULES` is never cached. Bust via `--no-cache`.
+- **V7 Test-Trust-Chain (TESTS-PROOF marker)**: solo bullet commits carry a `TESTS-PROOF:` block (test/lint/fmt commands + PASS counts + `COMMIT_SHA`). `gate-3-verifier` parses via `tmux_pair.py parse-tests-proof` and trusts when `HEAD == COMMIT_SHA`. Stale markers go to WARNING + narrow re-run; missing on 0.14+ runs goes to BLOCKER.
+- **V8 Cargo-Target-Sharing**: shared `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo>/` prefix on every boot command for Cargo repos. Cross-worktree cache; cargo's lock-file handles concurrency. Non-Rust repos skip automatically. Bust via `--no-shared-target`.
+- **V9 Recon-Cache with Delta-Mode (1h TTL)**: recon JSON cached at `/tmp/tmux-pair-recon-<repo>-<commit>.json`; follow-up runs read the cache + delta-recon for files with `mtime > cache-time`. Bust via `--no-cache`.
+- **V10 Inline-Gates for trivial plans**: when `task_kind=bug-fix` AND `bullets <= 3` AND `predicted files-touched <= 5`, solo runs GATE 2 inline in its own pane; `gate-3-verifier` may also inline when TESTS-PROOF is valid. `gate-3-code-reviewer` always stays as a subagent. Helper: `tmux_pair.py inline-gate-decide --plan-file <path> --task-kind <kind>`.
 
 ### Engineer subagents and parallel plans
 
-Writer, reviewer, and orchestrator briefings tell engineers to keep their main panes lean by using subagents for bounded side work:
+The solo briefing tells the agent to keep its main pane lean by using subagents for bounded side work:
 
 - parallel recon files, where each subagent reads an independent module and returns short `file:line` pointers
 - parallel test suites, where unit, integration, lint, or browser-smoke checks can run without shared mutable state
-- parallel fix branches, where independent plan bullets with disjoint files can use extra worktrees or additional spawn invocations
+- parallel fix branches, where independent plan bullets with disjoint files can use extra sub-worktrees
 
-For Codex subagent spawns using codex apps or the Helmholtz/Maxwell pattern, the documented default is `gpt-5.3-codex-spark` with `reasoning_effort=high` while the user limit allows it. On rate-limit hit, fall back to the current default model, `gpt-5.5` with `high`. Claude stays on the Task tool and uses the model from the subagent definition.
+For codex subagent spawns the documented default is `gpt-5.3-codex-spark` with `reasoning_effort=high` while the user limit allows it. On rate-limit hit, fall back to `gpt-5.5` with `high`. Claude stays on the Task tool and uses the model from the subagent definition.
 
-Plans must make parallelism visible. Use markers like `B3 || B4 [parallel]` for independent work and `B3 -> B4 [sequenziell: shared file scripts/tmux_pair.py]` when ordering is required. GATE 2 warns when independent bullets are needlessly serial and blocks missing per-bullet markers.
+Plans must make parallelism visible. Use markers `B3 || B4 [parallel]` for independent work and `B3 -> B4 [sequential: shared file scripts/tmux_pair.py]` when ordering is required. GATE 2 warns when independent bullets are needlessly serial and blocks missing per-bullet markers.
 
 ### PROJECT.md care
 
-The gated workflow treats project-local `PROJECT.md` care as mandatory for
-feature and refactor bullets that change the package map, feature surface,
-design decisions, or implementation history. The writer owns the update and
-the reviewer signs off on either the concrete `PROJECT.md` diff or a justified
-skip for refactor, test, or docs-only bullets with no feature-surface change.
+The gated workflow treats project-local `PROJECT.md` care as mandatory for feature and refactor bullets that change the package map, feature surface, design decisions, or implementation history. Solo owns the update and the GATE-3 verifier checks that PROJECT.md was touched when the plan includes a feature, workflow, command, flag, package-map, architecture, or history-worthy change. If a repository has no `PROJECT.md`, solo asks during recon whether to bootstrap a human-maintained skeleton. This plugin's own `PROJECT.md` is a reference example for format and detail depth.
 
-The GATE 3 verifier checks whether `PROJECT.md` was touched when the plan
-includes a feature, workflow, command, flag, package-map, architecture, or
-history-worthy change. If a repository has no `PROJECT.md`, the orchestrator
-checks that during recon and asks whether to bootstrap a human-maintained
-skeleton. This plugin's own `PROJECT.md` is a reference example for format and
-detail depth.
+### Post-Merge Retro (mandatory)
 
-### Post-Merge Retro (Mandatory)
-
-After `COMPLETE` and the human's squash-merge, the spawn run is not yet done. Worktree + panes stay intact while the human collects a 200-500 word factual retro from each active pane (orchestrator, writer, reviewers), then persists recurring issue classes either into this plugin's SKILL.md (workflow cross-cutting) or into consumer-repo rules / skills (repo-specific). Cleanup follows only after pattern-persist. See `skills/tmux-pair-orchestration/references/gated-workflow.md` for the procedure.
+After Phase 7 (`DONE-MERGED`), the run is not yet done. Worktree and branch are gone, but the tmux window stays intact while solo collects a 200-500 word factual retro from itself plus three parallel `Agent` personas (orchestrator-view, writer-view, reviewer-view) and one `codex exec "retro"` for an independent fourth view. Recurring issue classes are persisted either into the tmux-pair-orchestration skill (workflow-cross-cutting) or into consumer-repo rules / skills (repo-specific). Only after pattern-persist does `tmux kill-window` close the window.
 
 ### Recurring Pre-Flight Checks (Rust focus)
 
@@ -237,49 +195,45 @@ GATE 2 (`agents/gate-2-plan-check.md` Item 16) anchors and GATE 3 code-reviewer 
 - Memory recon (mandatory): RECON reads `MEMORY.md` plus the relevant memory files before plan-write.
 - API-Surface-Upfront: consumer-bullet must name the producer-bullet's exact public signature.
 
-Aggregated from spawn retros, falsifiable, additive to standard adversarial review.
+Aggregated from solo retros, falsifiable, additive to standard adversarial review.
 
 ### Reviewer-Readiness + rules-bootstrap (GATE 1.5)
 
-A reviewer without rules says "looks fine": that is the failure mode GATE 1.5 prevents. The orchestrator runs the readiness-check before planning. On `NEEDS-RULES`, it loops: per gap one `AskUserQuestion`, then the bootstrap subagent generates `.claude/rules/<topic>.md` from one of seven shipped language templates (Rust, TypeScript, Python, Go, JavaScript, Java, generic skeleton) plus repo recon plus user answers. Templates ship in `templates/rules/` and are sanitized: no company-specific naming, ADRs, or domain references. Project-specific content comes from the user's own answers, baked into the user's own repo.
+A reviewer without rules says "looks fine": that is the failure mode GATE 1.5 prevents. Solo runs the readiness-check before planning. On `NEEDS-RULES`, it loops: per gap one `AskUserQuestion` in its own pane, then the bootstrap subagent generates `.claude/rules/<topic>.md` from one of seven shipped language templates (Rust, TypeScript, Python, Go, JavaScript, Java, generic skeleton) plus repo recon plus user answers. Templates ship in `templates/rules/` and are sanitized: no company-specific naming, ADRs, or domain references.
 
-Optional opt-in `/gepa` pass after fresh rules; the plugin does not call `/gepa` automatically because the GEPA skill is optional user setup. If the user opts in, they trigger `/gepa` themselves out-of-band after the run.
+Optional opt-in `/gepa` pass after fresh rules; the plugin does not call `/gepa` automatically. If the user opts in, they trigger `/gepa` themselves out-of-band after the run.
 
-## Token management (long-running spawns)
+## Token management (long-running runs)
 
-Three helper subcommands let an orchestrator (or the human directly) refresh an agent in place:
+Three helper subcommands let solo (or the human directly) refresh the agent in place:
 
 ```
 python3 <plugin>/scripts/tmux_pair.py status <pane-id>
 python3 <plugin>/scripts/tmux_pair.py compact <pane-id> --briefing-file <path> [--focus "<one-liner>"] [--timeout 300]
-python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> <id2> [...] [--threshold-k <N>] [--cooldown-sec <N>]
+python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> [--threshold-k <N>] [--cooldown-sec <N>]
 ```
 
-`status` returns JSON with the detected agent, current token count (parsed from claude's footer; codex usually shows up as `null` so callers fall back to a time/event heuristic), and the raw matched footer line.
+`status` returns JSON with the detected agent, current token count (parsed from claude's footer; codex usually shows up as `null` so callers fall back to a time / event heuristic), and the raw matched footer line.
 
-`compact` sends `/compact [focus]` to the pane (the official claude `/compact [instructions]` form, see [code.claude.com/docs/en/commands](https://code.claude.com/docs/en/commands)), polls `capture-pane` for completion (claude prints `Conversation compacted`; for codex we accept a token-count drop of 50% or more as a fallback signal), then sends the re-brief from `--briefing-file` via the regular send path. The optional `--focus` hint shapes the summary so the agent retains plan + REVIEW-state + peer-protocol. The re-brief MUST be self-contained: after `/compact` the agent has lost the conversational state and only remembers the summary. Include role, task, current progress recap, the next concrete step, the peer protocol, and the standards.
+`compact` sends `/compact [focus]` to the pane (the official claude `/compact [instructions]` form), polls `capture-pane` for completion, then sends the re-brief from `--briefing-file` via the regular send path. The optional `--focus` hint shapes the summary so the agent retains plan + REVIEW-state + protocol context.
 
-**Compact has two paths.** The orchestrator-driven path uses `tmux_pair.py compact <pane>` (sends `/compact` plus Re-Brief, useful when the watcher pings or the engineer is mid-tool-call and unaware). The engineer-driven self-compact path uses `tmux_pair.py send <eigener_pane> "/compact <focus>"`: same mechanic, engineer-initiated. Self-compact discipline: between cycles only, never mid-edit; prepare a self-re-brief file (plan-bullet, REVIEW-state, next step, peer pane ids) BEFORE sending; signal `SELF-COMPACT-PLANNED: <bullet> <focus>` to the orchestrator so the watcher does not also fire. Codex panes have no known `/compact` form; self-compact is claude-only.
+**Compact has two paths.** The orchestrator-driven path uses `tmux_pair.py compact <pane>` (sends `/compact` plus re-brief). The engineer-driven self-compact uses `tmux_pair.py send <own-pane> "/compact <focus>"`: same mechanic, engineer-initiated. Self-compact discipline: between phases only, never mid-edit; prepare a self-re-brief file BEFORE sending. Codex panes have no known `/compact` form; self-compact is claude-only.
 
-`monitor` runs as a background watcher. The spawn orchestrator briefing kicks one off automatically as DUTY 0; solo mode does not auto-start it (the agent self-compacts between phases).
-
-Trigger windows for manual `compact`:
-
-- between REVIEW cycles when the engineer is idle, never mid-edit or mid-tool-call
-- the watcher's threshold ping (model-aware: 140k for 200k-context models, 700k for 1M-context)
-- before a known long phase (e.g. starting Wave N) so the agent enters it fresh
-
-To compact both engineers in a spawn in parallel, run two `compact` calls with `&` from the orchestrator's shell.
+`monitor` runs as a background watcher. Solo does not auto-start it: the agent self-compacts between phases.
 
 ## Skills
 
 The plugin ships three skills:
 
-- **`tmux-pair-orchestration`**: documents the pair protocol (`REVIEW-READY` to `REVIEW` loop), when to choose solo vs spawn, briefing templates for each role, the 6-phase solo workflow, the 5-gate spawn workflow with V1-V10 smartness, and failure modes. Triggers when the user asks for things like "spawn a solo with self-review", "spin up a writer/reviewer team", "run multiple agents on this", "set up an orchestrator + team", or names the workflow directly.
-- **`/tmux-pair:gepa`**: Genetic-Pareto prompt/text-artifact optimization (paper arXiv:2507.19457). Used opt-in after rules-bootstrap to optimize freshly generated `.claude/rules/*.md` against user-supplied test diffs. Plugin-namespaced so it does not collide with a user-local `/gepa` install. Skill files: `skills/gepa/`.
-- **`/tmux-pair:dg`**: Dinesh-vs-Gilfoyle adversarial code review. Two AI personas (attacker + defender) debate a diff or file until convergence. Useful as an optional pre-GATE-3 step on security/concurrency/auth/crypto/migration bullets. Skill files: `skills/dg/`.
+- **`tmux-pair-orchestration`**: documents the workflow, the 7-phase solo flow, briefing templates, the `/run` agent-pick heuristic, smart-workflow V1-V10, and failure modes. Triggers when the user asks for things like "spawn a solo with self-review", "use the tmux-pair workflow", or "/run for this task".
+- **`/tmux-pair:gepa`**: Genetic-Pareto prompt / text-artifact optimization (paper arXiv:2507.19457). Used opt-in after rules-bootstrap to optimize freshly generated `.claude/rules/*.md` against user-supplied test diffs.
+- **`/tmux-pair:dg`**: Dinesh-vs-Gilfoyle adversarial code review. Two AI personas (attacker + defender) debate a diff or file until convergence. Useful as an optional pre-GATE-3 step on security / concurrency / auth / crypto / migration bullets.
 
-External companion (NOT bundled, install separately): the official `code-simplifier` plugin from `claude-plugins-official` for refactor-passes after a feature lands.
+External companion (NOT bundled, install separately): the official `code-simplifier` plugin from `claude-plugins-official` for refactor passes after a feature lands.
+
+## History
+
+Multi-pane spawn modes (writer + reviewer panes, dual-review with two reviewers, parallel-writers with two writer panes) were retired in 0.19.0 for CARGO_TARGET_DIR contention under shared target dirs, git-index-lock races between parallel writers fighting `git add`, cross-writer PROJECT.md races forcing reactive plan-amendments, dual-review coordination overhead (per-bullet swap + peer-review + orchestrator-consolidate eating more wall-time than the extra review-quality bought), and pane-readiness races at boot. Solo + subagent fan-out + parallel `codex exec` second-opinion at each gate is the lean replacement: two independent minds without the coordination tax. The Phase 7 auto-squash-merge (0.20.0) replaced the manual human-driven merge that followed the older spawn-mode `COMPLETE` ping.
 
 ## License
 

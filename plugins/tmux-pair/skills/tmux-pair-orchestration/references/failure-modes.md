@@ -1,6 +1,8 @@
 # Failure modes
 
-Common ways spawn runs go wrong, with diagnostics, recovery, and prevention.
+> **Solo is the only mode (since 0.19.0).** Multi-pane spawn was retired; older entries below that mention "writer pane", "reviewer pane", or "orchestrator pane" describe the historical spawn-mode failure shapes. The diagnostic + recovery + prevention guidance still applies inside the single-agent solo flow: most failure modes (send, briefing timing, push gate, sub-agent leak) are mechanism-level and are not specific to multi-pane layouts.
+
+Common ways solo runs go wrong, with diagnostics, recovery, and prevention.
 
 ## 1. Send didn't submit
 
@@ -108,9 +110,9 @@ PROCESS-NEEDS-FIX: Drop style nits. Findings must be falsifiable bugs, missed re
 
 ## 7. Subagent leak
 
-**Symptom (spawn mode):** The writer or reviewer used a sub-agent (their own delegate) to do recon, and the sub-agent's output is being used as the basis for `REVIEW-READY` or `REVIEW`.
+**Symptom:** The solo agent (or a Phase 3 sub-bullet delegate) used a Task subagent to do recon, and the sub-agent's output is being used as the basis for `REVIEW-READY` or for an Edit decision without first-hand evidence.
 
-**Cause:** The spawn's value comes from direct file reads, greps, and git inspection (first-hand information). A sub-agent inserts a layer of summarization that hides things.
+**Cause:** The solo flow's value comes from direct file reads, greps, and git inspection (first-hand information). A sub-agent inserts a layer of summarization that hides things, especially when the recon was the entire basis for the bullet's edit.
 
 **Recovery (orchestrator):** Block the current event, demand a redo:
 

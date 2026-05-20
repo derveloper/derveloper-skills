@@ -1,14 +1,18 @@
 # Gated Workflow
 
-`/spawn` (in all sizes) runs through four forced quality gates before code lands on the branch, plus a Post-Merge Retro as a fifth required step after the squash-merge:
+> **Solo is the only mode (since 0.19.0).** Multi-pane spawn (writer + reviewer panes, dual-review, parallel-writers) was retired for CARGO_TARGET_DIR contention, git-index-lock races, cross-writer PROJECT.md races, and dual-review coordination overhead. This file documents the 7-phase solo workflow and its gates; older paragraphs may still use "orchestrator" / "writer" / "reviewer" as role names within the single-agent solo flow (the solo agent plays all three roles in sequence, with subagents and `codex exec` providing the adversarial second mind at each gate).
+
+`/solo` (default entry-point: `/run`) executes a 7-phase gated workflow with three forced quality gates before code lands on the base branch, plus a Post-Merge Retro as a required step after the auto-squash-merge:
 
 ```
-Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Human merges -> Post-Merge Retro -> Cleanup
+Phase 1 Recon -> Phase 2 Plan + GATE 2 Plan-Check -> Phase 3 Implementation Loop -> Phase 4 GATE 3 Final-Verify -> Phase 5 PROJECT.md + Skill-Persist -> Phase 6 Commit -> Phase 7 Auto-Squash-Merge + Cleanup -> DONE-MERGED -> Post-Merge Retro
 ```
 
-The Post-Merge Retro is mandatory, not optional. See the "Post-Merge Retro" section below for the procedure. Cleanup (worktree remove, branch delete, window kill) happens only after retro patterns are persisted.
+GATE 1 (Clarify) folds into Phase 1 and Phase 2: the solo agent calls `AskUserQuestion` in its own pane whenever recon or plan-write hits a user-decision question. GATE 1.5 (Reviewer-Readiness) runs between Phase 1 and Phase 2 to confirm `.claude/rules/*.md` cover the 8-item checklist; on `NEEDS-RULES` the bootstrap loop generates the missing rules from plugin templates.
 
-Gates exist because writer+reviewer loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 1.5, 2, and 3; the user enforces gate 1 via `AskUserQuestion`.
+The Post-Merge Retro is mandatory, not optional. See the "Post-Merge Retro" section below for the procedure. Phase 7 auto-cleanup (worktree remove, branch delete) happens before the retro; only the tmux window survives until pattern-persist is done.
+
+Gates exist because writer+reviewer loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 1.5, 2, and 3, each paired with a `codex exec` second opinion (different model family, fresh context, no pane setup); the solo agent enforces gate 1 via `AskUserQuestion` in its own pane.
 
 This file is the long version. The bundled briefings already encode the workflow: read this when adapting briefings, debugging a stuck gate, or deciding when to force a `BLOCKER`.
 
@@ -16,9 +20,11 @@ This file is the long version. The bundled briefings already encode the workflow
 
 | Gate 1 (Clarify) | Gate 1.5 (Reviewer-Readiness) | Gate 2 (Plan-Check) | Gate 3 (Final-Verify) |
 |-------------------|-------------------------------|---------------------|------------------------|
-| Orchestrator asks user directly via `AskUserQuestion` (in its own pane) | Orchestrator spawns readiness-check subagent; if NEEDS-RULES, runs bootstrap loop with `AskUserQuestion` per gap | Orchestrator spawns subagent | Orchestrator spawns two subagents (verifier + code-reviewer) |
+| Solo agent asks user directly via `AskUserQuestion` in own pane | Solo spawns `tmux-pair:reviewer-readiness-check` subagent; on NEEDS-RULES, loops `tmux-pair:rules-bootstrap` + `AskUserQuestion` per gap | Solo spawns `tmux-pair:gate-2-plan-check` AND runs `Bash(codex exec "adversarial plan-attack")` in parallel | Solo spawns `tmux-pair:gate-3-verifier` + `tmux-pair:gate-3-code-reviewer` AND runs `Bash(codex exec "diff-review")` in parallel |
 
-The orchestrator owns the `AskUserQuestion` call so the human stays unblocked. The human only sees major events (`MAJOR-STEP`, `BLOCKER`, `DONE`, `ABORT`, gate-3 verdicts, plus rare `GATE-1-ESCALATE` if the orchestrator hits a question outside its decision authority). Solo mode runs the same gate logic with the solo agent itself as the decider (no separate orchestrator pane).
+All human input lands in the solo agent's own pane via `AskUserQuestion`. The Phase 7 `DONE-MERGED` ping is the only back-channel message to the master pane. See SOLO USER INPUT RULE in the solo briefing template.
+
+Sections further down still use "orchestrator" / "writer" / "reviewer" as functional role names within the single-agent solo flow. The solo agent plays each role in sequence: orchestrator-self during planning, writer-self during Phase 3, reviewer-self when triggering Phase 4 gates. There is no separate pane for any of them since 0.19.0.
 
 ## Smart workflow (V1-V5)
 
