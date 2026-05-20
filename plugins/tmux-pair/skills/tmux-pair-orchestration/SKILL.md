@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spawn a solo with self-review", "run an agent on this with gates", "use the tmux-pair workflow", "/run for this task", or otherwise wants to run a single coding agent in a fresh git worktree with adversarial review gates. Solo is the only mode. Multi-pane spawn modes (writer + reviewer panes, dual-review, parallel-writers) were removed: shared CARGO_TARGET_DIR contention, git-index-lock races, cross-writer PROJECT.md races, and dual-review coordination outweighed the parallelism gain. Adversarial quality is preserved by running two independent minds at each gate: a claude subagent plus `codex exec` (different model family, fresh context, no pane setup). Sequential solo runs auto-squash-merge to base in Phase 7: each run produces ONE squash commit on the base branch, the feature branch + worktree are removed automatically, so chained runs always branch from a clean base. Covers the /run auto-entry, solo's 7-phase gated workflow (Recon -> Clarify -> Reviewer-Readiness -> Plan-Check -> Loop -> Final-Verify -> Persist -> Commit -> Auto-Squash-Merge), durable standards (claude --append-system-prompt-file + codex AGENTS.md), REVIEW-READY 3-field format, CLARIFY-NEEDED escalation, Plan-Update-Commit on drift, PROJECT.md care, DONE-MERGED format, sender identity prefixes, smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, --claude-model / --no-worktree flags, briefing templates, and recovery from common failure modes. Mandatory Post-Merge Retro persists recurring patterns into tmux-pair-skill or consumer-repo rules / skills.
-version: 0.20.0
+version: 0.20.1
 ---
 
 # tmux-pair-orchestration
@@ -329,6 +329,42 @@ Diese Checks gehören in `--with-standards` Briefings UND in Konsument-Repo `.cl
 - **Brief-vs-Reality-Validation vor Plan-Lock**: Brief auf altem Code-State ist die häufigste Plan-Drift-Quelle. Vor Plan-Lock: `cargo clippy -p <crate>` + `git grep -n "<keyword>"` + `rg-evidence` für jedes "verify-first" oder "should-be-X" Item im Brief. Falsifizierbar: Plan-Lock-Commit zitiert mindestens 2 Brief-Items mit current-code-Evidence-SHAs.
 
 - **Target-Dir Hygiene vor llvm-cov**: `.gitignore` enthält `target-cov/` (und ähnliche Tool-Output-Dirs) BEVOR der erste `cargo llvm-cov` läuft. Reactive-Fix nach Crash kostet 30+ min Recovery.
+
+- **Cross-Boundary-Checks bei tool-/mcp-/hook-Crates**: zusätzlich zur Backend-Bullet-Klasse triggert eine Cross-Boundary-Klasse sobald das Diff `<repo>-tool-*`, `<repo>-mcp-*` oder `<repo>-hook-*` mit Message-Mutation anfasst. Drei falsifizierbare Checks: (1) Tool-Output-Audit (`rg "reqwest::Error|reqwest::Url|::Url\b" <touched-crate>/src/` plus visueller Audit aller `output:`/`Value::String(...)` im Error-Path), (2) Provider-Turn-Alternation (jeder Hook der `Decision::Replace(Vec<Message>)` oder `Decision::Inject(Message)` zurückgibt MUSS user/assistant-Alternation halten, Test gegen `validate_turn_sequence(&msgs)`), (3) Cap-Single-Source (pro Resource-Cap genau eine durchsetzende Stelle pro Call-Path). Pattern aus example-project-mcp-split R3-Retro: url-leak, double-validation, Apology-Turn-Bruch kamen alle erst im Adversarial-Gate hoch.
+
+## Build/Compile-Speed-Erkenntnisse (R3 mcp-split, 2026-05-20)
+
+Aus einem Bench-Pass am Ende von R3 mcp-split. Compile/Link single-crate auf macOS ist NICHT der dominante Bottleneck:
+
+| Konfiguration | Wallclock (example-project-tool-stt nextest) |
+|---|---:|
+| Baseline warm | 3.54s |
+| Touch-rebuild | 4.01s |
+| Cold-clean | 4.60s |
+| sccache + CARGO_INCREMENTAL=0 warm-cache | 2.56s |
+| lld-Swap | 26.22s (RUSTFLAGS bricht alle Caches, nicht aussagekräftig) |
+
+Befunde:
+
+- **shared-target-dir (V8) liefert schon den Hauptwin** cross-worktree (~80% Deps-Cache-Hit zwischen Runs in der Chain). Per-Crate cold-clean liegt bei 4-5s, das ist im Rahmen.
+- **sccache ist marginal** wenn shared-target-dir aktiv ist. Sccache hilft nur wenn `CARGO_INCREMENTAL=0`, was den Edit-Loop verlangsamt. Trade-Off: lohnt nur für Fresh-Target-Dir-Cold-Starts (CI, Branch-Swap).
+- **lld auf macOS nicht empfohlen**: Apple ld64 ist auf Mach-O bereits optimiert. RUSTFLAGS-Swap zwingt Full-Deps-Recompile und bricht alle Caches.
+- **mold auf macOS skip**: mold ist Linux-fokussiert, kein zuverlässiger macOS-Pfad.
+
+**Echte Time-Sinks im Solo-Workflow** (nicht Build):
+
+1. **Cargo-Invocations × Bullet-Count**: 8-12 cargo-calls pro Bullet (test, clippy-lib, clippy-tests, fmt, coverage) × ~4s Cargo-Overhead = ~40s pure Cargo-Overhead pro Bullet. Bei 8 Bullets ~320s nur für Cargo-Resolve-Loops.
+2. **Adversarial-Gate-Latenz**: ~30min pro Solo-Run (GATE-2 Subagent + codex-CLI + GATE-3 verifier + code-reviewer + codex). Token-Throughput-bound.
+3. **Subagent-Token-Throughput**: model-bound.
+
+**Mögliche Workflow-Hebel** (höher als Build-Tuning):
+
+- Per-Bullet-Gates parallelisieren (clippy + test parallel statt sequenziell). Realisierbar via separate Bash-Background-Calls.
+- nextest-Archive für CI-Reuse (`cargo nextest archive`).
+- Sccache nur als optionales env (`RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0`) für Cold-Worktree-Starts, NICHT default.
+- Bullet-Cut nach API-Surface statt nach Crate: weniger Round-2-Fixes durch saubere Layer-Decisions upfront.
+
+**Anti-Pattern**: Build-Bench ohne Workflow-Bench. Wenn Cargo-Invocations × Bullet-Count + Gate-Latenz nicht mitgemessen werden, optimiert man den falschen Hebel.
 
 ## Cleanup (auto + manuell)
 
