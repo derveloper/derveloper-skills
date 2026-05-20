@@ -263,7 +263,7 @@ Normal messages get a sender identity prefix automatically. Example: `wr.<featur
 
 Default claude model: `claude-opus-4-7` (1M context). For 200k-context runs, use `--claude-model claude-opus-4-6`. Compact-watcher threshold scales automatically: 1M → 700k (70%), 200k → 140k.
 
-Default reasoning effort: `medium` on both harnesses for the main pane; reviewer subagents always run at the top tier (claude `xhigh`, codex `high`). Override with `--claude-effort`, `--codex-effort`, `--reviewer-claude-effort`, `--reviewer-codex-effort`.
+Default reasoning effort: `xhigh` on both harnesses for the main pane AND reviewer subagents (codex gpt-5.5 supports xhigh). Override with `--claude-effort`, `--codex-effort`, `--reviewer-claude-effort`, `--reviewer-codex-effort`.
 
 Long-running runs drift past the model's sweet spot. Helper subcommands:
 

@@ -58,20 +58,22 @@ DEFAULT_CLAUDE_MODEL = "claude-opus-4-7"
 # Der CLI-Flag ist race-free. Override per Spawn via --claude-effort. Leer ("")
 # = flag NICHT setzen, claude default oder CLAUDE_CODE_EFFORT_LEVEL env-var
 # greift.
-DEFAULT_CLAUDE_EFFORT = "medium"
+DEFAULT_CLAUDE_EFFORT = "xhigh"
 
 # Default Codex reasoning effort. Wird als `-c model_reasoning_effort=<level>`
 # im Boot-Command gesetzt. codex CLI hat keinen dedizierten --effort Flag,
-# nur generisches `-c key=value` als Override-Mechanismus. Skala:
-# minimal|low|medium|high. Override per Spawn via --codex-effort. Leer ("")
-# = flag NICHT setzen, codex CLI Default oder ~/.codex/config.toml greift.
-DEFAULT_CODEX_EFFORT = "medium"
+# nur generisches `-c key=value` als Override-Mechanismus. Skala bei gpt-5.5:
+# minimal|low|medium|high|xhigh. Override per Spawn via --codex-effort.
+# Leer ("") = flag NICHT setzen, codex CLI Default oder ~/.codex/config.toml
+# greift.
+DEFAULT_CODEX_EFFORT = "xhigh"
 
-# Reviewer-Rollen laufen IMMER auf höchster Reasoning-Stufe, egal welcher
-# Harness. claude-Reviewer: xhigh. codex-Reviewer: high (codex Top-Stufe).
-# Override per Spawn via --reviewer-claude-effort / --reviewer-codex-effort.
+# Reviewer-Rollen laufen auf höchster Reasoning-Stufe, egal welcher Harness.
+# Seit 0.20.0 sind die Writer/Orchestrator-Defaults auch auf xhigh, also
+# matchen die Reviewer-Defaults. Override per Spawn via
+# --reviewer-claude-effort / --reviewer-codex-effort.
 DEFAULT_REVIEWER_CLAUDE_EFFORT = "xhigh"
-DEFAULT_REVIEWER_CODEX_EFFORT = "high"
+DEFAULT_REVIEWER_CODEX_EFFORT = "xhigh"
 
 # pi (custom CLI) Model + Thinking-Level. cortecs/qwen3-coder-next ist
 # the users aktueller Pi-Default (EU-Pay-per-Use, ~0.15/0.80 EUR pro 1M Tokens,

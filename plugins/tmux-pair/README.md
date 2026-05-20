@@ -66,10 +66,10 @@ Spawn-time flags:
 --no-worktree                   # skip git worktree, run on the project's current branch
 --interactive                   # opt-in Decision-Pause-Points for V2 decisions
 --claude-model claude-opus-4-7  # default model for any claude pane
---claude-effort medium          # default --effort level for non-reviewer claude panes (writer/orch/solo)
---codex-effort medium           # default model_reasoning_effort for non-reviewer codex panes
---reviewer-claude-effort xhigh  # effort override applied to claude-reviewer panes
---reviewer-codex-effort high    # effort override applied to codex-reviewer panes
+--claude-effort xhigh           # default --effort level for non-reviewer claude panes (solo)
+--codex-effort xhigh            # default model_reasoning_effort for non-reviewer codex panes (gpt-5.5)
+--reviewer-claude-effort xhigh  # effort override applied to claude-reviewer subagents
+--reviewer-codex-effort xhigh   # effort override applied to codex-reviewer subagents
 --pi-provider cortecs           # pi default provider (claude-bridge for Subscription)
 --pi-model qwen3-coder-next     # pi default model (claude-opus-4-7 via bridge)
 --pi-thinking high              # pi default reasoning level
@@ -105,7 +105,7 @@ The default claude model is `claude-opus-4-7` (1M context). Override per spawn:
 
 The compact-watcher threshold scales with the context window automatically: 1M to 700k threshold (70%), 200k to 140k threshold. Override with `monitor --threshold-k <N>` if needed. Codex pane boot follows the user's configured CLI default; Codex engineer subagents use the Spark-first policy below.
 
-The default reasoning effort for non-reviewer panes is `medium` on both harnesses: claude panes start with `--effort medium` (writer, orchestrator, solo), codex panes with `-c model_reasoning_effort=medium`. Reviewer panes override this and always run on the harness top tier so review quality stays high regardless of writer/orchestrator budget: `--reviewer-claude-effort xhigh` for claude-reviewers, `--reviewer-codex-effort high` for codex-reviewers (codex tops out at `high`). Override per spawn with `--claude-effort`, `--codex-effort`, `--reviewer-claude-effort`, `--reviewer-codex-effort`; pass an empty string to skip the flag entirely so the harness uses its own default or the `CLAUDE_CODE_EFFORT_LEVEL` env-var.
+The default reasoning effort for every pane is `xhigh` on both harnesses: claude panes start with `--effort xhigh`, codex panes (gpt-5.5) with `-c model_reasoning_effort=xhigh`. Reviewer subagents inherit the same xhigh tier via `--reviewer-claude-effort xhigh` and `--reviewer-codex-effort xhigh`. Override per spawn with `--claude-effort`, `--codex-effort`, `--reviewer-claude-effort`, `--reviewer-codex-effort`; pass an empty string to skip the flag entirely so the harness uses its own default or the `CLAUDE_CODE_EFFORT_LEVEL` env-var.
 
 ## Dynamic team sizing
 
