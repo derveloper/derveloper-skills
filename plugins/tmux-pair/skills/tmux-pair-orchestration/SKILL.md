@@ -24,7 +24,18 @@ Multi-pane spawn modes (separate writer + reviewer panes, dual-review with two r
 
 Adversarial review-quality is preserved by parallel two-mind gates inside the single pane: a claude subagent (`Agent(gate-2-plan-check)` etc.) plus `codex exec` (out-of-process, fresh context, different model family). Two independent minds without the coordination tax.
 
-Default agent: `claude` (recon-strong, follows briefings, integrates plan + subagent feedback cleanly). Override via `--agent codex` or `--agent pi` (the user's custom CLI). Reviewer subagents run at top reasoning tier regardless of solo agent's budget.
+Default agent: `claude` (recon-strong, follows briefings, integrates plan + subagent feedback cleanly). `/run` picks dynamically between `claude` and `codex` based on the task profile when the user does not pass `--agent` explicitly; `pi` is opt-in only. Reviewer subagents run at top reasoning tier regardless of solo agent's budget.
+
+Agent pick heuristic (used by `/run`):
+
+| Task profile | Pick | Reason |
+|---|---|---|
+| Recon-heavy, multi-file, plan-integration, AskUserQuestion-heavy, design work, briefings, greenfield scaffolding, compliance/PII | `claude` | Plan integration + Subagent-Spawn (Task tool) + AskUserQuestion structured. Default tie-breaker. |
+| Single-file edits, code translation (lang A → B), mechanic refactor, bulk-rename, codemod | `codex` | Terminal-driven, direct file-ops, fast turnaround per file. |
+| Adversarial bug-hunt, debugging mystery panics, race-condition tracing, "find the real cause" | `codex` | gpt-5.5 + xhigh reasoner sharp on adversarial logic. |
+| Cost-sensitive bulk work (mass renames, mechanic migrations) | `pi` (opt-in via `--agent pi`) | Cortecs/qwen3 fits bulk; expensive top-tier models would burn budget. |
+
+Ambiguous → `claude` (safer default). User can override anytime with `--agent codex` / `--agent pi`. The picked agent is surfaced in the `/run` recon note.
 
 ## Solo workflow (7 phases)
 
