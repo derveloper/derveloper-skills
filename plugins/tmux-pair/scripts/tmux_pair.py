@@ -268,17 +268,26 @@ def _save_cache(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
-def _cargo_target_dir(repo_root: Path, no_shared: bool) -> Path | None:
-    """V8 shared cargo target directory or None (per-worktree default).
+def _cargo_target_dir(repo_root: Path, wt_path: Path,
+                      shared: bool) -> Path | None:
+    """Per-worktree (default) or shared cargo target directory.
 
-    Returns None when --no-shared-target is set or when the project clearly
-    isn't a cargo workspace (no Cargo.toml within two levels). Callers that
-    set CARGO_TARGET_DIR for non-Rust projects don't break anything (cargo
-    just ignores the env), but skipping the prepend keeps the boot command
-    readable.
+    Default behavior (since 0.22.1): each worktree gets its own cargo target
+    directory under CARGO_TARGET_BASE / "<repo-slug>__<wt-slug>". This lets
+    multiple agents work on the same project in parallel worktrees without
+    cargo file-lock contention. Cold-rebuild cost per worktree is the
+    trade-off; solo runs typically last 30-90 min, so a one-time cargo
+    build of a few minutes is acceptable.
+
+    Pass --shared-target to opt back into the legacy 0.14.0..0.22.0 behavior
+    (single shared cache "<repo-slug>") when you know only one agent is
+    active on the repo at a time and want maximum cache warmth.
+
+    Returns None when the project clearly isn't a cargo workspace (no
+    Cargo.toml within two levels). Callers that set CARGO_TARGET_DIR for
+    non-cargo projects don't break anything (cargo just ignores the env),
+    but skipping the prepend keeps the boot command readable.
     """
-    if no_shared:
-        return None
     root = Path(repo_root).resolve()
     has_cargo = (root / "Cargo.toml").is_file() or any(
         (root / sub).is_dir() and (root / sub / "Cargo.toml").is_file()
@@ -286,7 +295,11 @@ def _cargo_target_dir(repo_root: Path, no_shared: bool) -> Path | None:
     )
     if not has_cargo:
         return None
-    return CARGO_TARGET_BASE / _cache_repo_slug(root)
+    repo_slug = _cache_repo_slug(root)
+    if shared:
+        return CARGO_TARGET_BASE / repo_slug
+    wt_slug = _cache_repo_slug(Path(wt_path).resolve())
+    return CARGO_TARGET_BASE / f"{repo_slug}__{wt_slug}"
 
 
 # V7 TESTS-PROOF marker schema (parsed from commit-message bodies).
@@ -2896,8 +2909,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     project, wt_path, branch, window_name, human_pane = _common_pair_setup(args)
     session = current_session()
 
-    no_shared_target = bool(getattr(args, "no_shared_target", False))
-    cargo_target = _cargo_target_dir(project, no_shared_target)
+    shared_target = bool(getattr(args, "shared_target", False))
+    cargo_target = _cargo_target_dir(project, wt_path, shared_target)
 
     orchestrator_name = f"or.{window_name}"
     writer_name = f"wr.{window_name}"
@@ -3292,8 +3305,8 @@ def cmd_solo(args: argparse.Namespace) -> int:
         sys.exit(f"error: unknown agent '{args.agent}'")
     project, wt_path, branch, window_name, human_pane = _common_pair_setup(args)
     session = current_session()
-    no_shared_target = bool(getattr(args, "no_shared_target", False))
-    cargo_target = _cargo_target_dir(project, no_shared_target)
+    shared_target = bool(getattr(args, "shared_target", False))
+    cargo_target = _cargo_target_dir(project, wt_path, shared_target)
     solo_name = f"solo.{window_name}"
     pi_provider, pi_model, pi_thinking = _pi_overrides_for_role(args, "writer")
     pane = spawn_pane(
@@ -3857,8 +3870,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="opt-in Decision-Pause-Points; default off (unattended).")
     tr.add_argument("--no-cache", action="store_true",
                     help="V6/V9: skip readiness-cache and recon-cache reads/writes.")
-    tr.add_argument("--no-shared-target", action="store_true",
-                    help="V8: do not set CARGO_TARGET_DIR for spawned panes.")
+    tr.add_argument("--shared-target", action="store_true",
+                    help="Use one shared CARGO_TARGET_DIR per repo across "
+                         "all worktrees (legacy 0.14.0..0.22.0 behavior). "
+                         "Default is per-worktree CARGO_TARGET_DIR so "
+                         "parallel agents on the same project don't fight "
+                         "for the cargo file-lock.")
     tr.set_defaults(func=cmd_spawn)
 
     so = sub.add_parser("solo",
@@ -3927,9 +3944,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="pi model override for the solo pane.")
     so.add_argument("--pi-writer-thinking", default=None,
                     help="pi thinking override for the solo pane.")
-    so.add_argument("--no-shared-target", action="store_true",
-                    help="do not set CARGO_TARGET_DIR. Solo builds into the "
-                         "worktree-local target/. Default: shared cache.")
+    so.add_argument("--shared-target", action="store_true",
+                    help="Use one shared CARGO_TARGET_DIR per repo across "
+                         "all worktrees (legacy 0.14.0..0.22.0 behavior). "
+                         "Default is per-worktree CARGO_TARGET_DIR so "
+                         "parallel solos on the same project don't fight "
+                         "for the cargo file-lock.")
     so.set_defaults(func=cmd_solo)
 
     li = sub.add_parser("list", help="list panes in the current session")

@@ -82,7 +82,7 @@ Switch off the gates with `--no-gated` for trivial tasks (Phase 7 still applies)
 --pi-writer-provider <name>     # pi role override (solo uses the writer role internally)
 --pi-writer-model <slug>
 --pi-writer-thinking <level>
---no-shared-target              # disable shared CARGO_TARGET_DIR (V8)
+--shared-target                 # opt-in: one shared CARGO_TARGET_DIR per repo (legacy 0.14..0.22.0). Default since 0.22.1: per-worktree target so parallel solos do not fight for the cargo file-lock.
 ```
 
 Add or replace agent commands in `~/.config/tmux-pair/agents.json`:
@@ -160,7 +160,7 @@ Each gate also runs a parallel `Bash(codex exec ...)` second-opinion (out-of-pro
 - **V5 Unattended-Default**: `/solo` and `/run` run unattended by default; `--interactive` turns V2 self-decisions into `AskUserQuestion` pause points.
 - **V6 Readiness-Cache (24h TTL)**: `reviewer-readiness-check` results cached at `~/.cache/tmux-pair/readiness/<repo>-<rules-hash>-<commit>.json`. Cache-Hit + PASS skips the subagent spawn. `NEEDS-RULES` is never cached. Bust via `--no-cache`.
 - **V7 Test-Trust-Chain (TESTS-PROOF marker)**: solo bullet commits carry a `TESTS-PROOF:` block (test/lint/fmt commands + PASS counts + `COMMIT_SHA`). `gate-3-verifier` parses via `tmux_pair.py parse-tests-proof` and trusts when `HEAD == COMMIT_SHA`. Stale markers go to WARNING + narrow re-run; missing on 0.14+ runs goes to BLOCKER.
-- **V8 Cargo-Target-Sharing**: shared `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo>/` prefix on every boot command for Cargo repos. Cross-worktree cache; cargo's lock-file handles concurrency. Non-Rust repos skip automatically. Bust via `--no-shared-target`.
+- **Per-Worktree Cargo Target (since 0.22.1)**: each spawn gets `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo>__<wt-slug>/` so parallel agents on the same project never collide on cargo's file-lock. Trade-off: cold rebuild per worktree (a few minutes amortised against a 30..90 min solo run). Opt back into the legacy single shared target (`~/.cache/tmux-pair/cargo-target/<repo>/`) with `--shared-target` when only one agent is active and maximum cache warmth matters. Non-Cargo repos skip the env entirely.
 - **V9 Recon-Cache with Delta-Mode (1h TTL)**: recon JSON cached at `/tmp/tmux-pair-recon-<repo>-<commit>.json`; follow-up runs read the cache + delta-recon for files with `mtime > cache-time`. Bust via `--no-cache`.
 - **V10 Inline-Gates for trivial plans**: when `task_kind=bug-fix` AND `bullets <= 3` AND `predicted files-touched <= 5`, solo runs GATE 2 inline in its own pane; `gate-3-verifier` may also inline when TESTS-PROOF is valid. `gate-3-code-reviewer` always stays as a subagent. Helper: `tmux_pair.py inline-gate-decide --plan-file <path> --task-kind <kind>`.
 

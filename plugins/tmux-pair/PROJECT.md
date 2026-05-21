@@ -477,3 +477,20 @@ V2 decision log for 0.22.0:
 | D5 | `solo-briefing.md` got a full rewrite | The previous content was a writer-role briefing template from spawn-mode times. A solo template needs Phase 7, the SOLO USER INPUT RULE, and the gated-7-phase scaffolding; a banner reframe would not have produced a useful starting template. |
 | D6 | German-only marker leftovers fixed across SKILL.md and README in this run | The 0.21.0 English-only refactor missed `sequenziell`, `Bezug:`, and a few other markers. Catching them now keeps the plugin source 100 percent English. |
 | D7 | Squash-merge subject `docs(tmux-pair): bring docs in sync with solo-only 7-phase reality (0.22.0)` | User-prescribed exact wording; matches the conventional-commit pattern used by previous version bumps in this repo. |
+
+### 0.22.1 (Per-Worktree CARGO_TARGET_DIR default, 2026-05-21)
+
+User feedback: with parallel solos on the same project, the shared `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>/` from V8 (0.14.0) blocked cargo builds across worktrees on cargo's `.cargo-lock`. Multiple agents on the same repo serialised through the lock and could hang past test timeouts.
+
+- Default flipped: each worktree now gets its own `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>__<wt-slug>/`. Parallel agents no longer fight for the cargo file-lock. Trade-off: cold rebuild per worktree on first solo touching it (a few minutes, amortised against a 30..90 min solo run).
+- `--no-shared-target` removed; `--shared-target` added as opt-in to the legacy single-shared-target behaviour (max cache warmth, single active agent). Scripts/CI that passed `--no-shared-target` need to drop the flag.
+- `_cargo_target_dir(repo_root, no_shared)` signature changed to `_cargo_target_dir(repo_root, wt_path, shared)`; callers in `cmd_solo` + `cmd_spawn` pass `wt_path` from `_common_pair_setup`.
+- Docs synced: README.md (per-worktree-cargo paragraph + flag list), SKILL.md (section renamed "Per-Worktree Cargo Target"), gated-workflow.md (V6-V10 summary + V8 details), commands/solo.md (argument-hint + flag list).
+- Versions synced to 0.22.1 across plugin.json + marketplace.json + SKILL.md frontmatter.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Default flipped from shared to per-worktree | User explicitly asked for parallel agents to not block each other. Per-worktree separation is the surgical fix; shared cache as opt-in covers the single-agent cache-warmth use case. |
+| D2 | Slug pattern `<repo-slug>__<wt-slug>` | Stable across solo runs on the same worktree; `_cache_repo_slug` already normalises non-alphanumerics. No collision risk because `_common_pair_setup` returns unique worktree paths per feature. |
+| D3 | Drop `--no-shared-target`, add `--shared-target` | Flag inversion is a clean break at patch-bump time; an alias would invert semantically and confuse new users. |
+| D4 | Patch bump 0.22.0 -> 0.22.1 instead of minor | Behaviour change is opt-in/out at the spawn boundary; the public 7-phase workflow is unchanged. Patch bump signals "same surface, smarter default". |

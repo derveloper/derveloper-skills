@@ -124,7 +124,7 @@ Failure modes:
 
 ## Smart workflow (V6-V10)
 
-V6-V10 add caching, trust-chains, and inline decisions for trivial plans. All additive: the classic flow continues to work; smart-features kick in only when caches are warm or thresholds match. Two new spawn flags govern opt-out: `--no-cache` disables V6 (readiness) + V9 (recon) caches; `--no-shared-target` disables V8 (CARGO_TARGET_DIR sharing).
+V6-V10 add caching, trust-chains, and inline decisions for trivial plans. All additive: the classic flow continues to work; smart-features kick in only when caches are warm or thresholds match. Flag overrides: `--no-cache` disables V6 (readiness) + V9 (recon) caches; `--shared-target` switches V8 from the default per-worktree CARGO_TARGET_DIR back to the legacy single-shared-target behaviour (one cache shared across all worktrees of the same repo).
 
 ### V6 Readiness-Cache
 
@@ -150,7 +150,7 @@ Reviewer panes inside the loop trust the marker for spot-checks too. They may st
 
 ### V8 Cargo-Target-Sharing
 
-`cmd_spawn` computes `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>/` (slug = basename, non-alphanumeric replaced by `_`) and prepends `env CARGO_TARGET_DIR=<path>` to every spawned boot command. Non-Cargo repos skip the env entirely. `--no-shared-target` disables sharing per spawn.
+`cmd_solo` and `cmd_spawn` compute `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>__<wt-slug>/` (slug = basename with non-alphanumerics replaced by `_`) and prepend `env CARGO_TARGET_DIR=<path>` to every spawned boot command. Each worktree gets its own target directory so parallel agents on the same project do not collide on cargo's file-lock. Pass `--shared-target` to switch to the legacy single-shared `<repo-slug>/` target (max cache warmth, single active agent). Non-Cargo repos skip the env entirely.
 
 Parallel worktrees on the same repo share the build cache. Cargo's own lock-file handles concurrency; occasional short blocks are normal.
 

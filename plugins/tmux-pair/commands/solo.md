@@ -1,6 +1,6 @@
 ---
 description: Spawn a single agent in a fresh git worktree, gated by a 7-phase self-driven workflow (recon, plan-check, impl, self-review, PROJECT.md/skill-persist, commit, auto-squash-merge) with subagent-driven adversarial gates
-argument-hint: <project-path> <base> <feature> [task...] [--no-gated] [--no-worktree] [--interactive] [--with-standards] [--greenfield] [--agent claude|codex|pi] [--claude-model SLUG] [--claude-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL] [--pi-provider NAME] [--no-shared-target]
+argument-hint: <project-path> <base> <feature> [task...] [--no-gated] [--no-worktree] [--interactive] [--with-standards] [--greenfield] [--agent claude|codex|pi] [--claude-model SLUG] [--claude-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL] [--pi-provider NAME] [--shared-target]
 ---
 
 # solo
@@ -73,7 +73,7 @@ Solo keeps the same gates spawn-mode used, just with leaner mechanics:
 - `--codex-effort <level>`: codex reasoning effort, set as `-c model_reasoning_effort=<level>` (default `xhigh`, gpt-5.5 supports xhigh). Choices: `minimal|low|medium|high|xhigh`.
 - `--pi-provider <name>` / `--pi-model <slug>` / `--pi-thinking <level>`: pi-specific overrides. Only applied when `--agent pi`.
 - `--pi-writer-provider` / `--pi-writer-model` / `--pi-writer-thinking`: pi role-specific overrides (solo internally uses the `writer` role for cargo/AGENTS.md handling).
-- `--no-shared-target`: do not set `CARGO_TARGET_DIR`. Default: shared cache `~/.cache/tmux-pair/cargo-target/<repo>/`.
+- `--shared-target`: use one shared `CARGO_TARGET_DIR` per repo across all worktrees (legacy 0.14.0..0.22.0 behavior, max cache warmth, single active agent). Default since 0.22.1: per-worktree `CARGO_TARGET_DIR` (`~/.cache/tmux-pair/cargo-target/<repo>__<wt-slug>/`) so parallel solos on the same project don't fight for the cargo file-lock.
 
 ## Action
 
@@ -89,7 +89,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py solo \
   [--agent <claude|codex|pi>] \
   [--claude-model <slug>] [--claude-effort <level>] \
   [--pi-model <slug>] [--pi-thinking <level>] [--pi-provider <name>] \
-  [--no-shared-target]
+  [--shared-target]
 ```
 
 If the feature description is missing or ambiguous, ask the user before spawning.

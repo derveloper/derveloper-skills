@@ -1,7 +1,7 @@
 ---
 name: tmux-pair-orchestration
 description: This skill should be used when the user asks to "spawn a solo with self-review", "run an agent on this with gates", "use the tmux-pair workflow", "/run for this task", or otherwise wants to run a single coding agent in a fresh git worktree with adversarial review gates. Solo is the only mode. Multi-pane spawn modes (writer + reviewer panes, dual-review, parallel-writers) were removed: shared CARGO_TARGET_DIR contention, git-index-lock races, cross-writer PROJECT.md races, and dual-review coordination outweighed the parallelism gain. Adversarial quality is preserved by running two independent minds at each gate: a claude subagent plus `codex exec` (different model family, fresh context, no pane setup). Sequential solo runs auto-squash-merge to base in Phase 7: each run produces ONE squash commit on the base branch, the feature branch + worktree are removed automatically, so chained runs always branch from a clean base. Covers the /run auto-entry, solo's 7-phase gated workflow (Recon -> Clarify -> Reviewer-Readiness -> Plan-Check -> Loop -> Final-Verify -> Persist -> Commit -> Auto-Squash-Merge), durable standards (claude --append-system-prompt-file + codex AGENTS.md), REVIEW-READY 3-field format, CLARIFY-NEEDED escalation, Plan-Update-Commit on drift, PROJECT.md care, DONE-MERGED format, sender identity prefixes, smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, --claude-model / --no-worktree flags, briefing templates, and recovery from common failure modes. Mandatory Post-Merge Retro persists recurring patterns into tmux-pair-skill or consumer-repo rules / skills.
-version: 0.22.0
+version: 0.22.1
 ---
 
 # tmux-pair-orchestration
@@ -243,9 +243,9 @@ TESTS-PROOF:
 
 `gate-3-verifier` reads it via `git log -1 --format=%B`. HEAD == COMMIT_SHA: trust, skip re-run. HEAD moved: WARNING + re-run. No marker on 0.14+: BLOCKER. Marker present pre-0.14: WARNING legacy.
 
-### V8 Cargo-Target-Sharing
+### Per-Worktree Cargo Target (since 0.22.1)
 
-`tmux_pair.py` prepends `env CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>/` to the boot command when the project is a Cargo workspace and `--no-shared-target` is not set. Single-solo runs see clean cache; cross-worktree parallelism from independent runs share the same target dir (cargo's lock-file handles concurrency, but brief block during peer-build is expected). Opt-out: `--no-shared-target`.
+`tmux_pair.py` prepends `env CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>__<wt-slug>/` to the boot command when the project is a Cargo workspace. Each worktree gets its own target directory, so parallel solos on the same project never block on cargo's file-lock. Trade-off: cold rebuild per worktree (a few minutes amortised against a 30..90 min solo run). Pass `--shared-target` to opt back into the legacy single-shared-target behaviour (`<repo-slug>/`) when only one agent is active and maximum cache warmth matters. Non-Cargo repos skip the env entirely.
 
 ### V9 Recon-Cache with Delta-Mode (1h TTL)
 
