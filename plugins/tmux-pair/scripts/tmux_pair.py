@@ -35,6 +35,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -558,9 +559,34 @@ def cmd_send(args: argparse.Namespace) -> int:
     flight. We retry up to 6 times with growing waits and a capture-pane probe
     (last 40 chars of last non-empty line) to confirm the input area cleared.
     Override with --no-enter.
+
+    `--from-file PATH` loads the body from a file instead of the positional
+    `text` argument. When the target pane runs codex AND the body is
+    multi-line, we automatically take the file-bridge path (short pointer
+    message into codex, codex reads the file via its shell tool) to avoid
+    the codex TUI's long-paste rendering bug.
     """
     pane = args.pane
     text = args.text
+    from_file = getattr(args, "from_file", None)
+    if from_file:
+        try:
+            with open(from_file, "r") as fh:
+                text = fh.read()
+        except OSError as exc:
+            print(f"error: cannot read --from-file {from_file}: {exc}",
+                  file=sys.stderr)
+            return 1
+    if text is None:
+        print("error: send requires either positional `text` or --from-file",
+              file=sys.stderr)
+        return 1
+    # Auto-route long multi-line bodies sourced from a file into the codex
+    # file-bridge when the pane is a codex pane. Short single-line messages
+    # (slash-commands, pings) keep the direct path.
+    if from_file and "\n" in text and _pane_agent(pane) == "codex":
+        _send_codex_safe(pane, text)
+        return 0
     if getattr(args, "identity_wrap", False):
         text = _identity_wrapped_text(text)
     if "\n" in text:
@@ -743,6 +769,65 @@ def _send_briefing_sync(pane: str, body: str) -> None:
     cmd_send(args)
 
 
+def _pane_agent(pane: str) -> str:
+    """Look up the agent registered for a pane (set in spawn_pane).
+
+    Returns "" when the pane was not spawned by this script or the option
+    was never set (e.g. external panes addressed via cmd_send --pane).
+    """
+    if not pane:
+        return ""
+    rc, out, _ = tmux_safe(
+        "show-options", "-p", "-v", "-t", pane, "@tmux-pair-agent"
+    )
+    return out.strip() if rc == 0 else ""
+
+
+def _send_codex_safe(pane: str, body: str) -> None:
+    """Codex-safe delivery for long messages.
+
+    The codex TUI input widget has rendering glitches when very long text is
+    pasted into it (briefings, plan-locks, re-briefs). Instead of pasting the
+    full body we write it to a tempfile and send a short pointer message.
+    Codex picks the file up via its built-in shell tool.
+
+    The file lives in /tmp; codex is asked to delete it after consumption.
+    We keep the file world-readable on purpose so a human can also `less`
+    it if a debugging session is needed.
+    """
+    fd, path = tempfile.mkstemp(
+        prefix="tmux-pair-msg-",
+        suffix=".md",
+        dir="/tmp",
+    )
+    with os.fdopen(fd, "w") as fh:
+        fh.write(body)
+    try:
+        os.chmod(path, 0o644)
+    except OSError:
+        pass
+    pointer = (
+        f"Your next instruction is too long to paste safely into the "
+        f"codex TUI. It has been written to {path}. Please read that file "
+        f"now and execute its contents as your next instruction. After "
+        f"you have fully processed it, delete the file with `rm {path}`."
+    )
+    args = argparse.Namespace(pane=pane, text=pointer, no_enter=False)
+    cmd_send(args)
+
+
+def _send_briefing_for_agent(pane: str, agent: str, body: str) -> None:
+    """Route a multi-line briefing through the agent-appropriate path.
+
+    - codex: file-bridge (avoids TUI rendering glitches on long pastes).
+    - claude / pi / anything else: direct send via load-buffer/paste-buffer.
+    """
+    if agent == "codex":
+        _send_codex_safe(pane, body)
+    else:
+        _send_briefing_sync(pane, body)
+
+
 def spawn_pane(
     *,
     session: str,
@@ -782,6 +867,14 @@ def spawn_pane(
         # Make pane titles visible. Server-wide setting, idempotent. Users who
         # don't want it can override in their .tmux.conf.
         tmux_safe("set-option", "-g", "pane-border-status", "top")
+
+    # Persist the agent on the pane so later sends (cmd_send --from-file,
+    # re-briefs, plan-updates) can pick an agent-appropriate delivery path
+    # (e.g. codex needs the file-bridge to avoid TUI rendering glitches on
+    # long pasted briefings).
+    if agent:
+        tmux_safe("set-option", "-p", "-t", pane_id,
+                  "@tmux-pair-agent", agent)
 
     if boot_command:
         time.sleep(0.5)  # shell needs boot time, otherwise first char is eaten
@@ -3068,9 +3161,12 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         with_standards=with_standards,
     )
 
-    _send_briefing_sync(orchestrator_pane, orchestrator_brief)
-    _send_briefing_sync(writer_pane, writer_brief)
-    _send_briefing_sync(reviewer_pane, reviewer_brief)
+    _send_briefing_for_agent(
+        orchestrator_pane, args.orchestrator_agent, orchestrator_brief)
+    _send_briefing_for_agent(
+        writer_pane, args.writer_agent, writer_brief)
+    _send_briefing_for_agent(
+        reviewer_pane, args.reviewer_agent, reviewer_brief)
     if dual_review:
         reviewer_2_brief = _briefing_spawn_engineer(interactive=args.interactive,
             role="Reviewer", partner_role="writer", partner_pane=writer_pane,
@@ -3080,7 +3176,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             peer_reviewer_pane=reviewer_pane,
             with_standards=with_standards,
         )
-        _send_briefing_sync(reviewer_2_pane, reviewer_2_brief)
+        _send_briefing_for_agent(
+            reviewer_2_pane, args.reviewer_2_agent, reviewer_2_brief)
 
     output = {
         "mode": "spawn",
@@ -3343,7 +3440,7 @@ def cmd_solo(args: argparse.Namespace) -> int:
         with_standards=with_standards,
         gated=gated,
     )
-    _send_briefing_sync(pane, brief)
+    _send_briefing_for_agent(pane, args.agent, brief)
     output = {
         "mode": "solo",
         "gated": gated,
@@ -3786,7 +3883,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     se = sub.add_parser("send", help="send text to a pane")
     se.add_argument("pane")
-    se.add_argument("text")
+    se.add_argument("text", nargs="?", default=None,
+                    help="text to send (omit when --from-file is used)")
+    se.add_argument("--from-file", dest="from_file", default=None,
+                    metavar="PATH",
+                    help="read the message body from PATH instead of the "
+                         "positional `text` argument. Useful for long "
+                         "re-briefs that should not be pasted into a codex "
+                         "TUI input widget (rendering glitches).")
     se.add_argument("--no-enter", action="store_true",
                     help="don't press Enter after sending")
     se.set_defaults(func=cmd_send, identity_wrap=True)

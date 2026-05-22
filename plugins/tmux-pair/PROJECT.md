@@ -494,3 +494,22 @@ User feedback: with parallel solos on the same project, the shared `CARGO_TARGET
 | D2 | Slug pattern `<repo-slug>__<wt-slug>` | Stable across solo runs on the same worktree; `_cache_repo_slug` already normalises non-alphanumerics. No collision risk because `_common_pair_setup` returns unique worktree paths per feature. |
 | D3 | Drop `--no-shared-target`, add `--shared-target` | Flag inversion is a clean break at patch-bump time; an alias would invert semantically and confuse new users. |
 | D4 | Patch bump 0.22.0 -> 0.22.1 instead of minor | Behaviour change is opt-in/out at the spawn boundary; the public 7-phase workflow is unchanged. Patch bump signals "same surface, smarter default". |
+
+### 0.22.2 (Codex file-bridge for long messages, 2026-05-22)
+
+User feedback: codex TUI input widget renders long pasted briefings with visual glitches (half-rendered lines, mis-wrapped boxes). Symptom is rendering-only (the text is consumed correctly) but it makes follow-up interaction painful and prompts the human to think the briefing failed.
+
+- New `_send_codex_safe(pane, body)`: writes the body to `/tmp/tmux-pair-msg-XXXX.md` (via `tempfile.mkstemp`, 0644) and sends a short pointer message into the pane: *"Your next instruction is too long to paste safely into the codex TUI. It has been written to /tmp/... Please read that file now and execute its contents as your next instruction. After processing, delete the file with `rm /tmp/...`."* Codex reads it via its built-in shell tool.
+- New `_send_briefing_for_agent(pane, agent, body)`: routes codex panes through `_send_codex_safe`, claude / pi panes through the existing `_send_briefing_sync` (direct send-keys + paste-buffer). Replaces all `_send_briefing_sync` callsites in `cmd_solo` + `cmd_spawn` (orchestrator + writer + reviewer + reviewer-2).
+- `spawn_pane` now persists the agent on the pane via `@tmux-pair-agent` (mirrors the existing `@tmux-pair-sender` option for sender identity). Enables later sends to look up the agent and pick the right delivery path.
+- `cmd_send` new flag `--from-file <PATH>`: reads the message body from a file (positional `text` becomes optional in that case). When the target pane runs codex AND the body is multi-line, the helper auto-routes through `_send_codex_safe` to keep re-briefs glitch-free.
+- Docs synced: README.md (Codex file-bridge section under Token management), SKILL.md (file-bridge subsection under Sending messages), plugin.json + marketplace.json + SKILL.md frontmatter all to 0.22.2.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | File-bridge over initial-prompt-via-boot-arg | Initial-prompt-via-boot-arg would let codex start processing the briefing before `/rename` and other post-boot slashes can apply. The file-bridge keeps the existing spawn ordering (boot, wait-ready, post-boot-slashes, briefing) intact; only the briefing's delivery mechanism changes. |
+| D2 | Tempfile under /tmp, world-readable, codex deletes after reading | /tmp clears on reboot so a forgotten file is bounded. World-readable lets a human `less` the file for debugging without elevated tooling. Asking codex to delete after processing keeps the steady state clean. |
+| D3 | Auto-detection via `@tmux-pair-agent` tmux pane option, not a new CLI flag | Mirrors the existing `@tmux-pair-sender` pattern; works for both initial briefings (caller passes `agent` to `_send_briefing_for_agent`) and later sends (cmd_send reads the option). One mechanism, both paths. |
+| D4 | claude / pi panes keep the direct paste path | The rendering bug is codex-specific. claude's input widget renders pasted content as `[Pasted text +N lines]` placeholders and pi handles long pastes cleanly. Routing them through the file-bridge would add a tool-call latency for no benefit. |
+| D5 | `--from-file` makes positional `text` optional | A CLI that needs both a file path AND a positional text-stand-in would be confusing. nargs="?" with a runtime check covers the common path (only --from-file) and the legacy path (only positional text). |
+| D6 | Patch bump 0.22.1 -> 0.22.2 instead of minor | Behaviour change is internal (message delivery mechanism for codex). The public 7-phase workflow, slash commands, and flag surface are unchanged except for the additive `--from-file`. Patch bump signals "same surface, codex-specific bug fix". |

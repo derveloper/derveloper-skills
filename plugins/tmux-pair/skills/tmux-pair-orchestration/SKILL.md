@@ -15,7 +15,7 @@ description: >
   smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, and
   recovery from failure modes. Mandatory Post-Merge Retro persists recurring
   patterns.
-version: 0.22.1
+version: 0.22.2
 ---
 
 # tmux-pair-orchestration
@@ -303,6 +303,17 @@ python3 <plugin>/scripts/tmux_pair.py send <pane-id> "<message>"
 Multi-line messages are submitted via `load-buffer` + `paste-buffer` to avoid the issue where some agent TUIs interpret each newline as a submit. Single-line messages use plain `send-keys -l`. After the text, the helper sends Enter three times with small gaps; this works around agent TUIs that ignore the first Enter when a tool call is in flight. Override with `--no-enter` if needed.
 
 Normal messages get a sender identity prefix automatically. Example: `wr.<feature>` sending `REVIEW-READY: ...` arrives as `[FROM: wr.<feature>] REVIEW-READY: ...`. Messages already starting with `[FROM:` are left unchanged. Slash commands such as `/compact <focus>` are command traffic and are not prefixed. Spawned panes store their stable sender name in `@tmux-pair-sender`.
+
+### Codex file-bridge for long messages (since 0.22.2)
+
+The codex TUI input widget glitches when very long text is pasted into it (visible artifacts: half-rendered lines, mis-wrapped boxes, stuck spinner). For codex panes we skip the paste entirely and route long bodies through a tempfile.
+
+- **Initial briefings**: `cmd_solo` and `cmd_spawn` detect the pane's agent and call `_send_briefing_for_agent`. For `codex`, the briefing body is written to `/tmp/tmux-pair-msg-XXXX.md` and a short pointer message is sent into the pane instead: *"Your next instruction is too long to paste safely into the codex TUI. It has been written to /tmp/... Please read that file now and execute its contents as your next instruction. After processing, delete the file with `rm /tmp/...`."* Codex reads the file via its built-in shell tool and processes the briefing.
+- **Re-briefs and plan-updates**: `tmux_pair.py send <pane> --from-file <path>` reads the body from a file. When the target pane runs codex AND the body is multi-line, the helper auto-routes through the same file-bridge.
+- **claude / pi panes**: unchanged. Their input widgets handle long pastes via `load-buffer` + `paste-buffer` without rendering bugs, so the direct send path stays.
+- **Agent lookup**: every spawned pane stores its agent in the `@tmux-pair-agent` tmux pane option at spawn time. `cmd_send` reads it to decide.
+
+The tempfile is left as-is if codex does not delete it; `/tmp` clears on reboot. The file is world-readable by design so a human can `less` it for debugging.
 
 ## Token management and re-briefs
 
