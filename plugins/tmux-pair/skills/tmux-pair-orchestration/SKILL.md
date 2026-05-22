@@ -1,6 +1,20 @@
 ---
 name: tmux-pair-orchestration
-description: This skill should be used when the user asks to "spawn a solo with self-review", "run an agent on this with gates", "use the tmux-pair workflow", "/run for this task", or otherwise wants to run a single coding agent in a fresh git worktree with adversarial review gates. Solo is the only mode. Multi-pane spawn modes (writer + reviewer panes, dual-review, parallel-writers) were removed: shared CARGO_TARGET_DIR contention, git-index-lock races, cross-writer PROJECT.md races, and dual-review coordination outweighed the parallelism gain. Adversarial quality is preserved by running two independent minds at each gate: a claude subagent plus `codex exec` (different model family, fresh context, no pane setup). Sequential solo runs auto-squash-merge to base in Phase 7: each run produces ONE squash commit on the base branch, the feature branch + worktree are removed automatically, so chained runs always branch from a clean base. Covers the /run auto-entry, solo's 7-phase gated workflow (Recon -> Clarify -> Reviewer-Readiness -> Plan-Check -> Loop -> Final-Verify -> Persist -> Commit -> Auto-Squash-Merge), durable standards (claude --append-system-prompt-file + codex AGENTS.md), REVIEW-READY 3-field format, CLARIFY-NEEDED escalation, Plan-Update-Commit on drift, PROJECT.md care, DONE-MERGED format, sender identity prefixes, smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, --claude-model / --no-worktree flags, briefing templates, and recovery from common failure modes. Mandatory Post-Merge Retro persists recurring patterns into tmux-pair-skill or consumer-repo rules / skills.
+description: >
+  Use when the user asks to "spawn a solo with self-review", "run an agent on this
+  with gates", "use the tmux-pair workflow", "/run for this task", or otherwise
+  wants to run a single coding agent in a fresh git worktree with adversarial
+  review gates. Solo is the only mode. Adversarial quality comes from running two
+  independent minds at each gate: a claude subagent plus `codex exec` (different
+  model family, fresh context). Sequential solo runs auto-squash-merge to base in
+  Phase 7, so chained runs always branch from a clean base. Covers `/run`
+  auto-entry, the 7-phase workflow (Recon, Clarify, Reviewer-Readiness, Plan-Check,
+  Loop, Final-Verify, Persist, Commit, Auto-Squash-Merge), durable standards via
+  --append-system-prompt-file + AGENTS.md, REVIEW-READY, CLARIFY-NEEDED,
+  Plan-Update-Commit on drift, PROJECT.md care, DONE-MERGED, sender prefixes,
+  smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, and
+  recovery from failure modes. Mandatory Post-Merge Retro persists recurring
+  patterns.
 version: 0.22.1
 ---
 
