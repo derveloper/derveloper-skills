@@ -90,7 +90,7 @@ Default tie-breaker for subagents stays `claude` (recon-strong, structured). Cod
    - `git -C <project> status --porcelain` -> must be empty (else BLOCKER)
    - `git -C <project> checkout <base>`
    - `git -C <project> merge --squash <branch>`
-   - `git -C <project> commit` (heredoc message: one-line subject + bullet body + decisions + test counts)
+   - `git -C <project> commit` (heredoc message: one-line subject + bullet body + decisions + test counts + phase/gate ledger)
    - `git -C <project> branch -D <branch>`
    - `git -C <project> worktree remove <wt_path>` (skipped if `--no-worktree`)
    - `DONE-MERGED solo.<feature>: <squash-sha> on <base>` ping
@@ -389,6 +389,12 @@ These checks belong in `--with-standards` briefings AND in consumer-repo `.claud
 - **Target-dir hygiene before llvm-cov**: `.gitignore` contains `target-cov/` (and similar tool-output dirs) BEFORE the first `cargo llvm-cov` runs. Reactive fix after a crash costs 30+ minutes of recovery.
 
 - **Cross-boundary checks for tool / mcp / hook crates**: on top of the backend-bullet class, a cross-boundary class triggers as soon as the diff touches `<repo>-tool-*`, `<repo>-mcp-*`, or `<repo>-hook-*` crates with message mutation. Three falsifiable checks: (1) tool-output audit (`rg "reqwest::Error|reqwest::Url|::Url\b" <touched-crate>/src/` plus a visual audit of all `output:` / `Value::String(...)` sites in the error path), (2) provider-turn alternation (any hook that returns `Decision::Replace(Vec<Message>)` or `Decision::Inject(Message)` MUST keep user/assistant alternation; test against `validate_turn_sequence(&msgs)`), (3) cap single-source (exactly one enforcing site per resource cap per call-path). Pattern from a past mcp-split retro: url-leak, double-validation, and broken apology-turn alternation only surfaced in the adversarial gate.
+
+- **Squash-body phase/gate ledger**: Phase 7 squash commits must preserve enough review evidence for post-merge retro. Commit body includes approximate wall-clock per phase, GATE-2 iteration count, GATE-3 cycle count, fix-loop causes, final verifier names, and whether incidental lint/fmt cleanup occurred. If incidental clippy cleanup appears, cite the production and test-target `cargo clippy --fix --allow-dirty` passes or state that the cleanup came from a final hard gate with no manual lint-edit class. Stale incidental entries that do not match `git show --name-only HEAD` are a retro BLOCKER.
+
+- **PROJECT.md conflict pre-check before Phase 7**: when a run updates PROJECT.md, Phase 7 must check whether base moved on PROJECT.md since branch creation before `merge --squash`. Falsifiable shape: `git -C <project> log --oneline <branch>.. <base> -- PROJECT.md` plus `git -C <project> diff --name-only <base>...<branch> -- PROJECT.md`. If both sides touched it, the solo plans the ordered merge of history blocks before committing instead of discovering it as an unstructured squash conflict.
+
+- **LLM-boundary sink matrix**: any run that changes LLM-facing XML/message boundaries must plan and review every producer and sink before implementation: live request path, injection path, reaction synth path, text attachments, typed media/file pass-through, source-attribute escaping, idempotency trust boundary, and legacy strip/migration behavior. Missing a non-primary producer is a plan-quality BLOCKER, because primary-path tests can pass while a secondary text path still bypasses the boundary.
 
 ## Build / compile-speed findings (mcp-split retro)
 
