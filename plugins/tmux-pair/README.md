@@ -221,11 +221,12 @@ python3 <plugin>/scripts/tmux_pair.py monitor --orch-pane <id> --panes <id1> [--
 
 `monitor` runs as a background watcher. Solo does not auto-start it: the agent self-compacts between phases.
 
-### Codex file-bridge for long messages (since 0.22.2)
+### Codex file-bridge for long messages (since 0.22.3)
 
 Codex's TUI input widget glitches when very long text is pasted into it. To avoid that, briefings sent to codex panes are routed through a tempfile and a short pointer message:
 
-- Initial briefings: the spawn helpers auto-detect the pane's agent (`@tmux-pair-agent` pane option, set at spawn time) and write the body to `/tmp/tmux-pair-msg-XXXX.md`. The pane receives a short *"read /tmp/... and execute it as your next instruction"* pointer. Codex reads the file via its built-in shell tool. Claude / pi panes keep the direct paste path.
+- Initial solo briefings: `cmd_solo` writes the body to `/tmp/tmux-pair-msg-XXXX.md` before boot and passes the short *"read /tmp/... and execute it as your next instruction"* pointer as Codex's initial CLI prompt. This avoids the post-ready `tmux_pair.py send` path, so `/run ... --agent codex` returns the JSON receipt promptly. Claude / pi panes keep the direct paste path.
+- Legacy spawn initial briefings: `cmd_spawn` still sends the pointer after all panes exist, because those briefings need peer pane IDs.
 - Re-briefs and plan-updates: `tmux_pair.py send <pane> --from-file <path>` reads the body from a file. When the target pane runs codex and the body is multi-line, the helper auto-routes through the same file-bridge.
 
 ## Skills

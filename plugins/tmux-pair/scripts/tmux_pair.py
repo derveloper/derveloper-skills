@@ -684,6 +684,11 @@ TRUST_MARKERS = (
 )
 
 
+def _agent_is_working(tail: str) -> bool:
+    """Return True when an agent TUI is already processing a prompt."""
+    return "esc to interrupt" in tail.lower()
+
+
 def _wait_for_agent_ready(pane: str, agent: str, timeout: int = 60) -> bool:
     """Poll capture-pane until the agent TUI is fully booted.
 
@@ -695,6 +700,8 @@ def _wait_for_agent_ready(pane: str, agent: str, timeout: int = 60) -> bool:
     Readiness markers:
       claude: '❯' visible in the pane tail
       codex:  '›' visible plus 'gpt-' or 'OpenAI Codex' in the tail
+      any:    'esc to interrupt' visible, meaning an initial prompt was
+              accepted and the agent is already working
 
     Returns True when ready, False on timeout.
     """
@@ -705,6 +712,8 @@ def _wait_for_agent_ready(pane: str, agent: str, timeout: int = 60) -> bool:
         tail = _pane_tail(pane, 30)
         if not tail:
             continue
+        if _agent_is_working(tail):
+            return True
         if not trust_handled and any(m in tail for m in TRUST_MARKERS):
             tmux_safe("send-keys", "-t", pane, "C-m")
             trust_handled = True
@@ -783,6 +792,34 @@ def _pane_agent(pane: str) -> str:
     return out.strip() if rc == 0 else ""
 
 
+def _write_temp_message_file(body: str) -> str:
+    fd, path = tempfile.mkstemp(
+        prefix="tmux-pair-msg-",
+        suffix=".md",
+        dir="/tmp",
+    )
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(body)
+    try:
+        os.chmod(path, 0o644)
+    except OSError:
+        pass
+    return path
+
+
+def _codex_file_pointer(path: str) -> str:
+    return (
+        f"Your next instruction is too long to paste safely into the "
+        f"codex TUI. It has been written to {path}. Please read that file "
+        f"now and execute its contents as your next instruction. After "
+        f"you have fully processed it, delete the file with `rm {path}`."
+    )
+
+
+def _append_initial_prompt(boot_command: str, prompt: str) -> str:
+    return f"{boot_command} {shlex.quote(prompt)}"
+
+
 def _send_codex_safe(pane: str, body: str) -> None:
     """Codex-safe delivery for long messages.
 
@@ -795,23 +832,8 @@ def _send_codex_safe(pane: str, body: str) -> None:
     We keep the file world-readable on purpose so a human can also `less`
     it if a debugging session is needed.
     """
-    fd, path = tempfile.mkstemp(
-        prefix="tmux-pair-msg-",
-        suffix=".md",
-        dir="/tmp",
-    )
-    with os.fdopen(fd, "w") as fh:
-        fh.write(body)
-    try:
-        os.chmod(path, 0o644)
-    except OSError:
-        pass
-    pointer = (
-        f"Your next instruction is too long to paste safely into the "
-        f"codex TUI. It has been written to {path}. Please read that file "
-        f"now and execute its contents as your next instruction. After "
-        f"you have fully processed it, delete the file with `rm {path}`."
-    )
+    path = _write_temp_message_file(body)
+    pointer = _codex_file_pointer(path)
     args = argparse.Namespace(pane=pane, text=pointer, no_enter=False)
     cmd_send(args)
 
@@ -3406,27 +3428,6 @@ def cmd_solo(args: argparse.Namespace) -> int:
     cargo_target = _cargo_target_dir(project, wt_path, shared_target)
     solo_name = f"solo.{window_name}"
     pi_provider, pi_model, pi_thinking = _pi_overrides_for_role(args, "writer")
-    pane = spawn_pane(
-        session=session, window_name=window_name, cwd=str(wt_path),
-        agent=args.agent,
-        boot_command=_boot_command_with_standards(
-            agent=args.agent, agents_dict=agents,
-            window_name=window_name, role="writer",
-            claude_effort=args.claude_effort,
-            codex_effort=args.codex_effort,
-            claude_model=args.claude_model,
-            cargo_target_dir=cargo_target,
-            pi_provider=pi_provider,
-            pi_model=pi_model,
-            pi_thinking=pi_thinking,
-            display_name=solo_name,
-            project_dir=wt_path,
-        ),
-        split="none", display_name=solo_name,
-    )
-    ready = _wait_panes_ready([(pane, args.agent)], timeout=70)
-    _post_boot_slashes(pane, args.agent, solo_name,
-                       claude_model=args.claude_model)
     with_standards, _ = _briefing_flags(
         args,
         no_worktree=bool(getattr(args, "no_worktree", False)),
@@ -3440,7 +3441,41 @@ def cmd_solo(args: argparse.Namespace) -> int:
         with_standards=with_standards,
         gated=gated,
     )
-    _send_briefing_for_agent(pane, args.agent, brief)
+    boot_command = _boot_command_with_standards(
+        agent=args.agent, agents_dict=agents,
+        window_name=window_name, role="writer",
+        claude_effort=args.claude_effort,
+        codex_effort=args.codex_effort,
+        claude_model=args.claude_model,
+        cargo_target_dir=cargo_target,
+        pi_provider=pi_provider,
+        pi_model=pi_model,
+        pi_thinking=pi_thinking,
+        display_name=solo_name,
+        project_dir=wt_path,
+    )
+    initial_briefing_path = None
+    briefing_dispatch = "sent (post-ready)"
+    if args.agent == "codex":
+        initial_briefing_path = _write_temp_message_file(brief)
+        boot_command = _append_initial_prompt(
+            boot_command,
+            _codex_file_pointer(initial_briefing_path),
+        )
+        briefing_dispatch = (
+            f"codex initial prompt via file-bridge ({initial_briefing_path})"
+        )
+    pane = spawn_pane(
+        session=session, window_name=window_name, cwd=str(wt_path),
+        agent=args.agent,
+        boot_command=boot_command,
+        split="none", display_name=solo_name,
+    )
+    ready = _wait_panes_ready([(pane, args.agent)], timeout=70)
+    if initial_briefing_path is None:
+        _post_boot_slashes(pane, args.agent, solo_name,
+                           claude_model=args.claude_model)
+        _send_briefing_for_agent(pane, args.agent, brief)
     output = {
         "mode": "solo",
         "gated": gated,
@@ -3453,7 +3488,7 @@ def cmd_solo(args: argparse.Namespace) -> int:
         "solo_name": solo_name,
         "solo_ready": ready.get(pane, False),
         "human_pane": human_pane,
-        "briefing_dispatch": "sent (post-ready)",
+        "briefing_dispatch": briefing_dispatch,
     }
     print(json.dumps(output, indent=2))
     return 0

@@ -15,7 +15,7 @@ description: >
   smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, and
   recovery from failure modes. Mandatory Post-Merge Retro persists recurring
   patterns.
-version: 0.22.2
+version: 0.22.3
 ---
 
 # tmux-pair-orchestration
@@ -304,11 +304,12 @@ Multi-line messages are submitted via `load-buffer` + `paste-buffer` to avoid th
 
 Normal messages get a sender identity prefix automatically. Example: `wr.<feature>` sending `REVIEW-READY: ...` arrives as `[FROM: wr.<feature>] REVIEW-READY: ...`. Messages already starting with `[FROM:` are left unchanged. Slash commands such as `/compact <focus>` are command traffic and are not prefixed. Spawned panes store their stable sender name in `@tmux-pair-sender`.
 
-### Codex file-bridge for long messages (since 0.22.2)
+### Codex file-bridge for long messages (since 0.22.3)
 
 The codex TUI input widget glitches when very long text is pasted into it (visible artifacts: half-rendered lines, mis-wrapped boxes, stuck spinner). For codex panes we skip the paste entirely and route long bodies through a tempfile.
 
-- **Initial briefings**: `cmd_solo` and `cmd_spawn` detect the pane's agent and call `_send_briefing_for_agent`. For `codex`, the briefing body is written to `/tmp/tmux-pair-msg-XXXX.md` and a short pointer message is sent into the pane instead: *"Your next instruction is too long to paste safely into the codex TUI. It has been written to /tmp/... Please read that file now and execute its contents as your next instruction. After processing, delete the file with `rm /tmp/...`."* Codex reads the file via its built-in shell tool and processes the briefing.
+- **Initial solo briefings**: `cmd_solo` writes the briefing body to `/tmp/tmux-pair-msg-XXXX.md` before boot and passes the short pointer as Codex's initial CLI prompt. This avoids the post-ready `tmux_pair.py send` path entirely, so `/run ... --agent codex` returns its JSON receipt promptly and Codex starts reading the briefing without a manual re-send. The pane title still carries the solo name; `/rename` is skipped for this boot-prompt path because Codex is already processing the task.
+- **Legacy spawn initial briefings**: `cmd_spawn` still uses `_send_briefing_for_agent` after all panes exist, because its briefings need the peer pane IDs. For `codex`, the body is written to `/tmp/tmux-pair-msg-XXXX.md` and a short pointer message is sent into the pane.
 - **Re-briefs and plan-updates**: `tmux_pair.py send <pane> --from-file <path>` reads the body from a file. When the target pane runs codex AND the body is multi-line, the helper auto-routes through the same file-bridge.
 - **claude / pi panes**: unchanged. Their input widgets handle long pastes via `load-buffer` + `paste-buffer` without rendering bugs, so the direct send path stays.
 - **Agent lookup**: every spawned pane stores its agent in the `@tmux-pair-agent` tmux pane option at spawn time. `cmd_send` reads it to decide.

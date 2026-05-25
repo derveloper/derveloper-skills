@@ -495,6 +495,20 @@ User feedback: with parallel solos on the same project, the shared `CARGO_TARGET
 | D3 | Drop `--no-shared-target`, add `--shared-target` | Flag inversion is a clean break at patch-bump time; an alias would invert semantically and confuse new users. |
 | D4 | Patch bump 0.22.0 -> 0.22.1 instead of minor | Behaviour change is opt-in/out at the spawn boundary; the public 7-phase workflow is unchanged. Patch bump signals "same surface, smarter default". |
 
+### 0.22.3 (Codex solo initial-prompt file-bridge, 2026-05-25)
+
+User feedback: `/run ... --agent codex` could create the worktree and pane, but the caller saw no JSON receipt for long enough that the spawn looked broken. The pane was ready; the fragile part was the post-ready `tmux_pair.py send` path for the short file-bridge pointer.
+
+- `cmd_solo` now builds the solo briefing before spawning a Codex pane, writes it to `/tmp/tmux-pair-msg-XXXX.md`, and appends the short file pointer as Codex's initial CLI prompt. This bypasses post-ready send for initial Codex solo briefings.
+- `_wait_for_agent_ready` now treats `esc to interrupt` as ready, because an initial prompt can be accepted and already running before the idle prompt appears.
+- Post-boot `/rename` is skipped for this Codex initial-prompt path. The tmux pane title and sender option still carry `solo.<feature>`, and avoiding a slash-command while Codex is working is more important than the in-TUI session name.
+- Docs synced: README.md, SKILL.md, plugin.json version to 0.22.3.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Initial Codex solo briefings use CLI prompt, not post-ready send | The briefing body still lives in `/tmp`, so the long-paste rendering bug stays fixed. Passing only the short pointer as `[PROMPT]` removes the tmux Enter/probe race and makes the spawn command return promptly. |
+| D2 | Keep legacy `cmd_spawn` on post-ready send | Legacy spawn briefings need peer pane IDs that do not exist before all panes are created. Solo is the supported path, so the targeted fix stays narrow. |
+
 ### 0.22.2 (Codex file-bridge for long messages, 2026-05-22)
 
 User feedback: codex TUI input widget renders long pasted briefings with visual glitches (half-rendered lines, mis-wrapped boxes). Symptom is rendering-only (the text is consumed correctly) but it makes follow-up interaction painful and prompts the human to think the briefing failed.
@@ -507,7 +521,7 @@ User feedback: codex TUI input widget renders long pasted briefings with visual 
 
 | ID | Decision | Rationale |
 |----|----------|-----------|
-| D1 | File-bridge over initial-prompt-via-boot-arg | Initial-prompt-via-boot-arg would let codex start processing the briefing before `/rename` and other post-boot slashes can apply. The file-bridge keeps the existing spawn ordering (boot, wait-ready, post-boot-slashes, briefing) intact; only the briefing's delivery mechanism changes. |
+| D1 | File-bridge over initial-prompt-via-boot-arg | Initial-prompt-via-boot-arg would let codex start processing the briefing before `/rename` and other post-boot slashes can apply. Superseded for `cmd_solo` in 0.22.3 after field evidence showed the post-ready send path could make a successful spawn look hung. |
 | D2 | Tempfile under /tmp, world-readable, codex deletes after reading | /tmp clears on reboot so a forgotten file is bounded. World-readable lets a human `less` the file for debugging without elevated tooling. Asking codex to delete after processing keeps the steady state clean. |
 | D3 | Auto-detection via `@tmux-pair-agent` tmux pane option, not a new CLI flag | Mirrors the existing `@tmux-pair-sender` pattern; works for both initial briefings (caller passes `agent` to `_send_briefing_for_agent`) and later sends (cmd_send reads the option). One mechanism, both paths. |
 | D4 | claude / pi panes keep the direct paste path | The rendering bug is codex-specific. claude's input widget renders pasted content as `[Pasted text +N lines]` placeholders and pi handles long pastes cleanly. Routing them through the file-bridge would add a tool-call latency for no benefit. |
