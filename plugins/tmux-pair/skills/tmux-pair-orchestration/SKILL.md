@@ -86,13 +86,13 @@ Default tie-breaker for subagents stays `claude` (recon-strong, structured). Cod
    BLOCKER in any → fix-loop. WARNING-only → proceed with documented follow-up. Max 3 review cycles.
 5. **PROJECT.md + Skill-Persist**: phase block in PROJECT.md, design decisions, domain knowledge as Skill under `.claude/skills/<repo>-<topic>/SKILL.md` (Persist-Convention; Rules only for cross-cutting always-on items).
 6. **Commit**: per-bullet conventional commits (no AI co-author), per-crate gates green, worktree clean. No DONE ping before Phase 7 has finished.
-7. **Auto-Squash-Merge + Cleanup**: solo squashes all bullet commits into one commit on `<base>`, deletes the feature branch, removes the worktree, then pings `DONE-MERGED`. Sequential chained runs always start from clean base. Steps the solo executes itself:
+7. **Auto-Squash-Merge + Cleanup**: solo squashes all bullet commits into one commit on `<base>`, removes the feature worktree, deletes the feature branch, then pings `DONE-MERGED`. Sequential chained runs always start from clean base. Steps the solo executes itself:
    - `git -C <project> status --porcelain` -> must be empty (else BLOCKER)
    - `git -C <project> checkout <base>`
    - `git -C <project> merge --squash <branch>`
    - `git -C <project> commit` (heredoc message: one-line subject + bullet body + decisions + test counts + phase/gate ledger)
-   - `git -C <project> branch -D <branch>`
    - `git -C <project> worktree remove <wt_path>` (skipped if `--no-worktree`)
+   - `git -C <project> branch -D <branch>`
    - `DONE-MERGED solo.<feature>: <squash-sha> on <base>` ping
    - Merge conflict in Phase 7 -> AskUserQuestion in own pane with the concrete error and 2-4 recovery options (rebase + retry, abort, manual resolve + retry). No BLOCKER ping to master. See SOLO USER INPUT RULE in the briefing.
 
@@ -433,7 +433,7 @@ Findings:
 
 ## Cleanup (auto + manual)
 
-The solo agent removes the worktree and the branch automatically in Phase 7 (Auto-Squash-Merge). The only manual step left is `tmux kill-window` after pattern-persist.
+The solo agent removes the worktree and the branch automatically in Phase 7 (Auto-Squash-Merge). Worktree removal comes before `git branch -D`: Git refuses to delete a branch that is still checked out in any worktree. The only manual step left is `tmux kill-window` after pattern-persist.
 
 Before 0.20.0 cleanup was fully manual and order-sensitive (retro first, then cleanup). Since 0.20.0 the solo agent performs the squash, branch-delete, and worktree-remove itself, and the retro step is the only remaining human duty.
 
