@@ -495,6 +495,23 @@ User feedback: with parallel solos on the same project, the shared `CARGO_TARGET
 | D3 | Drop `--no-shared-target`, add `--shared-target` | Flag inversion is a clean break at patch-bump time; an alias would invert semantically and confuse new users. |
 | D4 | Patch bump 0.22.0 -> 0.22.1 instead of minor | Behaviour change is opt-in/out at the spawn boundary; the public 7-phase workflow is unchanged. Patch bump signals "same surface, smarter default". |
 
+### 0.22.6 (Historyless agent boot commands, 2026-05-29)
+
+User feedback: tmux-pair typed full agent launch commands into fresh zsh panes,
+which persisted claude/codex/pi boot lines in the user's shell history.
+
+- `spawn_pane` now passes the boot command directly as the tmux
+  `shell-command` for `new-window` and `split-window`.
+- Empty pane spawns still open a normal interactive shell.
+- Docs synced: README.md, SKILL.md, plugin.json, marketplace.json, and
+  SKILL.md frontmatter to 0.22.6.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Use tmux shell-command instead of `send-keys` for boot | The agent process starts without entering a command line into interactive zsh history. |
+| D2 | Keep direct `send-keys` only for post-boot TUI messages | Slash commands and briefings are agent input, not shell input, so they do not touch shell history. |
+| D3 | Patch bump 0.22.5 -> 0.22.6 | Public flags stay unchanged; spawn mechanics are safer. |
+
 ### 0.22.5 (Default Claude model to Opus 4.8, 2026-05-28)
 
 User feedback: Opus 4.8 shipped today and should become the default Claude model for tmux-pair solo runs.

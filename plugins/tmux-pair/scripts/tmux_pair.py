@@ -940,10 +940,11 @@ def spawn_pane(
         + /resume picker)
     """
     target = f"{session}:{window_name}"
+    boot_args = [boot_command] if boot_command else []
     if not window_exists(session, window_name):
         pane_id = tmux(
             "new-window", "-t", f"{session}:", "-n", window_name,
-            "-c", cwd, "-d", "-P", "-F", "#{pane_id}",
+            "-c", cwd, "-d", "-P", "-F", "#{pane_id}", *boot_args,
         )
     else:
         if split == "none":
@@ -951,7 +952,7 @@ def spawn_pane(
         flag = "-h" if split == "h" else "-v"
         pane_id = tmux(
             "split-window", "-t", target, flag, "-c", cwd,
-            "-P", "-F", "#{pane_id}",
+            "-P", "-F", "#{pane_id}", *boot_args,
         )
 
     if display_name:
@@ -970,10 +971,9 @@ def spawn_pane(
         tmux_safe("set-option", "-p", "-t", pane_id,
                   "@tmux-pair-agent", agent)
 
-    if boot_command:
-        time.sleep(0.5)  # shell needs boot time, otherwise first char is eaten
-        tmux("send-keys", "-t", pane_id, "-l", boot_command)
-        tmux("send-keys", "-t", pane_id, "C-m")
+    # Agent boot commands are passed to tmux as the pane's shell-command
+    # instead of being typed into an interactive zsh prompt. That keeps
+    # full claude/codex/pi launch lines out of the user's shell history.
 
     # Slash-commands and briefing are sent by the caller after a parallel
     # _wait_panes_ready() across all panes. Doing it post-ready avoids the

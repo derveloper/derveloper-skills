@@ -95,6 +95,10 @@ Add or replace agent commands in `~/.config/tmux-pair/agents.json`:
 }
 ```
 
+Agent boot commands are started as the tmux pane's shell-command. They are not
+typed into an interactive zsh prompt, so full claude/codex/pi launch lines do
+not land in `~/.zsh_history`.
+
 Briefings are task-focused and compact by default. `--with-standards` includes the standards bundle; `--greenfield` adds the greenfield pre-flight block for first-session repos without `.claude/rules/`.
 
 ## Model selection and Compact-Watcher
