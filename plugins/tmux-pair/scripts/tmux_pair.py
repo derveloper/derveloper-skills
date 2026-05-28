@@ -28,6 +28,7 @@ keyed by agent name. Defaults below are intentionally minimal.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -167,16 +168,6 @@ def slugify(s: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "-", s.strip().lstrip("/"))
 
 
-# ---------------------------------------------------------------------------
-# V6-V10 smart-workflow primitives: caches, TESTS-PROOF parser, inline-gate
-# predictor. All self-contained helpers, no tmux dependency. Tested via the
-# new `parse-tests-proof` and `inline-gate-decide` subcommands plus
-# import-smoke (see tmux-pair PROJECT.md 0.14.0 implementation history).
-# ---------------------------------------------------------------------------
-
-import hashlib  # local import keeps top-of-file lean for legacy readers
-
-
 # V6 + V9: cache locations.
 READINESS_CACHE_DIR = Path.home() / ".cache" / "tmux-pair" / "readiness"
 RECON_CACHE_DIR = Path("/tmp")
@@ -301,6 +292,87 @@ def _cargo_target_dir(repo_root: Path, wt_path: Path,
         return CARGO_TARGET_BASE / repo_slug
     wt_slug = _cache_repo_slug(Path(wt_path).resolve())
     return CARGO_TARGET_BASE / f"{repo_slug}__{wt_slug}"
+
+
+def _cargo_target_cleanup_command(
+    project: str,
+    wt_path: Path,
+    *,
+    shared_target: bool,
+) -> str | None:
+    """Return the Phase-7 cleanup command for a per-worktree cargo target."""
+    if shared_target:
+        return None
+    target = _cargo_target_dir(Path(project), wt_path, shared=False)
+    if target is None:
+        return None
+    script = _scripts_dir() / "tmux_pair.py"
+    return (
+        f"python3 {shlex.quote(str(script))} cleanup-target "
+        f"--project {shlex.quote(str(project))} "
+        f"--worktree {shlex.quote(str(wt_path))}"
+    )
+
+
+def _cleanup_cargo_target_dir(
+    project: Path,
+    wt_path: Path,
+    *,
+    shared_target: bool,
+    dry_run: bool = False,
+) -> dict:
+    """Remove the per-worktree cargo target dir and refuse unsafe paths."""
+    if shared_target:
+        return {
+            "action": "skip",
+            "reason": "shared-target",
+            "path": None,
+        }
+
+    target = _cargo_target_dir(project, wt_path, shared=False)
+    if target is None:
+        return {
+            "action": "skip",
+            "reason": "non-cargo-project",
+            "path": None,
+        }
+
+    base = CARGO_TARGET_BASE.resolve(strict=False)
+    resolved = target.resolve(strict=False)
+    try:
+        resolved.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(
+            f"refusing to remove target outside {base}: {resolved}"
+        ) from exc
+
+    if resolved == base:
+        raise ValueError(f"refusing to remove cargo target base: {base}")
+    if "__" not in resolved.name:
+        raise ValueError(
+            "refusing to remove shared-looking cargo target without "
+            f"worktree slug: {resolved}"
+        )
+    if target.is_symlink():
+        raise ValueError(f"refusing to remove symlink cargo target: {target}")
+
+    payload = {
+        "action": "remove",
+        "reason": None,
+        "path": str(resolved),
+        "removed": False,
+        "dry_run": dry_run,
+    }
+    if dry_run:
+        return payload
+    if not target.exists():
+        payload["action"] = "skip"
+        payload["reason"] = "missing"
+        return payload
+
+    shutil.rmtree(target)
+    payload["removed"] = True
+    return payload
 
 
 # V7 TESTS-PROOF marker schema (parsed from commit-message bodies).
@@ -3242,11 +3314,27 @@ def _briefing_solo(
     *, human_pane: str,
     wt_path: Path, branch: str, base: str, project: str,
     feature: str, task: str,
+    cargo_target_cleanup_cmd: str | None = None,
     with_standards: bool = False,
     gated: bool = True,
 ) -> str:
     send_human = _send_command(human_pane)
     repo_block = _repo_subagents_block(Path(project))
+    cargo_cleanup_step = (
+        f"  6. {cargo_target_cleanup_cmd} (per-worktree CARGO_TARGET_DIR cleanup).\n"
+        if cargo_target_cleanup_cmd else
+        "  6. Per-worktree CARGO_TARGET_DIR cleanup: skipped (non-Cargo project or --shared-target).\n"
+    )
+    gated_cargo_cleanup_step = (
+        f"    6. {cargo_target_cleanup_cmd} (per-worktree CARGO_TARGET_DIR cleanup).\n"
+        if cargo_target_cleanup_cmd else
+        "    6. Per-worktree CARGO_TARGET_DIR cleanup: skipped (non-Cargo project or --shared-target).\n"
+    )
+    done_cleanup_text = (
+        "Worktree+branch+target cleaned."
+        if cargo_target_cleanup_cmd else
+        "Worktree+branch cleaned."
+    )
     if not gated:
         return (
             f"Language: respond to the human in the language the human writes in. Default English.\n\n"
@@ -3276,8 +3364,9 @@ def _briefing_solo(
             f"  3. git -C {project} merge --squash {branch}\n"
             f"  4. git -C {project} commit (heredoc message, one-liner + body).\n"
             f"  5. git -C {project} worktree remove {wt_path} (if worktree mode).\n"
-            f"  6. git -C {project} branch -D {branch}\n"
-            f"  7. DONE-MERGED ping. No push.\n"
+            f"{cargo_cleanup_step}"
+            f"  7. git -C {project} branch -D {branch}\n"
+            f"  8. DONE-MERGED ping. No push.\n"
             f"  On merge conflict: AskUserQuestion in own pane with the\n"
             f"  concrete error and 2-4 recovery options. No BLOCKER ping.\n"
         )
@@ -3378,10 +3467,11 @@ def _briefing_solo(
         f"    5. git -C {project} worktree remove {wt_path} (if worktree\n"
         f"       mode; path == project with --no-worktree, skip this\n"
         f"       step).\n"
-        f"    6. git -C {project} branch -D {branch}\n"
-        f"    7. DONE-MERGED ping to the user (back-channel exception):\n"
+        f"{gated_cargo_cleanup_step}"
+        f"    7. git -C {project} branch -D {branch}\n"
+        f"    8. DONE-MERGED ping to the user (back-channel exception):\n"
         f"       {send_human} \"DONE-MERGED solo.{feature}: <squash-sha> on {base}.\n"
-        f"                       <bullet count> bullets squashed. Worktree+branch cleaned.\"\n"
+        f"                       <bullet count> bullets squashed. {done_cleanup_text}\"\n"
         f"    On conflict in merge --squash: AskUserQuestion in own pane\n"
         f"    with concrete error + 2-4 recovery options. NO BLOCKER ping\n"
         f"    to master. NO push.\n"
@@ -3411,9 +3501,10 @@ def cmd_solo(args: argparse.Namespace) -> int:
     Phase 1 (recon) -> Phase 2 (plan + GATE-2 self-check via subagent) ->
     Phase 3 (impl, parallel subagents where independent) -> Phase 4 (GATE-3
     self-review via subagent) -> Phase 5 (PROJECT.md + skill persist) ->
-    Phase 6 (commit) -> Phase 7 (auto-squash-merge onto base + branch and
-    worktree cleanup + DONE-MERGED ping). Each phase uses subagents for
-    parallel work. With --no-gated: minimal briefing, just spawn + task.
+    Phase 6 (commit) -> Phase 7 (auto-squash-merge onto base + worktree,
+    per-worktree target, and branch cleanup + DONE-MERGED ping). Each phase
+    uses subagents for parallel work. With --no-gated: minimal briefing,
+    just spawn + task.
     Default ON.
 
     Worktree default. With --no-worktree: solo runs on the project's current
@@ -3426,6 +3517,9 @@ def cmd_solo(args: argparse.Namespace) -> int:
     session = current_session()
     shared_target = bool(getattr(args, "shared_target", False))
     cargo_target = _cargo_target_dir(project, wt_path, shared_target)
+    cargo_target_cleanup_cmd = _cargo_target_cleanup_command(
+        str(project), wt_path, shared_target=shared_target,
+    )
     solo_name = f"solo.{window_name}"
     pi_provider, pi_model, pi_thinking = _pi_overrides_for_role(args, "writer")
     with_standards, _ = _briefing_flags(
@@ -3438,6 +3532,7 @@ def cmd_solo(args: argparse.Namespace) -> int:
         human_pane=human_pane,
         wt_path=wt_path, branch=branch, base=args.base, project=str(project),
         feature=args.feature, task=args.task or "",
+        cargo_target_cleanup_cmd=cargo_target_cleanup_cmd,
         with_standards=with_standards,
         gated=gated,
     )
@@ -3871,6 +3966,23 @@ def cmd_inline_gate_decide(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cleanup_target(args: argparse.Namespace) -> int:
+    """Safely remove tmux-pair's per-worktree Cargo target directory."""
+    try:
+        payload = _cleanup_cargo_target_dir(
+            Path(args.project).expanduser(),
+            Path(args.worktree).expanduser(),
+            shared_target=bool(getattr(args, "shared_target", False)),
+            dry_run=bool(getattr(args, "dry_run", False)),
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="tmux_pair", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -4014,7 +4126,8 @@ def build_parser() -> argparse.ArgumentParser:
                          "all worktrees (legacy 0.14.0..0.22.0 behavior). "
                          "Default is per-worktree CARGO_TARGET_DIR so "
                          "parallel agents on the same project don't fight "
-                         "for the cargo file-lock.")
+                         "for the cargo file-lock. Phase 7 cleanup removes "
+                         "per-worktree targets only.")
     tr.set_defaults(func=cmd_spawn)
 
     so = sub.add_parser("solo",
@@ -4088,7 +4201,8 @@ def build_parser() -> argparse.ArgumentParser:
                          "all worktrees (legacy 0.14.0..0.22.0 behavior). "
                          "Default is per-worktree CARGO_TARGET_DIR so "
                          "parallel solos on the same project don't fight "
-                         "for the cargo file-lock.")
+                         "for the cargo file-lock. Phase 7 cleanup removes "
+                         "per-worktree targets only.")
     so.set_defaults(func=cmd_solo)
 
     li = sub.add_parser("list", help="list panes in the current session")
@@ -4159,11 +4273,32 @@ def build_parser() -> argparse.ArgumentParser:
                     help="upper bound for predicted files-touched (default: 5)")
     ig.set_defaults(func=cmd_inline_gate_decide)
 
+    ct = sub.add_parser(
+        "cleanup-target",
+        help="remove the per-worktree Cargo target cache after Phase 7",
+    )
+    ct.add_argument("--project", required=True,
+                    help="main project repo path used for the solo run")
+    ct.add_argument("--worktree", required=True,
+                    help="worktree path used for the solo run")
+    ct.add_argument("--shared-target", action="store_true",
+                    help="skip removal because the run used a shared target")
+    ct.add_argument("--dry-run", action="store_true",
+                    help="print the target that would be removed")
+    ct.set_defaults(func=cmd_cleanup_target)
+
     return p
 
 
 def main() -> int:
-    if shutil.which("tmux") is None:
+    no_tmux_commands = {
+        "cleanup-target",
+        "inline-gate-decide",
+        "parse-tests-proof",
+    }
+    requested_cmd = next((arg for arg in sys.argv[1:] if not arg.startswith("-")),
+                         "")
+    if requested_cmd not in no_tmux_commands and shutil.which("tmux") is None:
         sys.exit("error: tmux not on PATH")
     parser = build_parser()
     args = parser.parse_args()

@@ -10,7 +10,7 @@ Phase 1 Recon -> Phase 2 Plan + GATE 2 Plan-Check -> Phase 3 Implementation Loop
 
 GATE 1 (Clarify) folds into Phase 1 and Phase 2: the solo agent calls `AskUserQuestion` in its own pane whenever recon or plan-write hits a user-decision question. GATE 1.5 (Reviewer-Readiness) runs between Phase 1 and Phase 2 to confirm `.claude/rules/*.md` cover the 8-item checklist; on `NEEDS-RULES` the bootstrap loop generates the missing rules from plugin templates.
 
-The Post-Merge Retro is mandatory, not optional. See the "Post-Merge Retro" section below for the procedure. Phase 7 auto-cleanup (worktree remove, branch delete) happens before the retro; only the tmux window survives until pattern-persist is done.
+The Post-Merge Retro is mandatory, not optional. See the "Post-Merge Retro" section below for the procedure. Phase 7 auto-cleanup (worktree remove, per-worktree Cargo target cleanup, branch delete) happens before the retro; only the tmux window survives until pattern-persist is done.
 
 Gates exist because writer+reviewer loops on their own optimise for "produce something" instead of "produce the right thing". Each gate forces an adversarial check before the run can continue. Subagents enforce gates 1.5, 2, and 3, each paired with a `codex exec` second opinion (different model family, fresh context, no pane setup); the solo agent enforces gate 1 via `AskUserQuestion` in its own pane.
 
@@ -150,9 +150,9 @@ Reviewer panes inside the loop trust the marker for spot-checks too. They may st
 
 ### V8 Cargo-Target-Sharing
 
-`cmd_solo` and `cmd_spawn` compute `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>__<wt-slug>/` (slug = basename with non-alphanumerics replaced by `_`) and prepend `env CARGO_TARGET_DIR=<path>` to every spawned boot command. Each worktree gets its own target directory so parallel agents on the same project do not collide on cargo's file-lock. Pass `--shared-target` to switch to the legacy single-shared `<repo-slug>/` target (max cache warmth, single active agent). Non-Cargo repos skip the env entirely.
+`cmd_solo` and `cmd_spawn` compute `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>__<wt-slug>/` (slug = basename with non-alphanumerics replaced by `_`) and prepend `env CARGO_TARGET_DIR=<path>` to every spawned boot command. Each worktree gets its own target directory so parallel agents on the same project do not collide on cargo's file-lock. Phase 7 solo cleanup runs `tmux_pair.py cleanup-target --project <project> --worktree <wt_path>` after worktree removal; the helper deletes only per-worktree targets below `~/.cache/tmux-pair/cargo-target/` and refuses shared-looking names. Pass `--shared-target` to switch to the legacy single-shared `<repo-slug>/` target (max cache warmth, single active agent). Shared targets are not auto-deleted. Non-Cargo repos skip the env entirely.
 
-Parallel worktrees on the same repo share the build cache. Cargo's own lock-file handles concurrency; occasional short blocks are normal.
+Parallel worktrees on the same repo do not share the build cache by default. This avoids Cargo lock contention at the cost of a cold build per worktree; the per-worktree cache is intentionally disposable at Phase 7.
 
 ### V9 Recon-Cache with Delta-Mode
 
@@ -599,6 +599,7 @@ After `COMPLETE` lands and the human squash-merges the worktree branch, the spaw
 ```bash
 cd <project-path>
 git worktree remove ../<project-name>-wt-<feature>
+python3 <plugin>/scripts/tmux_pair.py cleanup-target --project <project-path> --worktree ../<project-name>-wt-<feature>
 git branch -D feature/<feature>      # -D because squash-merge is git-perspectively "unmerged"
 tmux kill-window -t <window-name>
 ```

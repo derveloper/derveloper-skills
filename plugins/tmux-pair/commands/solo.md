@@ -73,7 +73,7 @@ Solo keeps the same gates spawn-mode used, just with leaner mechanics:
 - `--codex-effort <level>`: codex reasoning effort, set as `-c model_reasoning_effort=<level>` (default `xhigh`, gpt-5.5 supports xhigh). Choices: `minimal|low|medium|high|xhigh`.
 - `--pi-provider <name>` / `--pi-model <slug>` / `--pi-thinking <level>`: pi-specific overrides. Only applied when `--agent pi`.
 - `--pi-writer-provider` / `--pi-writer-model` / `--pi-writer-thinking`: pi role-specific overrides (solo internally uses the `writer` role for cargo/AGENTS.md handling).
-- `--shared-target`: use one shared `CARGO_TARGET_DIR` per repo across all worktrees (legacy 0.14.0..0.22.0 behavior, max cache warmth, single active agent). Default since 0.22.1: per-worktree `CARGO_TARGET_DIR` (`~/.cache/tmux-pair/cargo-target/<repo>__<wt-slug>/`) so parallel solos on the same project don't fight for the cargo file-lock.
+- `--shared-target`: use one shared `CARGO_TARGET_DIR` per repo across all worktrees (legacy 0.14.0..0.22.0 behavior, max cache warmth, single active agent). Default since 0.22.1: per-worktree `CARGO_TARGET_DIR` (`~/.cache/tmux-pair/cargo-target/<repo>__<wt-slug>/`) so parallel solos on the same project don't fight for the cargo file-lock. Since 0.22.4, Phase 7 removes that per-worktree target via `tmux_pair.py cleanup-target`; shared targets are not auto-deleted.
 
 ## Action
 
@@ -100,7 +100,7 @@ JSON with `worktree`, `branch`, `window`, `solo_pane`, `solo_agent`, `solo_name`
 
 ## Cleanup (auto, Phase 7)
 
-Phase 7 of the gated workflow does the squash-merge + branch-delete + worktree-remove automatically. The human only kills the tmux window after the Post-Merge Retro:
+Phase 7 of the gated workflow does the squash-merge, worktree removal, per-worktree Cargo target cleanup, and branch delete automatically. The human only kills the tmux window after the Post-Merge Retro:
 
 ```bash
 tmux kill-window -t <window-name>

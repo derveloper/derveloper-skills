@@ -495,6 +495,20 @@ User feedback: with parallel solos on the same project, the shared `CARGO_TARGET
 | D3 | Drop `--no-shared-target`, add `--shared-target` | Flag inversion is a clean break at patch-bump time; an alias would invert semantically and confuse new users. |
 | D4 | Patch bump 0.22.0 -> 0.22.1 instead of minor | Behaviour change is opt-in/out at the spawn boundary; the public 7-phase workflow is unchanged. Patch bump signals "same surface, smarter default". |
 
+### 0.22.4 (Phase-7 per-worktree Cargo target cleanup, 2026-05-28)
+
+User feedback: Rust solos left stale per-worktree target directories under `~/.cache/tmux-pair/cargo-target/`, and the disk filled up after chained runs. Worktree and branch cleanup was not enough because Cargo artifacts live outside the git worktree.
+
+- Added `tmux_pair.py cleanup-target --project <repo> --worktree <wt>` for safe per-worktree target cleanup. It recomputes the V8 target path, refuses paths outside `~/.cache/tmux-pair/cargo-target/`, refuses shared-looking target names without a worktree slug, refuses symlinks, and skips `--shared-target`.
+- Solo Phase 7 briefings now include the cleanup command after `git worktree remove` and before `git branch -D`.
+- Docs synced: README.md, SKILL.md, gated-workflow.md, commands/solo.md, plugin.json, marketplace.json, and SKILL.md frontmatter to 0.22.4.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Dedicated `cleanup-target` helper instead of raw `rm -rf "$CARGO_TARGET_DIR"` | The agent should not delete arbitrary environment-derived paths. The helper has one authority boundary: computed tmux-pair per-worktree targets under the known cache base. |
+| D2 | Keep `--shared-target` caches persistent | Shared targets are explicitly chosen for cache warmth across runs. Auto-deleting them would undo the flag's reason to exist. |
+| D3 | Patch bump 0.22.3 -> 0.22.4 | Public workflow is unchanged except safer cleanup at the existing Phase-7 boundary. |
+
 ### 0.22.3 (Codex solo initial-prompt file-bridge, 2026-05-25)
 
 User feedback: `/run ... --agent codex` could create the worktree and pane, but the caller saw no JSON receipt for long enough that the spawn looked broken. The pane was ready; the fragile part was the post-ready `tmux_pair.py send` path for the short file-bridge pointer.

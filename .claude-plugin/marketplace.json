@@ -13,7 +13,7 @@
       "name": "tmux-pair",
       "source": "./plugins/tmux-pair",
       "description": "Run a single coding agent on a task via tmux + git worktree. /run auto-entry performs a short repo + task recon, then dispatches to /solo. /solo runs one agent in a fresh worktree with a gated 7-phase workflow (Recon, Clarify, Reviewer-Readiness, Plan-Check, Loop, Final-Verify, Auto-Squash-Merge). Each gate runs two independent minds in parallel: a claude subagent plus `codex exec` (different model family, fresh context, no pane setup). Phase 7 (new in 0.20.0) auto-squashes bullet commits onto base, deletes the feature branch, removes the worktree, and pings DONE-MERGED so sequential chained runs always start from a clean base. Includes the orchestration script, the tmux-pair-orchestration skill, PROJECT.md care, scoped subagents for the gates, sender identity prefixes, explicit parallel-plan markers, auto-detection of repo-specific subagents (`.claude/agents/<repo>-*.md`) listed in every briefing, shipped rules templates for 7 stacks, bundled companion skills (gepa for prompt-optimization, dg for adversarial code review), and pi as third coding agent alongside claude + codex. `/run` dynamically picks claude vs codex based on task profile (recon-heavy/plan-integration -> claude, single-file/codemod/adversarial bug-hunt -> codex). Multi-pane spawn modes were removed in 0.19.0.",
-      "version": "0.22.3",
+      "version": "0.22.4",
       "category": "workflow",
       "tags": ["tmux", "git-worktree", "solo-agent", "gated-workflow"]
     }

@@ -15,7 +15,7 @@ description: >
   smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, and
   recovery from failure modes. Mandatory Post-Merge Retro persists recurring
   patterns.
-version: 0.22.3
+version: 0.22.4
 ---
 
 # tmux-pair-orchestration
@@ -92,6 +92,7 @@ Default tie-breaker for subagents stays `claude` (recon-strong, structured). Cod
    - `git -C <project> merge --squash <branch>`
    - `git -C <project> commit` (heredoc message: one-line subject + bullet body + decisions + test counts + phase/gate ledger)
    - `git -C <project> worktree remove <wt_path>` (skipped if `--no-worktree`)
+   - `tmux_pair.py cleanup-target --project <project> --worktree <wt_path>` for per-worktree Cargo targets
    - `git -C <project> branch -D <branch>`
    - `DONE-MERGED solo.<feature>: <squash-sha> on <base>` ping
    - Merge conflict in Phase 7 -> AskUserQuestion in own pane with the concrete error and 2-4 recovery options (rebase + retry, abort, manual resolve + retry). No BLOCKER ping to master. See SOLO USER INPUT RULE in the briefing.
@@ -259,7 +260,7 @@ TESTS-PROOF:
 
 ### Per-Worktree Cargo Target (since 0.22.1)
 
-`tmux_pair.py` prepends `env CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>__<wt-slug>/` to the boot command when the project is a Cargo workspace. Each worktree gets its own target directory, so parallel solos on the same project never block on cargo's file-lock. Trade-off: cold rebuild per worktree (a few minutes amortised against a 30..90 min solo run). Pass `--shared-target` to opt back into the legacy single-shared-target behaviour (`<repo-slug>/`) when only one agent is active and maximum cache warmth matters. Non-Cargo repos skip the env entirely.
+`tmux_pair.py` prepends `env CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>__<wt-slug>/` to the boot command when the project is a Cargo workspace. Each worktree gets its own target directory, so parallel solos on the same project never block on cargo's file-lock. Trade-off: cold rebuild per worktree (a few minutes amortised against a 30..90 min solo run). Since 0.22.4, Phase 7 runs `tmux_pair.py cleanup-target --project <project> --worktree <wt_path>` after worktree removal. The helper refuses paths outside `~/.cache/tmux-pair/cargo-target/` and refuses shared-looking target names without a worktree slug. Pass `--shared-target` to opt back into the legacy single-shared-target behaviour (`<repo-slug>/`) when only one agent is active and maximum cache warmth matters; shared targets are not auto-deleted. Non-Cargo repos skip the env entirely.
 
 ### V9 Recon-Cache with Delta-Mode (1h TTL)
 
@@ -345,7 +346,7 @@ The full list lives in `references/failure-modes.md`. The most common:
 
 ## Post-Merge Retro (mandatory)
 
-Default workflow after the solo agent sends `DONE-MERGED`. Phase 7 of the solo workflow has already executed the squash-merge, branch delete, and worktree remove. The retro step remains:
+Default workflow after the solo agent sends `DONE-MERGED`. Phase 7 of the solo workflow has already executed the squash-merge, worktree removal, per-worktree Cargo target cleanup, and branch delete. The retro step remains:
 
 1. **Retro**: the orchestrator sends a tailored retro question to the solo pane (via `tmux_pair.py send`; the pane is still alive after Phase 7) AND spawns 2-3 `Agent` personas in parallel with different perspectives (orchestrator view, writer view, reviewer view), plus one `codex exec "retro"` for an independent fourth view. Expect 200-500 words of factual analysis per source (no praise, weaknesses stated directly). Topics:
 
@@ -367,7 +368,7 @@ Default workflow after the solo agent sends `DONE-MERGED`. Phase 7 of the solo w
 tmux kill-window -t <window-name>
 ```
 
-Worktree and branch are gone since Phase 7; only the tmux window remains for the retro. The retro step is mandatory, not optional. A solo run without a retro fails to persist the most expensive learnings of the run.
+Worktree, branch, and per-worktree Cargo target are gone since Phase 7; only the tmux window remains for the retro. The retro step is mandatory, not optional. A solo run without a retro fails to persist the most expensive learnings of the run.
 
 ## Recurring Pre-Flight Checks (aggregated from retros)
 
@@ -433,7 +434,7 @@ Findings:
 
 ## Cleanup (auto + manual)
 
-The solo agent removes the worktree and the branch automatically in Phase 7 (Auto-Squash-Merge). Worktree removal comes before `git branch -D`: Git refuses to delete a branch that is still checked out in any worktree. The only manual step left is `tmux kill-window` after pattern-persist.
+The solo agent removes the worktree, per-worktree Cargo target, and branch automatically in Phase 7 (Auto-Squash-Merge). Worktree removal comes before `git branch -D`: Git refuses to delete a branch that is still checked out in any worktree. Cargo target cleanup runs through `tmux_pair.py cleanup-target`, not raw `rm -rf`, so shared targets and non-tmux-pair paths are protected. The only manual step left is `tmux kill-window` after pattern-persist.
 
 Before 0.20.0 cleanup was fully manual and order-sensitive (retro first, then cleanup). Since 0.20.0 the solo agent performs the squash, branch-delete, and worktree-remove itself, and the retro step is the only remaining human duty.
 

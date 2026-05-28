@@ -61,9 +61,10 @@ SOLO GATED WORKFLOW (subagent-centric)
     3. git merge --squash <branch>
     4. git commit (heredoc: subject + body with B1..Bn summary,
        decisions, test counts).
-    5. git branch -D <branch>
-    6. git worktree remove <wt_path>
-    7. DONE-MERGED ping to user pane.
+    5. git worktree remove <wt_path>
+    6. tmux_pair.py cleanup-target --project <project> --worktree <wt_path>
+    7. git branch -D <branch>
+    8. DONE-MERGED ping to user pane.
     On merge conflict: AskUserQuestion in own pane with concrete
     error + 2-4 recovery options. No BLOCKER ping to master.
 

@@ -1,6 +1,6 @@
 # tmux-pair
 
-Run a single coding agent on a task via tmux + git worktrees. The agent lives in its own pane in a fresh `git worktree`, executes a 7-phase gated self-driven workflow with adversarial review at each gate, then auto-squash-merges its bullet commits onto the base branch and cleans up the feature branch and worktree.
+Run a single coding agent on a task via tmux + git worktrees. The agent lives in its own pane in a fresh `git worktree`, executes a 7-phase gated self-driven workflow with adversarial review at each gate, then auto-squash-merges its bullet commits onto the base branch and cleans up the feature branch, worktree, and per-worktree Cargo target.
 
 ## What it does
 
@@ -29,7 +29,7 @@ Inside an existing tmux session:
 /solo   <project-path> <base-ref> <feature-name> <task description>
 ```
 
-Both create a worktree at `<project-parent>/<project-basename>-wt-<feature>` and branch `feature/<feature>` from `<base-ref>`. Phase 7 squashes that feature branch back onto the base, deletes the branch, removes the worktree, and pings `DONE-MERGED` so sequential chained runs always start from a clean base.
+Both create a worktree at `<project-parent>/<project-basename>-wt-<feature>` and branch `feature/<feature>` from `<base-ref>`. Phase 7 squashes that feature branch back onto the base, removes the worktree, deletes the matching per-worktree Cargo target, deletes the branch, and pings `DONE-MERGED` so sequential chained runs always start from a clean base.
 
 ## /run agent-pick heuristic
 
@@ -58,7 +58,7 @@ Phase 1 Recon -> Phase 2 Plan + GATE-2 -> Phase 3 Implementation -> Phase 4 GATE
 4. **GATE-3 Final-Verify**: three independent adversarial checks in parallel: `Agent(gate-3-verifier)`, `Agent(gate-3-code-reviewer)`, `Bash(codex exec "diff-review")`. BLOCKER in any means fix-loop. WARNING-only proceeds with documented follow-up.
 5. **PROJECT.md + Skill-Persist**: phase block + decisions in PROJECT.md, domain insights as a `.claude/skills/<repo>-<topic>/SKILL.md` (default) or `.claude/rules/<key>.md` (cross-cutting, justified).
 6. **Commit**: per-bullet conventional commits (no AI co-author). Workspace gate PASS first. Worktree clean (only pre-existing allowlist permitted). No push.
-7. **Auto-Squash-Merge + Cleanup**: solo squashes its bullet commits into one commit on the base branch, deletes the feature branch, removes the worktree, then pings `DONE-MERGED`. Sequential chained runs always start from a clean base. On merge conflict: AskUserQuestion in own pane with 2-4 recovery options. No BLOCKER ping back to master.
+7. **Auto-Squash-Merge + Cleanup**: solo squashes its bullet commits into one commit on the base branch, removes the worktree, deletes the per-worktree Cargo target, deletes the feature branch, then pings `DONE-MERGED`. Sequential chained runs always start from a clean base. On merge conflict: AskUserQuestion in own pane with 2-4 recovery options. No BLOCKER ping back to master.
 
 All human input lands in the solo agent's own pane via `AskUserQuestion`. The Phase 7 `DONE-MERGED` ping is the only back-channel signal to the spawning master pane.
 
@@ -82,7 +82,7 @@ Switch off the gates with `--no-gated` for trivial tasks (Phase 7 still applies)
 --pi-writer-provider <name>     # pi role override (solo uses the writer role internally)
 --pi-writer-model <slug>
 --pi-writer-thinking <level>
---shared-target                 # opt-in: one shared CARGO_TARGET_DIR per repo (legacy 0.14..0.22.0). Default since 0.22.1: per-worktree target so parallel solos do not fight for the cargo file-lock.
+--shared-target                 # opt-in: one shared CARGO_TARGET_DIR per repo (legacy 0.14..0.22.0). Default since 0.22.1: per-worktree target so parallel solos do not fight for the cargo file-lock. Since 0.22.4, Phase 7 removes per-worktree targets.
 ```
 
 Add or replace agent commands in `~/.config/tmux-pair/agents.json`:
@@ -160,7 +160,7 @@ Each gate also runs a parallel `Bash(codex exec ...)` second-opinion (out-of-pro
 - **V5 Unattended-Default**: `/solo` and `/run` run unattended by default; `--interactive` turns V2 self-decisions into `AskUserQuestion` pause points.
 - **V6 Readiness-Cache (24h TTL)**: `reviewer-readiness-check` results cached at `~/.cache/tmux-pair/readiness/<repo>-<rules-hash>-<commit>.json`. Cache-Hit + PASS skips the subagent spawn. `NEEDS-RULES` is never cached. Bust via `--no-cache`.
 - **V7 Test-Trust-Chain (TESTS-PROOF marker)**: solo bullet commits carry a `TESTS-PROOF:` block (test/lint/fmt commands + PASS counts + `COMMIT_SHA`). `gate-3-verifier` parses via `tmux_pair.py parse-tests-proof` and trusts when `HEAD == COMMIT_SHA`. Stale markers go to WARNING + narrow re-run; missing on 0.14+ runs goes to BLOCKER.
-- **Per-Worktree Cargo Target (since 0.22.1)**: each spawn gets `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo>__<wt-slug>/` so parallel agents on the same project never collide on cargo's file-lock. Trade-off: cold rebuild per worktree (a few minutes amortised against a 30..90 min solo run). Opt back into the legacy single shared target (`~/.cache/tmux-pair/cargo-target/<repo>/`) with `--shared-target` when only one agent is active and maximum cache warmth matters. Non-Cargo repos skip the env entirely.
+- **Per-Worktree Cargo Target (since 0.22.1)**: each spawn gets `CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo>__<wt-slug>/` so parallel agents on the same project never collide on cargo's file-lock. Trade-off: cold rebuild per worktree (a few minutes amortised against a 30..90 min solo run). Since 0.22.4, Phase 7 removes this per-worktree target with `tmux_pair.py cleanup-target`, guarded so only children under `~/.cache/tmux-pair/cargo-target/` with a worktree slug are deleted. Opt back into the legacy single shared target (`~/.cache/tmux-pair/cargo-target/<repo>/`) with `--shared-target` when only one agent is active and maximum cache warmth matters; shared targets are not auto-deleted. Non-Cargo repos skip the env entirely.
 - **V9 Recon-Cache with Delta-Mode (1h TTL)**: recon JSON cached at `/tmp/tmux-pair-recon-<repo>-<commit>.json`; follow-up runs read the cache + delta-recon for files with `mtime > cache-time`. Bust via `--no-cache`.
 - **V10 Inline-Gates for trivial plans**: when `task_kind=bug-fix` AND `bullets <= 3` AND `predicted files-touched <= 5`, solo runs GATE 2 inline in its own pane; `gate-3-verifier` may also inline when TESTS-PROOF is valid. `gate-3-code-reviewer` always stays as a subagent. Helper: `tmux_pair.py inline-gate-decide --plan-file <path> --task-kind <kind>`.
 
@@ -182,7 +182,7 @@ The gated workflow treats project-local `PROJECT.md` care as mandatory for featu
 
 ### Post-Merge Retro (mandatory)
 
-After Phase 7 (`DONE-MERGED`), the run is not yet done. Worktree and branch are gone, but the tmux window stays intact while solo collects a 200-500 word factual retro from itself plus three parallel `Agent` personas (orchestrator-view, writer-view, reviewer-view) and one `codex exec "retro"` for an independent fourth view. Recurring issue classes are persisted either into the tmux-pair-orchestration skill (workflow-cross-cutting) or into consumer-repo rules / skills (repo-specific). Only after pattern-persist does `tmux kill-window` close the window.
+After Phase 7 (`DONE-MERGED`), the run is not yet done. Worktree, branch, and per-worktree Cargo target are gone, but the tmux window stays intact while solo collects a 200-500 word factual retro from itself plus three parallel `Agent` personas (orchestrator-view, writer-view, reviewer-view) and one `codex exec "retro"` for an independent fourth view. Recurring issue classes are persisted either into the tmux-pair-orchestration skill (workflow-cross-cutting) or into consumer-repo rules / skills (repo-specific). Only after pattern-persist does `tmux kill-window` close the window.
 
 ### Recurring Pre-Flight Checks (Rust focus)
 
