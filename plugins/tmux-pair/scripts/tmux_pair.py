@@ -52,11 +52,11 @@ DEFAULT_AGENTS: dict[str, str] = {
     "pi": "pi",
 }
 
-# Default Claude model. Opus 4.7 has a 1M context window (vs Opus 4.6 with
+# Default Claude model. Opus 4.8 has a 1M context window (vs Opus 4.6 with
 # 200k). Override per spawn via --claude-model. When the model changes, the
 # monitor subcommand adjusts DEFAULT_COMPACT_THRESHOLD_K automatically (700k
 # for 1M, 140k for 200k).
-DEFAULT_CLAUDE_MODEL = "claude-opus-4-7"
+DEFAULT_CLAUDE_MODEL = "claude-opus-4-8"
 
 # Default Claude effort level. "max" gives the orchestrator and engineer the
 # largest reasoning budget. Set as --effort <level> in the boot command
@@ -120,7 +120,7 @@ def _pi_overrides_for_role(args, role: str) -> tuple[str, str, str]:
 # Compact-Watcher default: at this token value the watcher pings the
 # orchestrator. Conservative for 200k context models (Opus 4.6 = 200k):
 # 140k matches 70 percent context use and leaves 60k headroom for the
-# re-brief and the next bullet. For 1M context models (Opus 4.7) the user
+# re-brief and the next bullet. For 1M context models (Opus 4.8) the user
 # can set --threshold-k 800.
 DEFAULT_COMPACT_THRESHOLD_K = 140
 
@@ -992,7 +992,7 @@ def _post_boot_slashes(
     bracketed-paste after boot; several `tmux send-keys -l` calls in quick
     succession get merged into a single composer insert, so the first
     slash command swallows all following inputs as its argument (for
-    example `/model claude-opus-4-7/rename ...[Pasted text]` -> API 400
+    example `/model claude-opus-4-8/rename ...[Pasted text]` -> API 400
     'model: String should have at most 256 characters'). CLI flags apply
     before the TUI starts and are race-free.
 
@@ -2573,10 +2573,10 @@ def _briefing_spawn_engineer(
 
 def _threshold_for_model(claude_model: str) -> int:
     """Pick a compact-watcher threshold matching the model's context window
-    at ~70 percent. Opus 4.6 = 200k -> 140k. Opus 4.7 = 1M -> 700k. Anything
+    at ~70 percent. Opus 4.6 = 200k -> 140k. Opus 4.8 = 1M -> 700k. Anything
     else falls back to DEFAULT_COMPACT_THRESHOLD_K (the 200k-sized default).
     Heuristic on slug substrings; no hard model-list."""
-    if "4-7" in claude_model or "4.7" in claude_model:
+    if any(token in claude_model for token in ("4-7", "4.7", "4-8", "4.8")):
         return 700
     return DEFAULT_COMPACT_THRESHOLD_K
 
@@ -4228,7 +4228,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"token threshold in thousands (default: "
                          f"{DEFAULT_COMPACT_THRESHOLD_K}, sized for 200k-Context-"
                          f"models like Opus 4.6 = 70 percent. For 1M-Context "
-                         f"models like Opus 4.7 set --threshold-k 800).")
+                         f"models like Opus 4.8 set --threshold-k 800).")
     mo.add_argument("--interval-sec", type=int, default=180,
                     help="poll interval in seconds (default: 180)")
     mo.add_argument("--cooldown-sec", type=int, default=600,

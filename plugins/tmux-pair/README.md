@@ -73,7 +73,7 @@ Switch off the gates with `--no-gated` for trivial tasks (Phase 7 still applies)
 --with-standards                # append the durable standards bundle to the briefing
 --greenfield                    # --with-standards plus greenfield pre-flight
 --interactive                   # turn V2 self-decisions into AskUserQuestion pause points
---claude-model claude-opus-4-7  # default claude model (1M context); claude-opus-4-6 for 200k
+--claude-model claude-opus-4-8  # default claude model (1M context); claude-opus-4-6 for 200k
 --claude-effort xhigh           # default --effort for claude
 --codex-effort xhigh            # default model_reasoning_effort for codex (gpt-5.5)
 --pi-provider cortecs           # pi default provider
@@ -99,7 +99,7 @@ Briefings are task-focused and compact by default. `--with-standards` includes t
 
 ## Model selection and Compact-Watcher
 
-Default claude model: `claude-opus-4-7` (1M context). Override per spawn:
+Default claude model: `claude-opus-4-8` (1M context). Override per spawn:
 
 ```
 /solo  ~/code/myapp main rule-migration --no-gated

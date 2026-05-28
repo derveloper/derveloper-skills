@@ -495,6 +495,20 @@ User feedback: with parallel solos on the same project, the shared `CARGO_TARGET
 | D3 | Drop `--no-shared-target`, add `--shared-target` | Flag inversion is a clean break at patch-bump time; an alias would invert semantically and confuse new users. |
 | D4 | Patch bump 0.22.0 -> 0.22.1 instead of minor | Behaviour change is opt-in/out at the spawn boundary; the public 7-phase workflow is unchanged. Patch bump signals "same surface, smarter default". |
 
+### 0.22.5 (Default Claude model to Opus 4.8, 2026-05-28)
+
+User feedback: Opus 4.8 shipped today and should become the default Claude model for tmux-pair solo runs.
+
+- Changed the default Claude model slug to `claude-opus-4-8`.
+- Kept Compact-Watcher's 1M context threshold for both Opus 4.7 and Opus 4.8 explicit overrides.
+- Docs synced: README.md, SKILL.md, commands/solo.md, plugin.json, marketplace.json, and SKILL.md frontmatter to 0.22.5.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Use `claude-opus-4-8` | Anthropic's launch docs list this as the API model ID. |
+| D2 | Patch bump 0.22.4 -> 0.22.5 | Runtime behavior changes only by selecting the newer same-family default model. Flags and workflow stay compatible. |
+| D3 | Keep Opus 4.7 in Compact-Watcher heuristic | Users can still override back to 4.7. It has the same 1M threshold behavior as 4.8. |
+
 ### 0.22.4 (Phase-7 per-worktree Cargo target cleanup, 2026-05-28)
 
 User feedback: Rust solos left stale per-worktree target directories under `~/.cache/tmux-pair/cargo-target/`, and the disk filled up after chained runs. Worktree and branch cleanup was not enough because Cargo artifacts live outside the git worktree.

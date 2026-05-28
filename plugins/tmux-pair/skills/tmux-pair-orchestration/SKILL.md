@@ -15,7 +15,7 @@ description: >
   smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, and
   recovery from failure modes. Mandatory Post-Merge Retro persists recurring
   patterns.
-version: 0.22.4
+version: 0.22.5
 ---
 
 # tmux-pair-orchestration
@@ -319,7 +319,7 @@ The tempfile is left as-is if codex does not delete it; `/tmp` clears on reboot.
 
 ## Token management and re-briefs
 
-Default claude model: `claude-opus-4-7` (1M context). For 200k-context runs, use `--claude-model claude-opus-4-6`. Compact-watcher threshold scales automatically: 1M → 700k (70%), 200k → 140k.
+Default claude model: `claude-opus-4-8` (1M context). For 200k-context runs, use `--claude-model claude-opus-4-6`. Compact-watcher threshold scales automatically: 1M → 700k (70%), 200k → 140k.
 
 Default reasoning effort: `xhigh` on both harnesses for the main pane AND reviewer subagents (codex gpt-5.5 supports xhigh). Override with `--claude-effort`, `--codex-effort`, `--reviewer-claude-effort`, `--reviewer-codex-effort`.
 
