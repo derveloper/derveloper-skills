@@ -3536,10 +3536,13 @@ def cmd_solo(args: argparse.Namespace) -> int:
         with_standards=with_standards,
         gated=gated,
     )
+    # Ultracode is not a valid boot --effort level (claude --effort rejects it);
+    # boot with xhigh and send /effort ultracode as a post-boot slash below.
+    boot_effort = "xhigh" if args.claude_effort == "ultracode" else args.claude_effort
     boot_command = _boot_command_with_standards(
         agent=args.agent, agents_dict=agents,
         window_name=window_name, role="writer",
-        claude_effort=args.claude_effort,
+        claude_effort=boot_effort,
         codex_effort=args.codex_effort,
         claude_model=args.claude_model,
         cargo_target_dir=cargo_target,
@@ -3570,6 +3573,11 @@ def cmd_solo(args: argparse.Namespace) -> int:
     if initial_briefing_path is None:
         _post_boot_slashes(pane, args.agent, solo_name,
                            claude_model=args.claude_model)
+        if args.agent == "claude" and args.claude_effort == "ultracode":
+            # Idle composer right after ready: /effort ultracode lands and
+            # executes BEFORE the briefing (the only window where the slash
+            # submits; sent after the briefing it hits a busy composer).
+            _send_briefing_for_agent(pane, args.agent, "/effort ultracode")
         _send_briefing_for_agent(pane, args.agent, brief)
     output = {
         "mode": "solo",
@@ -4142,8 +4150,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="base ref (default: origin/main)")
     so.add_argument("--task", default="",
                     help="task description sent to the solo agent")
-    so.add_argument("--agent", default="claude",
-                    help="agent for the solo pane (default: claude). "
+    so.add_argument("--agent", default="codex",
+                    help="agent for the solo pane (default: codex). "
                          "Choices depend on ~/.config/tmux-pair/agents.json: "
                          "typically claude, codex, pi.")
     so.add_argument("--no-worktree", action="store_true",

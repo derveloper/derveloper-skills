@@ -4,7 +4,7 @@ Run a single coding agent on a task via tmux + git worktrees. The agent lives in
 
 ## What it does
 
-`/run` is the default entry-point: it does a short repo + task recon, picks `claude` or `codex` for the agent based on task profile, then invokes `/solo` with the resolved flags. `/solo` spawns a single agent in a fresh worktree and runs the gated workflow.
+`/run` is the default entry-point: it does a short repo + task recon, defaults to `codex`, and only switches to `claude` for profiles that clearly need Claude-specific strengths. `/solo` spawns a single agent in a fresh worktree and runs the gated workflow.
 
 | Slash command | Purpose |
 |---|---|
@@ -33,18 +33,18 @@ Both create a worktree at `<project-parent>/<project-basename>-wt-<feature>` and
 
 ## /run agent-pick heuristic
 
-When the user does NOT pass `--agent` explicitly, `/run` picks `claude` or `codex` based on task profile:
+When the user does NOT pass `--agent` explicitly, `/run` defaults to `codex` and only picks `claude` for task profiles that clearly need Claude-specific strengths:
 
 | Task profile | Pick | Reason |
 |---|---|---|
-| Recon-heavy, multi-file, plan-integration, AskUserQuestion-heavy, design work, briefings, greenfield scaffolding, compliance/PII | `claude` | Plan integration + Task tool subagent spawn + structured AskUserQuestion. Default tie-breaker. |
+| Recon-heavy, multi-file, plan-integration, AskUserQuestion-heavy, design work, briefings, greenfield scaffolding, compliance/PII | `claude` | Plan integration + Task tool subagent spawn + structured AskUserQuestion. Explicit exception to the codex default. |
 | Single-file edits, code translation (lang A to B), mechanic refactor, bulk-rename, codemod | `codex` | Terminal-driven, direct file-ops, fast turnaround per file. |
 | Adversarial bug-hunt, debugging mystery panics, race-condition tracing, "find the real cause" | `codex` | gpt-5.5 + xhigh reasoner sharp on adversarial logic. |
 | Cost-sensitive bulk work (mass renames, mechanic migrations) | `pi` (opt-in via `--agent pi`) | Cortecs/qwen3 fits bulk; expensive top-tier models would burn budget. |
 
-Ambiguous task -> `claude` (safer default). The picked agent is surfaced in the `/run` recon note.
+Ambiguous task -> `codex` (default). The picked agent is surfaced in the `/run` recon note.
 
-**The same heuristic applies inside the solo run to subagent spawns**: `Agent(...)` (claude Task tool) for recon-heavy / plan-driven / repo-domain sub-bullets, `Bash(codex exec --cd <sub-wt> "...")` for single-file / mechanic / codemod / adversarial bug-hunt sub-bullets. Default tie-breaker stays `claude`. Phase 1 (Recon) defaults to claude subagents; Phase 3 (Impl) picks per sub-bullet profile; Phase 2 and Phase 4 (Gates) already run both minds in parallel.
+**The same heuristic applies inside the solo run to subagent spawns**: `Agent(...)` (claude Task tool) for recon-heavy / plan-driven / repo-domain sub-bullets, `Bash(codex exec --cd <sub-wt> "...")` for single-file / mechanic / codemod / adversarial bug-hunt sub-bullets. Subagent tie-breaker stays `claude`. Phase 1 (Recon) defaults to claude subagents; Phase 3 (Impl) picks per sub-bullet profile; Phase 2 and Phase 4 (Gates) already run both minds in parallel.
 
 ## Solo workflow (7 phases)
 
@@ -67,7 +67,7 @@ Switch off the gates with `--no-gated` for trivial tasks (Phase 7 still applies)
 ## Configuration
 
 ```
---agent claude                  # default: claude (choices: claude|codex|pi)
+--agent codex                   # default: codex (choices: claude|codex|pi)
 --no-gated                      # bypass the 7-phase gated workflow briefing
 --no-worktree                   # skip git worktree add, run on the current branch
 --with-standards                # append the durable standards bundle to the briefing

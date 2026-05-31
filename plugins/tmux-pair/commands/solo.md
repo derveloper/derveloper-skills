@@ -67,7 +67,7 @@ Solo keeps the same gates spawn-mode used, just with leaner mechanics:
 - `--interactive`: decision-pause-points in solo briefing (rare; default autonom). Without this flag, V2 self-decisions proceed without asking the user.
 - `--with-standards`: append the durable standards bundle (STANDARDS, RECALL_DISCIPLINE, BULLET_START_RITUAL, PAIR_PROTOCOL) to the briefing.
 - `--greenfield`: enables `--with-standards` plus the greenfield pre-flight block. For first-session repos without `.claude/rules/` seed.
-- `--agent <name>`: agent for the solo pane (default `claude`). Other choices per `~/.config/tmux-pair/agents.json`: `codex`, `pi`.
+- `--agent <name>`: agent for the solo pane (default `codex`). Other choices per `~/.config/tmux-pair/agents.json`: `claude`, `pi`.
 - `--claude-model <slug>`: claude model slug (default `claude-opus-4-8`). Only applied when `--agent claude`.
 - `--claude-effort <level>`: claude effort level (default `xhigh`). Choices: `low|medium|high|xhigh|max`.
 - `--codex-effort <level>`: codex reasoning effort, set as `-c model_reasoning_effort=<level>` (default `xhigh`, gpt-5.5 supports xhigh). Choices: `minimal|low|medium|high|xhigh`.

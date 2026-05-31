@@ -12,8 +12,9 @@ git-index-lock races, cross-writer PROJECT.md races, and dual-review
 coordination overhead. Parallel work happens via subagent fan-out: claude
 `Agent(...)` calls for recon-heavy / plan-driven sub-bullets and
 `Bash(codex exec --cd <sub-wt> "...")` for single-file / mechanic /
-adversarial sub-bullets. The `/run` slash-command picks `claude` or `codex`
-per task profile and delegates to `/solo` with the resolved flags.
+adversarial sub-bullets. The `/run` slash-command defaults to `codex`,
+switches to `claude` for clearly Claude-shaped task profiles, and delegates
+to `/solo` with the resolved flags.
 
 ## Architecture
 
@@ -44,10 +45,10 @@ the solo flow.
   Auto-Squash-Merge onto base + branch and worktree cleanup. Adversarial gates
   run two independent minds in parallel (claude subagent + `codex exec`
   out-of-process second opinion).
-- `/run` auto-entry: short repo + task recon, picks `claude` or `codex` per
-  task profile (recon-heavy / plan-integration -> claude;
-  single-file / mechanic / adversarial bug-hunt -> codex; opt-in `pi` for
-  cost-sensitive bulk work), then invokes `/solo` with the resolved flags.
+- `/run` auto-entry: short repo + task recon, defaults to `codex`, switches
+  to `claude` for recon-heavy / plan-integration / greenfield / compliance
+  profiles, keeps opt-in `pi` for cost-sensitive bulk work, then invokes
+  `/solo` with the resolved flags.
 - The same `claude` vs `codex` heuristic applies inside the solo run to
   subagent spawns: `Agent(...)` for recon-heavy / plan-driven sub-bullets,
   `Bash(codex exec --cd <sub-wt> "...")` for single-file / mechanic /
@@ -494,6 +495,25 @@ User feedback: with parallel solos on the same project, the shared `CARGO_TARGET
 | D2 | Slug pattern `<repo-slug>__<wt-slug>` | Stable across solo runs on the same worktree; `_cache_repo_slug` already normalises non-alphanumerics. No collision risk because `_common_pair_setup` returns unique worktree paths per feature. |
 | D3 | Drop `--no-shared-target`, add `--shared-target` | Flag inversion is a clean break at patch-bump time; an alias would invert semantically and confuse new users. |
 | D4 | Patch bump 0.22.0 -> 0.22.1 instead of minor | Behaviour change is opt-in/out at the spawn boundary; the public 7-phase workflow is unchanged. Patch bump signals "same surface, smarter default". |
+
+### 0.22.7 (Codex as default solo agent, 2026-05-31)
+
+User feedback: tmux workflow should use codex by default instead of claude.
+
+- `/solo` now defaults `--agent` to `codex`.
+- `/run` docs now describe codex as the default and claude as an explicit
+  exception for recon-heavy, plan-integration, greenfield, compliance, and
+  stakeholder-heavy profiles.
+- Plugin metadata and skill frontmatter bumped to 0.22.7.
+- Carried forward pending claude `ultracode` handling in `cmd_solo`: boot with
+  `xhigh`, then send `/effort ultracode` before the briefing because claude
+  rejects `--effort ultracode` at boot.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Default `/solo` to `codex` | Direct script invocations should match the workflow default without relying on slash-command recon. |
+| D2 | Keep claude as an exception path, not removed | Some workflows still need Claude-specific Task-tool and AskUserQuestion strengths. |
+| D3 | Patch bump 0.22.6 -> 0.22.7 | Public CLI surface is unchanged; only the default value and docs changed. |
 
 ### 0.22.6 (Historyless agent boot commands, 2026-05-29)
 
