@@ -4147,7 +4147,7 @@ def build_parser() -> argparse.ArgumentParser:
     so.add_argument("--feature", required=True,
                     help="short feature name, used in branch + window")
     so.add_argument("--base", default="origin/main",
-                    help="base ref (default: origin/main)")
+                    help="base ref, local or remote (default: origin/main)")
     so.add_argument("--task", default="",
                     help="task description sent to the solo agent")
     so.add_argument("--agent", default="codex",

@@ -15,7 +15,7 @@ description: >
   smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, and
   recovery from failure modes. Mandatory Post-Merge Retro persists recurring
   patterns.
-version: 0.22.7
+version: 0.22.8
 ---
 
 # tmux-pair-orchestration
@@ -98,6 +98,14 @@ Default tie-breaker for subagents stays `claude` (recon-strong, structured). Cod
    - Merge conflict in Phase 7 -> AskUserQuestion in own pane with the concrete error and 2-4 recovery options (rebase + retry, abort, manual resolve + retry). No BLOCKER ping to master. See SOLO USER INPUT RULE in the briefing.
 
 Default flag set: `--no-gated` for trivial tasks where subagent-driven recon/plan/review is overkill (e.g. doc tweak, single-file rename). Gated is the default. Worktree is the default; `--no-worktree` opts out.
+
+**Base ref rule:** the user-provided `<base>` / `--base` value is the
+authority for worktree creation. It may be a local ref such as `main` or a
+remote ref such as `origin/main`. Do not require `origin`, `origin/HEAD`, or
+remote tracking when `--base main` was provided and resolves locally. Missing
+remote metadata is not a reason to use `--no-worktree`. Worktree mode is the
+default and must be preserved unless the user explicitly passes `--no-worktree`
+or the supplied base ref cannot be resolved by `git worktree add`.
 
 ### Repo-specific subagents (auto-detected)
 
@@ -391,7 +399,7 @@ These checks belong in `--with-standards` briefings AND in consumer-repo `.claud
 
 - **Brief-vs-Reality validation before Plan-Lock**: a brief written against an old code state is the most common plan-drift source. Before Plan-Lock: run `cargo clippy -p <crate>` plus `git grep -n "<keyword>"` plus `rg`-evidence for every "verify-first" or "should-be-X" item in the brief. Falsifiable: the Plan-Lock commit cites at least two brief items with current-code evidence SHAs.
 
-- **Parent-worktree dirty gate before solo spawn and Phase 7**: before creating a worktree, the orchestrator runs `git -C <project> status --porcelain`. If the parent worktree is dirty, stop immediately and ask the user before spawning. Do not defer this to Phase 7, because a long run turns a simple dirty-tree choice into pressure to commit unrelated files. Phase 7 repeats the same check before `merge --squash`. Pre-existing files may be committed only after an explicit user answer naming that action; then they get a separate commit, separate review note, and separate validation. Falsifiable: the run log contains the pre-spawn status output, and a dirty parent has an AskUserQuestion/answer before any `git worktree add`.
+- **Parent-worktree dirty gate before solo spawn and Phase 7**: before creating a worktree, the orchestrator runs `git -C <project> status --porcelain`. If the parent worktree is dirty, stop immediately and ask the user before spawning. The base ref is the user-provided `<base>` / `--base` value and may be local (`main`) or remote (`origin/main`); do not replace it with `origin/HEAD` for preflight. Do not defer this to Phase 7, because a long run turns a simple dirty-tree choice into pressure to commit unrelated files. Phase 7 repeats the same check before `merge --squash`. Pre-existing files may be committed only after an explicit user answer naming that action; then they get a separate commit, separate review note, and separate validation. Falsifiable: the run log contains the pre-spawn status output, a local base such as `main` is accepted without an `origin` remote, and a dirty parent has an AskUserQuestion/answer before any `git worktree add`.
 
 - **Target-dir hygiene before llvm-cov**: `.gitignore` contains `target-cov/` (and similar tool-output dirs) BEFORE the first `cargo llvm-cov` runs. Reactive fix after a crash costs 30+ minutes of recovery.
 

@@ -496,6 +496,23 @@ User feedback: with parallel solos on the same project, the shared `CARGO_TARGET
 | D3 | Drop `--no-shared-target`, add `--shared-target` | Flag inversion is a clean break at patch-bump time; an alias would invert semantically and confuse new users. |
 | D4 | Patch bump 0.22.0 -> 0.22.1 instead of minor | Behaviour change is opt-in/out at the spawn boundary; the public 7-phase workflow is unchanged. Patch bump signals "same surface, smarter default". |
 
+### 0.22.8 (Local base refs for worktrees, 2026-06-01)
+
+User feedback: the orchestrator must keep using worktrees when the supplied
+base is a local ref such as `main`; missing `origin` metadata is not a reason
+to fall back to `--no-worktree`.
+
+- `/solo --base` help now states that the base ref may be local or remote.
+- The orchestration skill now treats the user-provided base ref as authoritative
+  for worktree creation and preflight checks.
+- Plugin metadata, marketplace entry, and skill frontmatter bumped to 0.22.8.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Accept local and remote base refs for worktree creation | Users often pass local `main`; requiring `origin/HEAD` breaks the intended worktree isolation. |
+| D2 | Keep worktree mode as the default | Falling back to the parent worktree risks local-change collisions; only explicit `--no-worktree` or an unresolvable supplied base ref should disable isolation. |
+| D3 | Patch bump 0.22.7 -> 0.22.8 | The change clarifies and fixes spawn semantics without adding a new user-facing mode. |
+
 ### 0.22.7 (Codex as default solo agent, 2026-05-31)
 
 User feedback: tmux workflow should use codex by default instead of claude.
