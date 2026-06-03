@@ -35,24 +35,27 @@ SOLO GATED WORKFLOW (subagent-centric)
     `Bash(codex exec "adversarial plan-attack")`. BLOCKER in either
     -> fix loop, max 2 iterations.
 
-  Phase 3 - Implementation: parallel subagents per independent
+  Phase 3 - Implementation + bullet commits: parallel subagents per independent
     bullet (disjoint files, plan markers). Sequential bullets stay
-    in the main pane. Per bullet: affected tests + clippy + fmt.
+    in the main pane. Per bullet: affected tests + clippy + fmt,
+    then a Conventional Commit with TESTS-PROOF.
 
   Phase 4 - GATE-3 (self-review): three parallel checks:
     `Agent(gate-3-verifier)` (goal-backward, plan coverage),
     `Agent(gate-3-code-reviewer)` (adversarial diff),
-    `Bash(codex exec "diff-review")` (second opinion). BLOCKER in
-    any -> fix loop, max 3 iterations.
+    `Bash(codex exec "diff-review")` (second opinion). Verifier
+    reads bullet commits and TESTS-PROOF receipts. BLOCKER in any
+    -> fix loop, max 3 iterations.
 
   Phase 5 - PROJECT.md + skill-persist: phase block + decisions
     (D<n>a..f). Domain insights as
     `.claude/skills/<repo>-<topic>/SKILL.md` (default) or
     `.claude/rules/<key>.md` (cross-cutting always-on, justified).
 
-  Phase 6 - Commit: Conventional Commit (no AI co-author). No push.
-    Workspace gate PASS first. Worktree clean (only pre-existing
-    allowlist permitted).
+  Phase 6 - Commit hygiene: all intended bullet commits and
+    guidance/docs commits exist, use Conventional Commits, carry
+    enough detail for the squash body, and leave the worktree clean.
+    No push.
 
   Phase 7 - Auto-squash-merge + cleanup:
     1. git status --porcelain empty? Otherwise AskUserQuestion in
@@ -92,6 +95,6 @@ DONE-MERGED.
 ## Notes on adaptation
 
 - **Pointers are mandatory.** A briefing without pointers is a briefing without recon. If pointers are absent, the agent does recon first via Phase 1 subagents.
-- **Phase 7 is mandatory.** Solo runs that stop at Phase 6 (commit) leave a feature branch and worktree behind; sequential chained runs then stack on top of an old base. Phase 7 squashes and cleans up.
+- **Phase 7 is mandatory.** Solo runs that stop at Phase 6 (commit hygiene) leave a feature branch and worktree behind; sequential chained runs then stack on top of an old base. Phase 7 squashes and cleans up.
 - **AskUserQuestion is the only human-input path inside solo.** The script-generated briefing puts the SOLO USER INPUT RULE near the top so it lands in the agent's first response context.
 - **Push gate is mandatory.** Even if you trust the agent, the gate is cheap and catches one of the most common failure modes (see `references/failure-modes.md`).

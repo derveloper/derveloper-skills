@@ -1,6 +1,6 @@
 ---
 description: Spawn a single agent in a fresh git worktree, gated by a 7-phase self-driven workflow (recon, plan-check, impl, self-review, PROJECT.md/skill-persist, commit, auto-squash-merge) with subagent-driven adversarial gates
-argument-hint: <project-path> <base> <feature> [task...] [--no-gated] [--no-worktree] [--interactive] [--with-standards] [--greenfield] [--agent claude|codex|pi] [--claude-model SLUG] [--claude-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL] [--pi-provider NAME] [--shared-target]
+argument-hint: <project-path> <base> <feature> [task...] [--no-gated] [--no-worktree] [--interactive] [--with-standards] [--greenfield] [--agent claude|codex|pi] [--claude-model SLUG] [--claude-effort LEVEL] [--codex-effort LEVEL] [--pi-model SLUG] [--pi-thinking LEVEL] [--pi-provider NAME] [--shared-target]
 ---
 
 # solo
@@ -53,11 +53,11 @@ agent picks domain-experts over `general-purpose` for parallel work.
 
 ## Adversarial Gates (correctness preservation)
 
-Solo keeps the same gates spawn-mode used, just with leaner mechanics:
+Solo keeps the same gate intent the old spawn mode used, with leaner mechanics:
 
-- **GATE-2 Plan-Check**: `Agent(gate-2-plan-check)` AND `codex exec "adversarial plan-attack"` in parallel. Two independent minds, different model families. BLOCKER in either → fix loop. PASS in both → proceed.
-- **GATE-3 Verify + Code-Review**: `Agent(gate-3-verifier)` (goal-backward against plan) AND `Agent(gate-3-code-reviewer)` (adversarial, claude) AND `codex exec "adversarial diff-review"` (adversarial, codex) in parallel. BLOCKER in any → fix loop. WARNING-only → proceed with documented follow-ups.
-- **Per-Bullet REVIEW-READY**: solo writes + spawns `Agent(gate-3-code-reviewer)` per bullet for inline review when the bullet is non-trivial. Codex-CLI per bullet is opt-in (cost-aware).
+- **GATE-2 Plan-Check**: `Agent(gate-2-plan-check)` AND `codex exec "adversarial plan-attack"` in parallel. Two independent minds, different model families. BLOCKER in either -> fix loop. PASS or WARNING-only -> proceed.
+- **GATE-3 Verify + Code-Review**: `Agent(gate-3-verifier)` (goal-backward against plan) AND `Agent(gate-3-code-reviewer)` (adversarial, claude) AND `codex exec "adversarial diff-review"` (adversarial, codex) in parallel. BLOCKER in any -> fix loop. WARNING-only -> proceed with documented follow-ups.
+- **Per-Bullet review ledger**: solo records evidence and spawns `Agent(gate-3-code-reviewer)` per bullet for inline review when the bullet is non-trivial. Codex-CLI per bullet is opt-in (cost-aware).
 - **Post-Merge Retro**: solo spawns 3 `Agent` personas (orchestrator-view, writer-view, reviewer-view) plus one `codex exec` retro, synthesizes the 4 outputs into a memory entry. Mandatory after every squash-merge.
 
 ## Optional flags
@@ -65,12 +65,12 @@ Solo keeps the same gates spawn-mode used, just with leaner mechanics:
 - `--no-gated`: bypass the 7-phase workflow briefing. Minimal spawn + task. Use for trivial tasks where subagent-driven recon/plan/review is overkill.
 - `--no-worktree`: skip `git worktree add`, run on the project's current branch directly. Codex `AGENTS.md` write to project is skipped to avoid pollution.
 - `--interactive`: decision-pause-points in solo briefing (rare; default autonom). Without this flag, V2 self-decisions proceed without asking the user.
-- `--with-standards`: append the durable standards bundle (STANDARDS, RECALL_DISCIPLINE, BULLET_START_RITUAL, PAIR_PROTOCOL) to the briefing.
-- `--greenfield`: enables `--with-standards` plus the greenfield pre-flight block. For first-session repos without `.claude/rules/` seed.
+- `--with-standards`: append the durable standards bundle (STANDARDS, RECALL_DISCIPLINE, BULLET_START_RITUAL, SOLO_SUBAGENT_STRATEGY) to the briefing.
+- `--greenfield`: enables `--with-standards` plus the greenfield pre-flight block. For first-session repos without `.claude/rules/` or `.claude/skills/` guidance.
 - `--agent <name>`: agent for the solo pane (default `codex`). Other choices per `~/.config/tmux-pair/agents.json`: `claude`, `pi`.
 - `--claude-model <slug>`: claude model slug (default `claude-opus-4-8`). Only applied when `--agent claude`.
 - `--claude-effort <level>`: claude effort level (default `xhigh`). Choices: `low|medium|high|xhigh|max`.
-- `--codex-effort <level>`: codex reasoning effort, set as `-c model_reasoning_effort=<level>` (default `xhigh`, gpt-5.5 supports xhigh). Choices: `minimal|low|medium|high|xhigh`.
+- `--codex-effort <level>`: codex reasoning effort, set as `-c model_reasoning_effort=<level>` when supported by the installed CLI (default `xhigh`). Choices: `minimal|low|medium|high|xhigh`.
 - `--pi-provider <name>` / `--pi-model <slug>` / `--pi-thinking <level>`: pi-specific overrides. Only applied when `--agent pi`.
 - `--pi-writer-provider` / `--pi-writer-model` / `--pi-writer-thinking`: pi role-specific overrides (solo internally uses the `writer` role for cargo/AGENTS.md handling).
 - `--shared-target`: use one shared `CARGO_TARGET_DIR` per repo across all worktrees (legacy 0.14.0..0.22.0 behavior, max cache warmth, single active agent). Default since 0.22.1: per-worktree `CARGO_TARGET_DIR` (`~/.cache/tmux-pair/cargo-target/<repo>__<wt-slug>/`) so parallel solos on the same project don't fight for the cargo file-lock. Since 0.22.4, Phase 7 removes that per-worktree target via `tmux_pair.py cleanup-target`; shared targets are not auto-deleted.
@@ -87,7 +87,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/tmux_pair.py solo \
   --task "<task>" \
   [--no-gated] [--no-worktree] [--interactive] [--with-standards] [--greenfield] \
   [--agent <claude|codex|pi>] \
-  [--claude-model <slug>] [--claude-effort <level>] \
+  [--claude-model <slug>] [--claude-effort <level>] [--codex-effort <level>] \
   [--pi-model <slug>] [--pi-thinking <level>] [--pi-provider <name>] \
   [--shared-target]
 ```
@@ -106,6 +106,6 @@ Phase 7 of the gated workflow does the squash-merge, worktree removal, per-workt
 tmux kill-window -t <window-name>
 ```
 
-If solo encountered a merge-conflict in Phase 7, it sends a BLOCKER-ping instead of DONE-MERGED. Then the human resolves manually and confirms before solo retries.
+If solo hits a merge conflict in Phase 7, it asks in its own pane via `AskUserQuestion` with concrete recovery options. It does not send `DONE-MERGED` until the squash merge and cleanup succeeded, and it does not send a BLOCKER ping to the master pane for merge-conflict recovery.
 
 See `skills/tmux-pair-orchestration/references/gated-workflow.md` for the full retro procedure.

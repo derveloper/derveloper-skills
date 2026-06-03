@@ -30,7 +30,7 @@ to `/solo` with the resolved flags.
   briefing references, failure modes, and orchestration guidance.
 - `skills/gepa/` and `skills/dg/`: bundled companion skills for prompt
   optimization and adversarial review.
-- `templates/rules/`: language rule skeletons used by rules-bootstrap.
+- `templates/rules/`: language guidance skeletons used by rules-bootstrap.
 
 A `spawn` subparser still exists in `scripts/tmux_pair.py` for backwards
 compatibility with pre-0.19.0 invocations and is not the recommended path.
@@ -40,11 +40,11 @@ the solo flow.
 ## Feature Surface
 
 - Solo: single agent in a fresh worktree, gated 7-phase self-driven workflow:
-  Phase 1 Recon, Phase 2 Plan + GATE-2, Phase 3 Implementation, Phase 4 GATE-3
-  Final-Verify, Phase 5 PROJECT.md + Skill-Persist, Phase 6 Commit, Phase 7
-  Auto-Squash-Merge onto base + branch and worktree cleanup. Adversarial gates
-  run two independent minds in parallel (claude subagent + `codex exec`
-  out-of-process second opinion).
+  Phase 1 Recon, Phase 2 Plan + GATE-2, Phase 3 Implementation + bullet
+  commits, Phase 4 GATE-3 Final-Verify, Phase 5 PROJECT.md + Skill-Persist,
+  Phase 6 Commit hygiene, Phase 7 Auto-Squash-Merge onto base + branch and
+  worktree cleanup. Adversarial gates run two independent minds in parallel
+  (claude subagent + `codex exec` out-of-process second opinion).
 - `/run` auto-entry: short repo + task recon, defaults to `codex`, switches
   to `claude` for recon-heavy / plan-integration / greenfield / compliance
   profiles, keeps opt-in `pi` for cost-sensitive bulk work, then invokes
@@ -68,9 +68,10 @@ the solo flow.
   FF-merges each subagent's branch back into the feature-WT, then cleans up
   the sub-worktree before Phase 7.
 - Adaptive GATE strictness: solo classifies `task_kind`
-  (bug-fix / feature / refactor) during recon; `gate-2-plan-check`,
-  `gate-3-verifier`, and `gate-3-code-reviewer` relax or tighten checklist
-  items per class.
+  (bug-fix / feature / refactor) during recon; `gate-2-plan-check` and
+  `gate-3-verifier` adjust plan and coverage expectations per class.
+  `gate-3-code-reviewer` keeps correctness, security, maintainability, and
+  standards review invariant across task kinds.
 - `--interactive` flag: opt-in decision pause points. Off by default
   (unattended-by-default with V2 threshold self-decisions, logged in the
   internal COMPLETE marker and persisted as a PROJECT.md row).
@@ -84,7 +85,7 @@ the solo flow.
 - PROJECT.md care: feature and refactor bullets update the project map when
   package map, feature surface, design decisions, or implementation history
   change.
-- Engineer subagent strategy: solo delegates bounded side work (parallel
+- Solo subagent strategy: solo delegates bounded side work (parallel
   recon files, parallel test suites, independent fix branches) instead of
   doing it inline.
 - Parallel-plan markers: every plan bullet carries either a parallel marker
@@ -101,9 +102,10 @@ the solo flow.
   directory status.
 - Gate subagents are scoped and read-only where possible. This prevents a
   plan-check or final verifier from accidentally editing code.
-- Codex engineer subagent spawns should default to `gpt-5.3-codex-spark` with
-  high reasoning while user limits allow it, with fallback to `gpt-5.5` high on
-  rate limits. Claude continues through the Task tool and subagent definitions.
+- Codex subagent spawns use the installed `codex exec` default model with the
+  requested reasoning effort. Do not pin a Codex model slug in tmux-pair docs:
+  the CLI default changes independently of this plugin. Claude continues
+  through the Task tool and subagent definitions.
 - Version fields in `plugin.json`, `.claude-plugin/marketplace.json`, and the
   orchestration skill frontmatter must stay aligned for plugin updates.
 - `gate-3-code-reviewer` receives `task_kind` for audit context but keeps

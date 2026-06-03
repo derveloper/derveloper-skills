@@ -9,8 +9,8 @@ description: >
   model family, fresh context). Sequential solo runs auto-squash-merge to base in
   Phase 7, so chained runs always branch from a clean base. Covers `/run`
   auto-entry, the 7-phase workflow (Recon, Clarify, Reviewer-Readiness, Plan-Check,
-  Loop, Final-Verify, Persist, Commit, Auto-Squash-Merge), durable standards via
-  --append-system-prompt-file + AGENTS.md, REVIEW-READY, CLARIFY-NEEDED,
+  Loop, Final-Verify, Persist, Commit-Hygiene, Auto-Squash-Merge), durable standards via
+  --append-system-prompt-file + AGENTS.md, review-ledger evidence, CLARIFY-NEEDED,
   Plan-Update-Commit on drift, PROJECT.md care, DONE-MERGED, sender prefixes,
   smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, and
   recovery from failure modes. Mandatory Post-Merge Retro persists recurring
@@ -46,7 +46,7 @@ Agent pick heuristic (used by `/run`):
 |---|---|---|
 | Recon-heavy, multi-file, plan-integration, AskUserQuestion-heavy, design work, briefings, greenfield scaffolding, compliance/PII | `claude` | Plan integration + Subagent-Spawn (Task tool) + AskUserQuestion structured. Explicit exception to the codex default. |
 | Single-file edits, code translation (lang A → B), mechanic refactor, bulk-rename, codemod | `codex` | Terminal-driven, direct file-ops, fast turnaround per file. |
-| Adversarial bug-hunt, debugging mystery panics, race-condition tracing, "find the real cause" | `codex` | gpt-5.5 + xhigh reasoner sharp on adversarial logic. |
+| Adversarial bug-hunt, debugging mystery panics, race-condition tracing, "find the real cause" | `codex` | Installed Codex CLI default model with `xhigh` reasoning, sharp on adversarial logic. |
 | Cost-sensitive bulk work (mass renames, mechanic migrations) | `pi` (opt-in via `--agent pi`) | Cortecs/qwen3 fits bulk; expensive top-tier models would burn budget. |
 
 Ambiguous → `codex` (default). User can override anytime with `--agent claude` / `--agent pi`. The picked agent is surfaced in the `/run` recon note.
@@ -56,7 +56,7 @@ Ambiguous → `codex` (default). User can override anytime with `--agent claude`
 | Mechanism | Tool | Strength profile |
 |---|---|---|
 | claude subagent | `Agent(general-purpose)` or `Agent(<repo>-*)` (Task tool) | Plan-integration, multi-step recon with `AskUserQuestion` chaining, design + briefing-driven impl, structured output (XML / JSON / markdown), repo-domain experts (`.claude/agents/<repo>-*.md`). |
-| codex subagent | `Bash(codex exec --skip-git-repo-check --cd <wt> "...")` | Single-file edits, code translation, mechanic refactors, codemods, adversarial bug-hunt, race-condition tracing, "find the real cause" prompts (gpt-5.5 + xhigh). Out-of-process, no context pollution. |
+| codex subagent | `Bash(codex exec --skip-git-repo-check --cd <wt> "...")` | Single-file edits, code translation, mechanic refactors, codemods, adversarial bug-hunt, race-condition tracing, "find the real cause" prompts. Out-of-process, no context pollution. |
 
 Per phase:
 
@@ -78,14 +78,14 @@ Default tie-breaker for subagents stays `claude` (recon-strong, structured). Cod
    - `Agent(gate-2-plan-check)` (claude, adversarial, scoped read-only)
    - `Bash(codex exec --skip-git-repo-check "adversarial plan-attack against <plan>")` (codex, different model family, fresh context)
    Both must return PASS or WARNING-only. BLOCKER in either → fix-loop. Max 3 plan iterations; iteration 4+ asks the user.
-3. **Implementation**: agent codes directly. Per-bullet runs nextest + clippy + per-crate gates inline. PROJECT.md care for feature/refactor bullets that change package map, feature surface, design decisions, or implementation history.
+3. **Implementation + bullet commits**: agent codes directly. Per-bullet runs nextest + clippy + per-crate gates inline, then commits the logical step with a `TESTS-PROOF` block. PROJECT.md care applies for feature/refactor bullets that change package map, feature surface, design decisions, or implementation history.
 4. **GATE-3 Final-Verify**: THREE independent adversarial checks in parallel:
    - `Agent(gate-3-verifier)` (claude, Haiku 4.5, goal-backward against plan)
    - `Agent(gate-3-code-reviewer)` (claude, Sonnet 4.6, adversarial diff review)
    - `Bash(codex exec "adversarial diff-review against main..HEAD")` (codex)
-   BLOCKER in any → fix-loop. WARNING-only → proceed with documented follow-up. Max 3 review cycles.
+   The verifier reads the bullet commits and their `TESTS-PROOF` receipts. BLOCKER in any → fix-loop. WARNING-only → proceed with documented follow-up. Max 3 review cycles.
 5. **PROJECT.md + Skill-Persist**: phase block in PROJECT.md, design decisions, domain knowledge as Skill under `.claude/skills/<repo>-<topic>/SKILL.md` (Persist-Convention; Rules only for cross-cutting always-on items).
-6. **Commit**: per-bullet conventional commits (no AI co-author), per-crate gates green, worktree clean. No DONE ping before Phase 7 has finished.
+6. **Commit hygiene**: all intended bullet commits and guidance/docs commits exist, use Conventional Commits, carry enough detail for the squash body, and leave the worktree clean. No completion ping before Phase 7 has finished.
 7. **Auto-Squash-Merge + Cleanup**: solo squashes all bullet commits into one commit on `<base>`, removes the feature worktree, deletes the feature branch, then pings `DONE-MERGED`. Sequential chained runs always start from clean base. Steps the solo executes itself:
    - `git -C <project> status --porcelain` -> must be empty (else BLOCKER)
    - `git -C <project> checkout <base>`
@@ -135,8 +135,8 @@ EOF
 Decision logic:
 
 1. **Task clarification**: if `<task>` is missing or ambiguous, ask once via `AskUserQuestion`.
-2. **Repo recon**: inspect size, language stack, `.claude/agents/`, `.claude/rules/`, grep for keywords from `<task>` to estimate affected file count.
-3. **Pre-pick sensible solo flags**: `--with-standards` for repos lacking explicit rules, `--greenfield` for completely fresh repos.
+2. **Repo recon**: inspect size, language stack, `.claude/agents/`, `.claude/rules/`, `.claude/skills/`, grep for keywords from `<task>` to estimate affected file count.
+3. **Pre-pick sensible solo flags**: `--with-standards` for repos lacking explicit guidance, `--greenfield` for completely fresh repos.
 4. **Invoke solo** with the resolved flags.
 
 There is no spawn-mode anymore. All `/solo` flags are forwarded.
@@ -156,7 +156,7 @@ For an 11+ sweep: do a pre-plan triage of all candidate bullets into four classe
 | Class | Per-bullet review pattern |
 |---|---|
 | Code-fix (real change) | full GATE-2 + GATE-3 + codex-CLI second-opinion |
-| Verify-absent (already fixed in earlier phase) | rg-evidence in REVIEW-READY, single-pass verifier check |
+| Verify-absent (already fixed in earlier phase) | rg-evidence in review ledger, single-pass verifier check |
 | Doc-only (PROJECT.md, comment, skill text) | bundled with other doc-only bullets, one PROJECT.md-closeout review |
 | Won't-fix (technically impossible or out-of-scope) | plan-amendment commit with rationale, no implementation |
 
@@ -174,23 +174,23 @@ Standards survive `/compact` and context resets because they sit in the system p
 - **`--no-worktree`**: if codex is the solo agent, standards are auto-enabled in the briefing so codex still receives durable standards context.
 - **`agents.json` overrides** are respected: if the user has remapped `claude`, the plugin does NOT inject `--append-system-prompt-file` blindly. The wrapper can read the standards file itself.
 
-The standards block covers: real Umlaute (no ASCII substitutes), Conventional Commits with no `--no-verify` and no AI-co-author trailer, the REVIEW-READY 3-field format, the honesty protocol (past-tense claims need same-turn tool evidence), drift signals (em-dashes, progress markers, ALL-CAPS headers, "should I"-after-clear-directive), the `incidental:` format for PostToolUse-hook fmt drift, the worktree-as-sandbox rule, the no-pre-existing-issues rule, recall-discipline (cite the relevant rule + memory before sensitive actions), and the bullet-start ritual (class + relevant rules + common BLOCKER-classes before the first edit on a bullet).
+The standards block covers: real Umlaute (no ASCII substitutes), Conventional Commits with no `--no-verify` and no AI-co-author trailer, phase-ledger evidence format, the honesty protocol (past-tense claims need same-turn tool evidence), drift signals (em-dashes, progress markers, ALL-CAPS headers, "should I"-after-clear-directive), the `incidental:` format for PostToolUse-hook fmt drift, the worktree-as-sandbox rule, the no-pre-existing-issues rule, recall-discipline (cite the relevant guidance + memory before sensitive actions), and the bullet-start ritual (class + relevant guidance + common BLOCKER-classes before the first edit on a bullet).
 
 ## Gated workflow (default)
 
 ```
-Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop -> GATE 3 Final-Verify -> Commit -> Auto-Squash-Merge (Phase 7) -> DONE-MERGED -> Post-Merge Retro
+Recon -> GATE 1 Clarify -> GATE 1.5 Reviewer-Readiness -> Plan -> GATE 2 Plan-Check -> Implementation Loop with bullet commits -> GATE 3 Final-Verify -> Commit-Hygiene -> Auto-Squash-Merge (Phase 7) -> DONE-MERGED -> Post-Merge Retro
 ```
 
 - **GATE 1 (Clarify)**. The solo agent calls `AskUserQuestion` directly. The human only sees a `GATE-1-ESCALATE` if a question is outside the agent's authority.
-- **GATE 1.5 (Reviewer-Readiness)**: one scoped subagent (`tmux-pair:reviewer-readiness-check`, Sonnet 4.6, Read+Grep+Glob+Bash, NO Edit/Write) reads `.claude/rules/*.md` and scores an 8-item checklist (style, tests, architecture, anti-patterns, naming, security, build, domain). On `NEEDS-RULES`, the agent runs a bootstrap loop: per gap one `AskUserQuestion`, then `tmux-pair:rules-bootstrap` bakes `.claude/rules/<topic>.md` from plugin language templates + repo recon + user answers, then re-run readiness-check. Loop terminates at READY or after iteration 3 with user-decided abort/partial-coverage/manual-amend. Optional opt-in `/gepa` pass after fresh rules; the plugin does not call `/gepa` automatically.
+- **GATE 1.5 (Reviewer-Readiness)**: one scoped subagent (`tmux-pair:reviewer-readiness-check`, Sonnet 4.6, Read+Grep+Glob+Bash, NO Edit/Write) reads `.claude/rules/*.md`, `.claude/skills/*/SKILL.md`, and root project docs, then scores an 8-item checklist (style, tests, architecture, anti-patterns, naming, security, build, domain). On `NEEDS-RULES`, the agent runs a bootstrap loop: per gap one `AskUserQuestion`, then `tmux-pair:rules-bootstrap` bakes `.claude/skills/<repo>-<topic>/SKILL.md` by default from plugin language templates + repo recon + user answers. `.claude/rules/<topic>.md` is reserved for justified cross-cutting guidance. Then re-run readiness-check. Loop terminates at READY or after iteration 3 with user-decided abort/partial-coverage/manual-amend. Optional opt-in `/gepa` pass after fresh guidance; the plugin does not call `/gepa` automatically.
 - **GATE 2 (Plan-Check)**: parallel two-mind check. `Agent(gate-2-plan-check)` (Sonnet 4.6, scoped read-only) verifies the plan goal-backward AND checks plan quality. Every bullet must carry either a parallel marker (`B3 || B4 [parallel]`) or a sequencing marker (`B3 -> B4 [sequential: shared file]`). In parallel: `Bash(codex exec "adversarial plan-attack")` for second-opinion. `BLOCKER` in either escalates to the agent's fix-loop; both PASS or WARNING-only proceeds.
 - **Implementation Loop**: solo writes + per-bullet self-review via `Agent(gate-3-code-reviewer)` when bullets are non-trivial. Per-bullet test-budget is crate-scoped (`cargo nextest -p <crate>`, never `--workspace`). PROJECT.md care for feature and refactor bullets. The solo agent uses subagents for parallel recon, parallel test suites, and independent fix branches when that keeps the main pane lean.
 - **GATE 3 (Final-Verify)**. Three parallel adversarial checks: `Agent(gate-3-verifier)` (Haiku 4.5, goal-backward against plan, runs build/test, checks plan-bullet coverage and PROJECT.md care), `Agent(gate-3-code-reviewer)` (Sonnet 4.6, adversarial diff review), and `Bash(codex exec "diff-review")` (codex, second-opinion). All PASS or WARNING-only: solo proceeds to Phase 5 (Persist), Phase 6 (Commit), and Phase 7 (Auto-Squash-Merge + DONE-MERGED). No interim ping to the human.
 
 The implementation loop adds six protocol elements:
 
-- **REVIEW-READY 3 mandatory fields**: every `REVIEW-READY:` ping carries (1) what changed (file:line + LOC-diff), (2) verification (`crate-gate=PASS` + test counts, or `crate-gate=N/A doc-only`), (3) plan-bullet/pain reference. Pings without these fields are blocked.
+- **Review ledger 3 mandatory fields**: every internal review entry carries (1) what changed (file:line + LOC-diff), (2) verification (`crate-gate=PASS` + test counts, or `crate-gate=N/A doc-only`), (3) plan-bullet/pain reference. Missing fields are blocked.
 - **CLARIFY-NEEDED**. When the agent hits a user-decision question mid-loop (scope, behavior, UX, architecture choice, naming conflict, trade-off not in the plan), it calls `AskUserQuestion` directly with 2-4 options. Engineers do NOT decide user-facing questions on their own.
 - **Plan-Update-Commit**. If a bullet hits a hard cap (LOC limit, file-size cap) or the estimate drifts more than ~50%, the agent commits a `docs(plan-amendment): ...` BEFORE the implementation commit that breaks the cap. A bullet with documented drift but no preceding amendment commit fails verifier.
 - **Parallel markers**. Plans mark independent bullets as `B3 || B4 [parallel]` and ordered bullets as `B3 -> B4 [sequential: <reason>]`. GATE 2 blocks missing markers.
@@ -203,9 +203,9 @@ Cross-cutting:
 - **Plan quality is enforced.** A skeletal "implement X" plan blocks at GATE 2.
 - **Context economy applies.** Heavy research, deep codebase reads, and web lookups go to subagents (one message, multiple parallel Task calls when independent). Diff-first reviews. Targeted Read-ranges over full-file dumps.
 - **Edit efficiency is part of the plan.** Pattern replace at >3 sites is a `sed`-job. Boilerplate generation = template + substitution. The plan names the tool.
-- **Few, descriptive commits.** The agent commits at logical-step granularity during the loop; the human squashes before merge to `main`. Commit messages must be substantial enough that a meaningful squash message can be distilled.
+- **Few, descriptive commits.** The agent commits at logical-step granularity during the loop. Phase 7 auto-squashes those bullet commits onto the base branch. Commit messages must be substantial enough that a meaningful squash body can be distilled.
 
-Greenfield repos (no `CLAUDE.md`, no `.claude/rules/`) are handled by GATE 1.5 automatically: the readiness-check returns `NEEDS-RULES` with all 8 topics as gaps, the bootstrap loop generates the full rules set from plugin templates + user answers + repo recon, and the agent proceeds only AFTER rules exist. Plan stays focused on the actual feature work; rules-generation is no longer a plan bullet.
+Greenfield repos (no `CLAUDE.md`, no `.claude/rules/`, no `.claude/skills/`) are handled by GATE 1.5 automatically: the readiness-check returns `NEEDS-RULES` with all 8 topics as gaps, the bootstrap loop generates the full guidance set from plugin templates + user answers + repo recon, and the agent proceeds only AFTER guidance exists. Plan stays focused on the actual feature work; guidance-generation is no longer a plan bullet.
 
 Full workflow with subagent prompt templates, gate event vocabulary, and failure modes in `references/gated-workflow.md`.
 
@@ -248,9 +248,9 @@ GATE 3 verdicts use three severities: BLOCKER (correctness, security, maintainab
 
 Default mode is unattended. Without `--interactive`, V2 self-decisions proceed autonomously and are logged in both `COMPLETE` and `PROJECT.md`. With `--interactive`, the agent pauses before every self-decision and asks the user via `AskUserQuestion`.
 
-### V6 Readiness-Cache (24h TTL)
+### V6 Readiness-Cache (helper only)
 
-`reviewer-readiness-check` is cached. Cache key: `sha256(.claude/rules/*.md content)` + commit-sha. Cache-hit (file exists + mtime < 24h + verdict=PASS): skip the subagent. Cache-miss / STALE: normal subagent spawn; PASS verdict gets cached atomically. `NEEDS-RULES` is never cached. Cache-bust: `--no-cache`.
+Cache helper code exists in `tmux_pair.py`, keyed by `sha256(.claude/rules/*.md + .claude/skills/*/SKILL.md content)` plus commit-sha. `cmd_solo` currently performs a fresh readiness run and does not automatically read or write this cache. Workflows that pass a cache payload into `reviewer-readiness-check` may skip the subagent on cache-hit with verdict=PASS. `NEEDS-RULES` is never cached.
 
 ### V7 Test-Trust-Chain (TESTS-PROOF marker)
 
@@ -270,9 +270,9 @@ TESTS-PROOF:
 
 `tmux_pair.py` prepends `env CARGO_TARGET_DIR=~/.cache/tmux-pair/cargo-target/<repo-slug>__<wt-slug>/` to the boot command when the project is a Cargo workspace. Each worktree gets its own target directory, so parallel solos on the same project never block on cargo's file-lock. Trade-off: cold rebuild per worktree (a few minutes amortised against a 30..90 min solo run). Since 0.22.4, Phase 7 runs `tmux_pair.py cleanup-target --project <project> --worktree <wt_path>` after worktree removal. The helper refuses paths outside `~/.cache/tmux-pair/cargo-target/` and refuses shared-looking target names without a worktree slug. Pass `--shared-target` to opt back into the legacy single-shared-target behaviour (`<repo-slug>/`) when only one agent is active and maximum cache warmth matters; shared targets are not auto-deleted. Non-Cargo repos skip the env entirely.
 
-### V9 Recon-Cache with Delta-Mode (1h TTL)
+### V9 Recon-Cache with Delta-Mode (helper only)
 
-Recon output (file map, crate list, PROJECT.md snapshot, key-function inventory) cached at `/tmp/tmux-pair-recon-<repo-slug>-<commit-sha>.json`. Subsequent runs on the same commit within 1h read the cache, then delta-recon for files with `mtime > cache-time`. Cache-bust: `--no-cache`.
+Recon cache paths and TTL are defined for workflow callers at `/tmp/tmux-pair-recon-<repo-slug>-<commit-sha>.json`. `cmd_solo` currently performs fresh recon and does not automatically read the cache or run delta-mode.
 
 ### V10 Inline-Gates for Trivial Plans
 
@@ -332,7 +332,7 @@ The tempfile is left as-is if codex does not delete it; `/tmp` clears on reboot.
 
 Default claude model: `claude-opus-4-8` (1M context). For 200k-context runs, use `--claude-model claude-opus-4-6`. Compact-watcher threshold scales automatically: 1M → 700k (70%), 200k → 140k.
 
-Default reasoning effort: `xhigh` on both harnesses for the main pane AND reviewer subagents (codex gpt-5.5 supports xhigh). Override with `--claude-effort`, `--codex-effort`, `--reviewer-claude-effort`, `--reviewer-codex-effort`.
+Default reasoning effort: `xhigh` on both harnesses for the main pane AND reviewer subagents. Codex uses `-c model_reasoning_effort=xhigh` when the installed CLI supports it. Override with `--claude-effort`, `--codex-effort`, `--reviewer-claude-effort`, `--reviewer-codex-effort`.
 
 Long-running runs drift past the model's sweet spot. Helper subcommands:
 
@@ -359,7 +359,7 @@ The full list lives in `references/failure-modes.md`. The most common:
 
 Default workflow after the solo agent sends `DONE-MERGED`. Phase 7 of the solo workflow has already executed the squash-merge, worktree removal, per-worktree Cargo target cleanup, and branch delete. The retro step remains:
 
-1. **Retro**: the orchestrator sends a tailored retro question to the solo pane (via `tmux_pair.py send`; the pane is still alive after Phase 7) AND spawns 2-3 `Agent` personas in parallel with different perspectives (orchestrator view, writer view, reviewer view), plus one `codex exec "retro"` for an independent fourth view. Expect 200-500 words of factual analysis per source (no praise, weaknesses stated directly). Topics:
+1. **Retro**: solo asks itself a tailored retro question (the pane is still alive after Phase 7) AND spawns 2-3 `Agent` personas in parallel with different perspectives (orchestrator view, writer view, reviewer view), plus one `codex exec "retro"` for an independent fourth view. Expect 200-500 words of factual analysis per source (no praise, weaknesses stated directly). Topics:
 
    - Phase wall-clock per 7-phase step
    - GATE-2 iterations and which mid-run self-decisions could have been prevented at plan-write time
@@ -369,7 +369,7 @@ Default workflow after the solo agent sends `DONE-MERGED`. Phase 7 of the solo w
    - Bullet-count retro (was monolithic correct, or too large?)
    - Phase 7 conflicts and cleanup friction
 
-2. **Pattern synthesis + persist**: the orchestrator collects the retros, identifies recurring issue classes (decorator-swallow, cancellation-root-mismatch, fmt-drift, plan-vs-reality-mismatch), and persists:
+2. **Pattern synthesis + persist**: solo collects the retros, identifies recurring issue classes (decorator-swallow, cancellation-root-mismatch, fmt-drift, plan-vs-reality-mismatch), and persists:
    - tmux-pair skill (this file): when the pattern is workflow-cross-cutting (Pre-Flight class, plan-drift indicator).
    - Consumer repo: `.claude/rules/*.md` (always-on cross-cutting) or `.claude/skills/<repo>-<topic>/SKILL.md` (path-scoped domain) per Persist-Convention.
 
@@ -385,21 +385,25 @@ Worktree, branch, and per-worktree Cargo target are gone since Phase 7; only the
 
 These checks belong in `--with-standards` briefings AND in consumer-repo `.claude/rules/pre-flight-checklists.md`. Aggregated from multiple solo retros, all falsifiable:
 
-- **Decorator-Sweep before Trait-Default-Add**: when adding a default-body trait method (especially lifecycle methods like `shutdown`/`close`/`flush`), run `rg "impl <Trait> for" --type rust` before REVIEW-READY, list every implementor, mark each one with two or more forward methods as a decorator, and either add an explicit forward override OR document a no-op rationale in a plan-amendment. Anti-pattern: trait-default no-op is silently swallowed by a decorator.
+- **Decorator-Sweep before Trait-Default-Add**: when adding a default-body trait method (especially lifecycle methods like `shutdown`/`close`/`flush`), run `rg "impl <Trait> for" --type rust` before the review entry, list every implementor, mark each one with two or more forward methods as a decorator, and either add an explicit forward override OR document a no-op rationale in a plan-amendment. Anti-pattern: trait-default no-op is silently swallowed by a decorator.
 
 - **Trait-Param-Honor check**: a trait-method param prefixed with `_` (`_grace`, `_token`) while the trait doc declares the param effective is a silent-discard footgun. Pre-flight: `rg '_[a-z]+: ' <trait-file>` cross-checked against the trait doc. The default body should either honestly ignore the param (and the doc gets updated) or honor it (with a test).
 
 - **Method-Resolution-Collision check**: a new trait method with the same name as an existing inherent impl on an implementor: pre-flight `cargo check -p <crate>` surfaces the ambiguity warning. Anti-pattern: the trait method is silently shadowed by the inherent method.
 
-- **Format-gate discipline**: a writer claim of "fmt clean" requires `cargo fmt -p <crate> --check` (NOT `cargo fmt -p <crate>` without `--check`). Per-crate fmt without `--check` silently rewrites neighbor files and produces drive-by drift. Falsifiable: REVIEW-READY with "fmt clean" plus `--check` output and exit 0.
+- **Format-gate discipline**: a "fmt clean" claim requires `cargo fmt -p <crate> --check` (NOT `cargo fmt -p <crate>` without `--check`). Per-crate fmt without `--check` silently rewrites neighbor files and produces drive-by drift. Falsifiable: review entry with "fmt clean" plus `--check` output and exit 0.
 
-- **Mechanical lint-fix pass BEFORE manual LLM edits (hard rule)**: every clippy-cleanup bullet MUST start with `cargo clippy -p <crate> --fix --allow-dirty --lib --bins --examples -- -D warnings` AND the test-target variant. `--fix` clears 60-90% of the typical lints (format-args inlining, use-statement cleanup, `&` redundancy, `into()` casts, needless-borrow, redundant-clone) deterministically and idempotently in about a second. Doing this work with LLM edits is pure waste: 15 Edit calls plus 15 LLM round-trips for something `cargo clippy --fix` finishes in one shell call. Recurring drift: solo did manual edits on format macros and use-imports instead of running the `--fix` pass first. Falsifiable: for every clippy bullet the REVIEW-READY ping MUST cite the `--fix` pass output (even if zero changes) BEFORE the manual fixes. The tool-use log shows `Bash(cargo clippy --fix ...)` before any `Edit` call that touches a clippy-pattern (format-arg, use-cleanup, needless-borrow, etc.). Missing = BLOCK from gate-3-code-reviewer.
+- **Mechanical lint-fix pass BEFORE manual LLM edits (hard rule)**: every clippy-cleanup bullet MUST start with `cargo clippy -p <crate> --fix --allow-dirty --lib --bins --examples -- -D warnings`. Run the test-target `--fix` variant only when the repo's lint matrix is known not to generate forbidden test idioms; otherwise run test clippy without `--fix` and fix test-target findings by hand. Pattern from graph-rag retro: test-target `--fix` rewrote result assertions into `unwrap()`, then `unwrap_used` failed. Falsifiable: for every clippy bullet the review entry cites the production `--fix` output (even if zero changes) BEFORE manual fixes, and if test-target `--fix` ran it also cites a same-turn `rg "unwrap\\(|expect\\(" <touched-tests>` audit or the repo-specific reason those calls are allowed. Missing = BLOCK from gate-3-code-reviewer.
+
+- **Source-first Plan-Lock for trait/store/schema/pipeline features**: before Plan-Lock on any task that changes a trait, store backend, migration, policy action, tool op, or consolidation pipeline, the solo agent must read the exact source files, not only recon summaries. Minimum evidence: trait file, one in-memory impl, every production backend impl/migration touched by the plan, and the domain pipeline/tool entrypoint. Falsifiable: the GATE-2 plan includes `file:line` evidence for each irreversible decision such as default-bodied trait methods, no-FK cascade, natural key shape, or fail-open behavior. If a GATE-2 BLOCKER points at an unread source file, the revised plan must cite that file before proceeding.
+
+- **Gate-fix recheck discipline**: after a GATE-2 BLOCKER changes the plan, rerun both plan-check minds on the revised plan. After a GATE-3 reviewer WARNING changes code, rerun at least the reviewer that raised it, plus the smallest relevant tests. Tests alone are not an adversarial recheck. Falsifiable: the phase/gate ledger names the original finding, the changed files, the second verdict, and the test command. If the recheck is skipped, the squash body must carry an explicit WARNING with rationale.
 
 - **Memory-Recon as a mandatory RECON step**: before plan-write, read `MEMORY.md` plus the 3-5 most relevant memory files under `~/.claude/projects/<repo>/memory/`. Mid-run self-decisions that would have been preventable by memory-recon are a drift indicator. **Memory-Freshness Gate**: memory files older than 3 days are a stale-risk flag; the plan-recon must state whether memory was re-validated against current code.
 
 - **Brief-vs-Reality validation before Plan-Lock**: a brief written against an old code state is the most common plan-drift source. Before Plan-Lock: run `cargo clippy -p <crate>` plus `git grep -n "<keyword>"` plus `rg`-evidence for every "verify-first" or "should-be-X" item in the brief. Falsifiable: the Plan-Lock commit cites at least two brief items with current-code evidence SHAs.
 
-- **Parent-worktree dirty gate before solo spawn and Phase 7**: before creating a worktree, the orchestrator runs `git -C <project> status --porcelain`. If the parent worktree is dirty, stop immediately and ask the user before spawning. The base ref is the user-provided `<base>` / `--base` value and may be local (`main`) or remote (`origin/main`); do not replace it with `origin/HEAD` for preflight. Do not defer this to Phase 7, because a long run turns a simple dirty-tree choice into pressure to commit unrelated files. Phase 7 repeats the same check before `merge --squash`. Pre-existing files may be committed only after an explicit user answer naming that action; then they get a separate commit, separate review note, and separate validation. Falsifiable: the run log contains the pre-spawn status output, a local base such as `main` is accepted without an `origin` remote, and a dirty parent has an AskUserQuestion/answer before any `git worktree add`.
+- **Parent-worktree dirty gate before solo spawn and Phase 7**: before creating a worktree, the launcher runs `git -C <project> status --porcelain`. If the parent worktree is dirty, stop immediately and ask the user before spawning. The base ref is the user-provided `<base>` / `--base` value and may be local (`main`) or remote (`origin/main`); do not replace it with `origin/HEAD` for preflight. Do not defer this to Phase 7, because a long run turns a simple dirty-tree choice into pressure to commit unrelated files. Phase 7 repeats the same check before `merge --squash`. Pre-existing files may be committed only after an explicit user answer naming that action; then they get a separate commit, separate review note, and separate validation. Falsifiable: the run log contains the pre-spawn status output, a local base such as `main` is accepted without an `origin` remote, and a dirty parent has an AskUserQuestion/answer before any `git worktree add`.
 
 - **Target-dir hygiene before llvm-cov**: `.gitignore` contains `target-cov/` (and similar tool-output dirs) BEFORE the first `cargo llvm-cov` runs. Reactive fix after a crash costs 30+ minutes of recovery.
 
@@ -455,7 +459,7 @@ Before 0.20.0 cleanup was fully manual and order-sensitive (retro first, then cl
 
 The plugin ships two companion skills, both plugin-namespaced:
 
-- **`/tmux-pair:gepa`**: Genetic-Pareto prompt/text-artifact optimization (paper arXiv:2507.19457). Opt-in after rules-bootstrap to optimize the freshly generated `.claude/rules/*.md`. Skill files in `skills/gepa/`.
+- **`/tmux-pair:gepa`**: Genetic-Pareto prompt/text-artifact optimization (paper arXiv:2507.19457). Opt-in after rules-bootstrap to optimize freshly generated `.claude/skills/*/SKILL.md` or `.claude/rules/*.md`. Skill files in `skills/gepa/`.
 - **`/tmux-pair:dg`**: Dinesh-vs-Gilfoyle adversarial code review. Two AI personas (attacker + defender) debate a diff or file until the defender concedes, defends, or the round limit hits. Useful as an optional pre-GATE-3 step on security/concurrency/auth/crypto/migration bullets. Skill files in `skills/dg/`.
 
 External companion (NOT bundled): `code-simplifier` from `claude-plugins-official` for refactor-passes after a feature lands.

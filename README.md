@@ -1,6 +1,6 @@
 # derveloper-skills
 
-Personal [Claude Code](https://claude.com/claude-code) plugin marketplace. Workflow tooling for multi-agent coding sessions in tmux: solo agents with gated self-review, or coordinated spawn-teams of orchestrator + writers + reviewers (size 3..5), sharing fresh `git` worktrees.
+Personal [Claude Code](https://claude.com/claude-code) plugin marketplace. Workflow tooling for single-agent coding sessions in tmux: one solo agent in a fresh `git` worktree, gated self-review, subagent fan-out for bounded parallel work, and `codex exec` as the independent second-opinion path.
 
 ## Install
 
@@ -11,35 +11,33 @@ Personal [Claude Code](https://claude.com/claude-code) plugin marketplace. Workf
 
 ## Plugins
 
-### tmux-pair (v0.16.0)
+### tmux-pair (v0.22.8)
 
-Spawn one to five coding agents on a single task. Each agent lives in its own tmux pane, all panes share a fresh `git worktree`, and the agents talk peer-to-peer through a small Python helper that handles the multi-line submit quirks of common agent TUIs.
+Run one coding agent on a task. The agent lives in its own tmux pane, works in a fresh `git worktree`, follows the 7-phase Solo workflow, and uses scoped subagents plus `codex exec` for adversarial gates. Legacy `tmux_pair.py spawn` still exists for manual recovery and old experiments, but it is not the documented happy path.
 
 #### Slash commands
 
 | Command | What it spawns | Layout | When to use |
 |---------|----------------|--------|-------------|
-| `/run <project> <base> <feature> [task]` | auto-recommends solo vs spawn after a short recon | depends on recommendation | default entry-point; let the skill pick the right mode |
-| `/solo <project> <base> <feature> [task]` | one agent, gated 6-phase self-driven workflow | single pane | self-contained refactor/cleanup; adversarial gate-subagents are enough |
-| `/spawn <project> <base> <feature> [task]` | coordinated team: orchestrator + writers + reviewers (size 3..5 via `--size`, dual-review at size 4 default, `--parallel-writers` for disjoint-bullet teams) | orchestrator on top, engineers below | bigger task, recon-heavy, want a dedicated orchestrator to filter + brief + verify |
+| `/run <project> <base> <feature> [task]` | auto-entry: short recon, agent pick, dispatch to `/solo` | single pane | default entry-point |
+| `/solo <project> <base> <feature> [task]` | one agent, gated 7-phase self-driven workflow | single pane | direct Solo start with explicit flags |
 
-`/solo` runs Recon -> Plan + GATE-2 -> Impl -> GATE-3 self-review -> PROJECT.md + skill persist -> Commit, with `tmux-pair:gate-2-plan-check`, `tmux-pair:gate-3-verifier`, and `tmux-pair:gate-3-code-reviewer` as scoped subagents. `/spawn` enforces the 5-gate workflow (Clarify, Reviewer-Readiness with rules-bootstrap loop, Plan-Check, Implementation Loop, Final-Verify).
+`/solo` runs Recon -> Clarify -> Reviewer-Readiness -> Plan-Check -> Implementation -> Final-Verify -> Persist -> Commit -> Auto-Squash-Merge, with `tmux-pair:reviewer-readiness-check`, `tmux-pair:rules-bootstrap`, `tmux-pair:gate-2-plan-check`, `tmux-pair:gate-3-verifier`, and `tmux-pair:gate-3-code-reviewer` as scoped subagents. Phase 7 squashes the feature branch onto the base branch, removes the worktree, deletes the per-worktree Cargo target, deletes the feature branch, then pings `DONE-MERGED`.
 
 #### Features
 
-- **Worktree isolation** per spawn. Branch `feature/<name>` from any base ref. Agents never touch the human's working dir.
-- **Three agent backends**: `claude` (default reviewer + orchestrator), `codex` (default writer), `pi` (the user's custom CLI; cortecs/qwen3-coder-next default, or via `pi-claude-bridge` for Anthropic-Subscription).
+- **Worktree isolation** per Solo run. Branch `feature/<name>` from any base ref. Agents never touch the human's working dir unless `--no-worktree` is explicit.
+- **Three agent backends**: `codex` default, `claude` for Claude-shaped profiles, `pi` opt-in for cheap bulk work.
 - **Durable standards** survive `/compact`: claude boots with `--append-system-prompt-file`, codex reads worktree-local `AGENTS.md`, pi reads both.
 - **Gate subagents** with explicit model + tool scoping (Sonnet for plan-check/code-review/readiness/bootstrap, Haiku for verifier and recon).
 - **Repo-specific subagent auto-detection**: any `.claude/agents/<repo>-*.md` in the target repo is listed in the briefing so the agents prefer domain experts over `general-purpose`.
-- **TESTS-PROOF trust chain (V7)**: writer-DONE pings + bullet commits carry `TESTS-PROOF` markers; `gate-3-verifier` trusts engineer-certified suites and skips re-runs when `HEAD == COMMIT_SHA`. No workspace-wide "to be safe" doubles.
+- **TESTS-PROOF trust chain (V7)**: bullet commits carry `TESTS-PROOF` markers; `gate-3-verifier` trusts certified suites and skips re-runs when `HEAD == COMMIT_SHA`. No workspace-wide "to be safe" doubles.
 - **Parallel-by-default plans**: every bullet carries either `B3 || B4 [parallel]` or `B3 -> B4 [sequenziell: <reason>]`. GATE 2 blocks missing markers.
 - **PROJECT.md care**: feature and refactor bullets that change package map, feature surface, design decisions, or implementation history update `PROJECT.md`. Verifier checks the diff.
-- **Smart workflow V1-V10**: inline-fix-spec, orchestrator-direct-decisions with `PROJECT.md` audit trail, adaptive GATE-strictness per `task_kind`, WARNING/NOTE auto-resolve, unattended-by-default with `--interactive` opt-in, readiness-cache (24h TTL), TESTS-PROOF marker, shared `CARGO_TARGET_DIR`, recon-cache with delta-mode (1h TTL), inline-gates for trivial bug-fix plans.
-- **Dynamic team sizing** (`/spawn --size 3..5`, `--parallel-writers`): preset for 1W/1R/1O (size 3), 1W/2R/1O dual-review (size 4 default), 2W/1R/1O parallel-writers (size 4 + flag), or 2W/2R/1O (size 5). Reviewers cross-check + consolidate; writers split disjoint plan-bullets.
+- **Smart workflow V1-V10**: inline-fix-spec, solo self-decisions with `PROJECT.md` audit trail, adaptive GATE-strictness per `task_kind`, WARNING/NOTE auto-resolve, unattended-by-default with `--interactive` opt-in, helper-only readiness/recon caches, TESTS-PROOF marker, per-worktree `CARGO_TARGET_DIR`, inline-gates for trivial bug-fix plans.
 - **Compact-watcher**: model-aware token threshold (1M -> 700k, 200k -> 140k), `/compact <focus>` over the pane, automatic re-brief.
 - **Bundled companion skills**: `/tmux-pair:gepa` (Genetic-Pareto prompt optimization, arXiv:2507.19457) and `/tmux-pair:dg` (Dinesh-vs-Gilfoyle adversarial code review).
-- **Shipped rules templates** for 7 stacks: Rust, TypeScript, Python, Go, JavaScript, Java, generic skeleton. Used by `tmux-pair:rules-bootstrap` when a fresh repo has no `.claude/rules/`.
+- **Shipped guidance templates** for 7 stacks: Rust, TypeScript, Python, Go, JavaScript, Java, generic skeleton. Used by `tmux-pair:rules-bootstrap` to create `.claude/skills/<repo>-<topic>/SKILL.md` by default; `.claude/rules/<topic>.md` is reserved for cross-cutting always-on guidance.
 
 #### Documentation
 
