@@ -11,7 +11,7 @@ Personal [Claude Code](https://claude.com/claude-code) plugin marketplace. Workf
 
 ## Plugins
 
-### tmux-pair (v0.22.8)
+### tmux-pair (v0.22.9)
 
 Run one coding agent on a task. The agent lives in its own tmux pane, works in a fresh `git worktree`, follows the 7-phase Solo workflow, and uses scoped subagents plus `codex exec` for adversarial gates. Legacy `tmux_pair.py spawn` still exists for manual recovery and old experiments, but it is not the documented happy path.
 

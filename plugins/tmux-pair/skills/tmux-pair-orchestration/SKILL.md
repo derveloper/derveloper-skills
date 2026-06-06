@@ -1,21 +1,13 @@
 ---
 name: tmux-pair-orchestration
 description: >
-  Use when the user asks to "spawn a solo with self-review", "run an agent on this
-  with gates", "use the tmux-pair workflow", "/run for this task", or otherwise
-  wants to run a single coding agent in a fresh git worktree with adversarial
-  review gates. Solo is the only mode. Adversarial quality comes from running two
-  independent minds at each gate: a claude subagent plus `codex exec` (different
-  model family, fresh context). Sequential solo runs auto-squash-merge to base in
-  Phase 7, so chained runs always branch from a clean base. Covers `/run`
-  auto-entry, the 7-phase workflow (Recon, Clarify, Reviewer-Readiness, Plan-Check,
-  Loop, Final-Verify, Persist, Commit-Hygiene, Auto-Squash-Merge), durable standards via
-  --append-system-prompt-file + AGENTS.md, review-ledger evidence, CLARIFY-NEEDED,
-  Plan-Update-Commit on drift, PROJECT.md care, DONE-MERGED, sender prefixes,
-  smart-workflow V1-V10, repo-specific subagent detection, Compact-Watcher, and
-  recovery from failure modes. Mandatory Post-Merge Retro persists recurring
-  patterns.
-version: 0.22.8
+  Use when the user wants to run, monitor, or recover a tmux-pair solo coding
+  workflow through `/run` or `/solo`: one agent in a fresh git worktree, gated
+  recon, plan checks, implementation, final verify, commit hygiene, and
+  auto-squash-merge. Covers durable standards, review-ledger evidence,
+  CLARIFY-NEEDED, plan drift handling, PROJECT.md care, DONE-MERGED, compact
+  recovery, repo-specific subagents, and mandatory post-merge retro.
+version: 0.22.9
 ---
 
 # tmux-pair-orchestration

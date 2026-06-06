@@ -498,6 +498,21 @@ User feedback: with parallel solos on the same project, the shared `CARGO_TARGET
 | D3 | Drop `--no-shared-target`, add `--shared-target` | Flag inversion is a clean break at patch-bump time; an alias would invert semantically and confuse new users. |
 | D4 | Patch bump 0.22.0 -> 0.22.1 instead of minor | Behaviour change is opt-in/out at the spawn boundary; the public 7-phase workflow is unchanged. Patch bump signals "same surface, smarter default". |
 
+### 0.22.9 (Skill description length fix, 2026-06-06)
+
+User feedback: Claude skipped loading `tmux-pair-orchestration` because the
+`SKILL.md` frontmatter description exceeded the 1024 character limit.
+
+- `tmux-pair-orchestration/SKILL.md` frontmatter description shortened to stay
+  below the loader limit while keeping the detailed workflow documentation in the
+  body.
+- Plugin metadata and root marketplace README bumped to 0.22.9.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Keep detailed trigger coverage in the body, not the description | Skill loader descriptions are metadata, not long-form workflow docs; the body remains the right place for detailed recovery and gate semantics. |
+| D2 | Patch bump 0.22.8 -> 0.22.9 | The public workflow surface is unchanged; this is a loader compatibility fix. |
+
 ### 0.22.8 (Local base refs for worktrees, 2026-06-01)
 
 User feedback: the orchestrator must keep using worktrees when the supplied
